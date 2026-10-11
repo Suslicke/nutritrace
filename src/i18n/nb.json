@@ -939,6 +939,16 @@
     },
     "all_fields": {
       "intro": "Trykk på et felt for å angi eller redigere målet."
+    },
+    "templates": {
+      "intro": "Lagre dine nåværende mål som en mal for å kunne bruke igjen senere.",
+      "save_button": "Lagre nåværende mål",
+      "goals_count": "{count} mål",
+      "apply": "Bruk",
+      "delete_template": "Slett mal",
+      "save_title": "Lagre som mal",
+      "template_name": "Malnavn",
+      "template_placeholder": "F.eks Sommerkroppen 2025"
     }
   }
 }
