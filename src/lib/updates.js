@@ -37,6 +37,7 @@ import { DB } from './db.js';
 const GH_OWNER = 'TraceApps';
 const GH_REPO  = 'nutritrace';
 const APP_NAME = 'NutriTrace';
+const CSRF_KEY = 'nt:csrf';   // this app's CSRF token in localStorage
 const CACHE_KEY_LAST_CHECK   = 'wl_updates_last_check';   // ISO string
 const CACHE_KEY_LATEST       = 'wl_updates_latest';       // JSON blob
 const CACHE_KEY_SKIP_VERSION = 'wl_updates_skip_version'; // version string user chose to skip
@@ -328,7 +329,7 @@ export async function checkForUpdate({ force = false } = {}) {
     } catch {}
     // Keep the shared store in sync so the banner + Settings-nav dot
     // update automatically whenever a check runs (mount, visibility
-    // change, "Check now" button, or the throttled 4h auto-check).
+    // change, "Check now" button, or the throttled auto-check).
     refreshUpdateAvailableStore();
     return result;
   } catch (e) {
@@ -611,7 +612,7 @@ export function formatAgo(dateOrIso) {
 export async function setServerUpdateCheck(enabled) {
   try {
     const { apiUrl } = await import('./platform.js');
-    const csrf = !isNative ? localStorage.getItem('nt:csrf') : null;
+    const csrf = !isNative ? localStorage.getItem(CSRF_KEY) : null;
     const res = await fetch(apiUrl('/api/updates/config'), {
       method: 'PUT',
       credentials: 'include',

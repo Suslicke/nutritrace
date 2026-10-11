@@ -7,7 +7,7 @@
   import { DB } from '../../lib/db.js';
   import {
     isNative, getServerUrl, setServerUrl, setNativeMode, getNativeMode,
-    setAuthToken, getAuthToken, apiUrl, explainConnectError,
+    setAuthToken, getAuthToken, apiUrl, explainConnectError, healthNeedsSetup,
   } from '../../lib/platform.js';
   import { currentUser, userMgmtActive } from '../../stores/auth.js';
   import { showSuccess, showError } from '../../stores/toast.js';
@@ -87,6 +87,7 @@
       if (isNative) {
         const { CapacitorHttp } = await import('@capacitor/core');
         const healthRes = await CapacitorHttp.get({ url: `${url}/api/health` });
+        if (healthNeedsSetup(healthRes)) { showError($_('native_setup.errors.server_needs_setup')); return; }
         if (healthRes.status < 200 || healthRes.status >= 300) throw new Error('Server not reachable');
         const loginRes = await CapacitorHttp.post({
           url: `${url}/api/auth/login`,
@@ -97,6 +98,7 @@
         if (loginRes.status < 200 || loginRes.status >= 300) throw new Error(loginData.error || 'Login failed');
       } else {
         const healthRes = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(8000) });
+        if (healthNeedsSetup({ data: await healthRes.clone().json().catch(() => null) })) { showError($_('native_setup.errors.server_needs_setup')); return; }
         if (!healthRes.ok) throw new Error('Server not reachable');
         const loginRes = await fetch(`${url}/api/auth/login`, {
           method: 'POST',

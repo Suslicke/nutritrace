@@ -507,7 +507,8 @@
       "credentials_required": "Enter your credentials",
       "browser_open_failed": "Could not open sign-in browser",
       "connected": "Connected to server",
-      "login_failed": "Login failed"
+      "login_failed": "Login failed",
+      "server_needs_setup": "This server isn't set up yet. Open it in a browser to create the first account, then connect here."
     }
   },
   "profile": {

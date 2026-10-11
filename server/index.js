@@ -42,7 +42,7 @@ import nutritionImportRoutes from './routes/nutrition-import.js';
 import offLocalRoutes from './routes/off-local.js';
 import updatesRoutes  from './routes/updates.js';
 import { logger }   from './logger.js';
-import { authenticate, userMgmtActive } from './middleware/auth.js';
+import { authenticate, userMgmtActive, setupRequired } from './middleware/auth.js';
 import { csrfProtect } from './middleware/csrf.js';
 import { makeRateLimiter } from './middleware/rate-limit.js';
 import {
@@ -201,8 +201,14 @@ router.get('/api/oidc/callback', (req, res) => {
   res.redirect(307, `${BASE_URL}/api/auth/oidc/callback${q >= 0 ? req.originalUrl.slice(q) : ''}`);
 });
 
+// Health answers before setup too: the server is up and only needs its first
+// account, which the Android app's connect screen says instead of "not
+// reachable". A server that is set up still answers exactly { ok: true }.
+router.get('/api/health', (req, res) => res.json(setupRequired() ? { ok: true, setup_required: true } : { ok: true }));
+
 // Setup enforcement — block data APIs until the first user account is created.
-// Only /api/auth/* is allowed so the client can check status + register the admin.
+// /api/auth/* is allowed so the client can check status + register the admin
+// (and /api/health, above, answers before this gate).
 // In intentional single-user mode (admin explicitly disabled user management
 // via DELETE /api/auth/management or POST /api/auth/recover), there are no
 // users by design and data APIs should be open. The single_user_mode flag in
@@ -211,9 +217,7 @@ router.get('/api/oidc/callback', (req, res) => {
 // still returning 503 on every data call.
 router.use('/api', (req, res, next) => {
   if (req.path.startsWith('/auth')) return next(); // allow auth routes (status, register, login)
-  if (userMgmtActive()) return next();             // users exist — normal operation
-  const singleUser = db.prepare(`SELECT value FROM app_config WHERE key = 'single_user_mode'`).get()?.value === '1';
-  if (singleUser) return next();                   // intentional single-user mode — let data APIs through
+  if (!setupRequired()) return next();              // set up, or single-user mode by choice
   res.status(503).json({ error: 'Setup required', setup_required: true });
 });
 
@@ -358,8 +362,6 @@ router.get('/api/goals/adaptive-tdee', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
-router.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Serve Svelte frontend (production build) — anything except index.html.
 // Content-hashed assets (in /assets/) are safe to cache forever — new deploy =
