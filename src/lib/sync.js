@@ -796,7 +796,10 @@ async function pullChanges({ signal = null, gen = accountGeneration() } = {}) {
     await dbSetSyncMeta('last_sync_at', data.server_time);
   }
 
-  const totalChanges = (data.foods?.length || 0) + (data.meals?.length || 0) + (data.diary?.length || 0) + (data.activity?.length || 0) + (data.wellness?.length || 0) + pulledSettings.length + (data.workouts?.length || 0) + newChat.length;
+  const totalChanges = (data.foods?.length || 0) + (data.meals?.length || 0) + (data.diary?.length || 0) + (data.activity?.length || 0) + (data.wellness?.length || 0) + pulledSettings.length + (data.workouts?.length || 0) + newChat.length
+    // Rows that only went away count too: a page still showing them reloads.
+    + (data.fasts?.length || 0) + (data.diary_tombstones?.length || 0)
+    + Object.values(data.deletions || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0);
   _dlog(`[sync] pull complete: ${data.foods?.length || 0} foods, ${data.meals?.length || 0} meals, ${data.diary?.length || 0} diary, ${data.activity?.length || 0} activity, ${data.wellness?.length || 0} wellness, ${pulledSettings.length} settings, ${data.workouts?.length || 0} workouts, ${newChat.length} chat`);
   return totalChanges > 0;
 }

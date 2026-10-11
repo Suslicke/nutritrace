@@ -1347,6 +1347,9 @@ test('the connection check and the sync stop while the app is hidden, and syncs 
   assert.match(monitor, /document\.hidden \? off\(\) : on\(\)/);
   assert.match(monitor, /addListener\('pause', off\)/);
   assert.match(sync, /new CustomEvent\('nt:sync-complete', \{ detail: \{ changed: !!hadChanges \} \}\)/);
+  // A pull that only removed rows (Clear all data, a wearable re-sync) is a change.
+  assert.match(sync, /Object\.values\(data\.deletions \|\| \{\}\)\.reduce/);
+  assert.match(sync, /data\.diary_tombstones\?\.length/);
   for (const f of ['../src/routes/Wellness.svelte', '../src/routes/Diary.svelte', '../src/components/ai/Trace.svelte']) {
     assert.match(readFileSync(new URL(f, import.meta.url), 'utf8'), /e\?\.detail\?\.changed === false/, f);
   }
