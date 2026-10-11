@@ -1397,12 +1397,17 @@ export async function dbUpsertWellness(date, source, metric_type, value, metadat
   // Connect (e.g. steps went 500 -> 1382 later in the day) would update the
   // local value but leave sync_status='synced' from the prior push, so
   // dbGetPendingChanges would skip the row and the server stays stale.
+  // Only a value that changed: Health Connect is read every sync, and
+  // marking the same steps pending each time made every 30s sync a push,
+  // a pull of the same rows back, and the pictures pass.
   await db.run(
     `INSERT INTO wellness_data (user_id, date, source, metric_type, value, metadata)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, date, source, metric_type) DO UPDATE SET
        value=excluded.value, metadata=excluded.metadata,
-       synced_at=datetime('now'), sync_status='pending'`,
+       synced_at=datetime('now'), sync_status='pending'
+     WHERE wellness_data.value IS NOT excluded.value
+        OR wellness_data.metadata IS NOT excluded.metadata`,
     [LOCAL_USER_ID, date, source, metric_type, value, JSON.stringify(metadata)]
   );
 }

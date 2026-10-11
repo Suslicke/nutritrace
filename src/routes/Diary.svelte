@@ -1763,7 +1763,8 @@
     // user to force-stop and reopen the app.
     let _onSyncComplete = null;
     if (isNative && getServerUrl()) {
-      _onSyncComplete = () => {
+      _onSyncComplete = (e) => {
+        if (e?.detail?.changed === false) return; // nothing new
         let cur = null;
         currentDate.subscribe(v => cur = v)();
         if (cur) loadEntry(cur);

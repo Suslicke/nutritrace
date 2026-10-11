@@ -997,8 +997,9 @@ async function _fullSync(silent, forceCheck, showFailureBanner, signal, gen) {
       showErrorBanner: false,
       error: null,
     }));
-    // Notify the app that sync completed — pages should refresh data
-    window.dispatchEvent(new CustomEvent('nt:sync-complete'));
+    // Notify the app that sync completed: pages refresh their data when it
+    // brought or sent something (changed), and may skip it otherwise.
+    window.dispatchEvent(new CustomEvent('nt:sync-complete', { detail: { changed: !!hadChanges } }));
     return { ok: true };
   } catch (e) {
     // Log e.message + e.code + e.stack so future issue reports don't come
@@ -1039,18 +1040,26 @@ export function startNetworkMonitor() {
     syncState.update(s => ({ ...s, online: false }));
   });
 
-  // Periodic health check every 30 seconds (window online/offline is unreliable on Android)
-  setInterval(async () => {
+  // Periodic health check every 30 seconds (window online/offline is
+  // unreliable on Android), only while the app is on screen: hidden, it
+  // kept asking the server every 30s with nobody looking.
+  let monitor = null;
+  const check = async () => {
     if (_syncing) return;
     const wasOnline = await new Promise(resolve => {
       syncState.subscribe(s => resolve(s.online))();
     });
     const nowOnline = await checkOnline();
     if (nowOnline && !wasOnline) {
-      _dlog('[sync] Server reachable again — syncing');
+      _dlog('[sync] Server reachable again, syncing');
       fullSync();
     }
-  }, 30000);
+  };
+  const on = () => { if (monitor == null && !(typeof document !== 'undefined' && document.hidden)) monitor = setInterval(check, 30000); };
+  const off = () => { if (monitor != null) { clearInterval(monitor); monitor = null; } };
+  on();
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => (document.hidden ? off() : on()));
+  import('@capacitor/app').then(({ App }) => { App.addListener('pause', off); App.addListener('resume', on); }).catch(() => {});
 }
 
 /** Quick push — debounced, for after local writes */

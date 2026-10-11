@@ -896,7 +896,14 @@
     tick().then(() => _scrollBottom(true));
   }
 
-  async function _refetchChatHistory() {
+  // The safety net, after a sync that changed nothing: every few minutes,
+  // not every 30s (each is a request for the whole history).
+  let _lastQuietRefetch = 0;
+  async function _refetchChatHistory(e) {
+    if (e?.detail?.changed === false) {
+      if (Date.now() - _lastQuietRefetch < 5 * 60 * 1000) return;
+      _lastQuietRefetch = Date.now();
+    }
     try {
       const rows = await NtApi.get('/api/ai/history');
       if (!Array.isArray(rows)) return;

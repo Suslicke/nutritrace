@@ -18,7 +18,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, copyFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, copyFileSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { createServer as httpServer, request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -1310,4 +1310,44 @@ test("after another account signs in, the phone's database holds nothing of the 
   assert.deepEqual(Object.values(r.after).every(n => n === 0), true, JSON.stringify(r.after));
   assert.equal(r.note, '');
   assert.deepEqual(r.diaryRows, []);
+});
+
+test('Health Connect read again with the same values leaves them sent; a new value goes up', async (t) => {
+  if (skip(t)) return;
+  // The suite's first account (signing up more runs into the server's limit).
+  const H = (await http(A, 'GET', '/api/auth/me')).user;
+  const r = phone('wellness', A, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(H)}, { confirm: async () => true });
+    const db = await p.dbn.getDb();
+    const D = '2031-07-19';
+    const status = async () => (await db.query("SELECT value, sync_status FROM wellness_data WHERE date = ? AND metric_type = 'steps'", [D])).values[0];
+    await p.dbn.dbUpsertWellness(D, 'health_connect', 'steps', 1382);
+    await p.sync();
+    const sent = await status();
+    // The 30s sync reads Health Connect again: same steps.
+    await p.dbn.dbUpsertWellness(D, 'health_connect', 'steps', 1382);
+    const same = await status();
+    await p.dbn.dbUpsertWellness(D, 'health_connect', 'steps', 1500);
+    const more = await status();
+    await p.sync();
+    p.done({ sent, same, more, after: await status() });`);
+  assert.equal(r.sent.sync_status, 'synced');
+  assert.deepEqual(r.same, { value: 1382, sync_status: 'synced' }, 'the same steps are not sent again every 30s');
+  assert.deepEqual(r.more, { value: 1500, sync_status: 'pending' });
+  assert.equal(r.after.sync_status, 'synced');
+  const rows = q(`SELECT w.value FROM wellness_data w WHERE w.user_id = ? AND w.date = '2031-07-19' AND w.metric_type = 'steps'`, H.id);
+  assert.deepEqual(rows, [{ value: 1500 }]);
+});
+
+test('the connection check and the sync stop while the app is hidden, and syncs say whether anything changed', () => {
+  const sync = readFileSync(new URL('../src/lib/sync.js', import.meta.url), 'utf8');
+  const monitor = sync.slice(sync.indexOf('export function startNetworkMonitor'), sync.indexOf('export function schedulePush'));
+  assert.doesNotMatch(monitor, /setInterval\(async/, 'an ungated interval');
+  assert.match(monitor, /document\.hidden \? off\(\) : on\(\)/);
+  assert.match(monitor, /addListener\('pause', off\)/);
+  assert.match(sync, /new CustomEvent\('nt:sync-complete', \{ detail: \{ changed: !!hadChanges \} \}\)/);
+  for (const f of ['../src/routes/Wellness.svelte', '../src/routes/Diary.svelte', '../src/components/ai/Trace.svelte']) {
+    assert.match(readFileSync(new URL(f, import.meta.url), 'utf8'), /e\?\.detail\?\.changed === false/, f);
+  }
 });

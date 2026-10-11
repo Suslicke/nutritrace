@@ -689,7 +689,8 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') _refreshSettings();
       });
-      setInterval(_refreshSettings, 30000); // every 30 seconds
+      // Every 30 seconds while the tab is in front; coming back refreshes too.
+      setInterval(() => { if (!document.hidden) _refreshSettings(); }, 30000);
     }
 
     // Day rollover. When the tab or app sits open across midnight, the diary

@@ -1376,7 +1376,8 @@
 
     // On native: reload wellness data when background sync completes
     if (isNative) {
-      _syncCompleteHandler = () => {
+      _syncCompleteHandler = (e) => {
+        if (e?.detail?.changed === false) return; // nothing new
         loadLocalWellnessData();
       };
       window.addEventListener('nt:sync-complete', _syncCompleteHandler);
