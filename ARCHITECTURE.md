@@ -251,7 +251,7 @@ See `.env.example` for the full list. Key ones:
 
 - **Cookie / storage prefix:** `wl_u<id>_<key>` (legacy from
   waistline; intentional)
-- **Auth cookie:** `nutritrace_token`
+- **Auth cookie:** `nt_token`
 - **Deep-link scheme:** `nutritrace://`
 - **Android app id:** `com.nutritrace.app`
 - **Comments:** state the non-obvious constraint or say nothing.

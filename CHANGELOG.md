@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **The Android app does less when nothing changed.** With Health Connect on, every 30-second sync sent the day's steps and other readings again, even when they hadn't changed, and downloaded them back. Now only a new value goes up. The connection check also stops while the app is hidden, the Diary and Wellness pages only reload when a sync brought something, and in the browser the settings refresh waits while the tab is in the background.
 - **Trace answers with models that can't use tools** ([#259](https://github.com/TraceApps/nutritrace/issues/259)). With an OpenAI-compatible model that has no tool support, every chat failed with `tool use is not supported`. Trace now asks again without tools and says once that the model can't log food or look things up. Thanks @jsapede for the report.
 - **Messages show on phones while Trace is open.** They were hidden behind it. Long messages wrap instead of running off the screen.
+- **`INSECURE_COOKIES` is explained the same way in the README, DEPLOY.md, `.env.example` and `docker-compose.yml` as in the other Trace apps**: what it does, why signing in at a plain `http://` address loops without it, and to leave it off behind HTTPS. When the browser drops the sign-in cookie on an HTTPS address, "How to fix it" on the sign-in screen opens the part of the reverse proxy guide about it.
 
 ---
 
