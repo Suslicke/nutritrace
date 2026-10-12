@@ -948,7 +948,21 @@
       "delete_template": "Slett mal",
       "save_title": "Lagre som mal",
       "template_name": "Malnavn",
-      "template_placeholder": "F.eks Sommerkroppen 2025"
+      "template_placeholder": "F.eks: Sommerkroppen 2025",
+      "snapshot_hint": "Lagre øyeblikksbilde av alle {count} nåværende mål.",
+      "save_template": "Lagre mal",
+      "apply_title": "Bruk mal",
+      "apply_confirm": "Bruk <strong>{name}</strong>?",
+      "apply_desc": "Dette vil erstatte de nåværende målene dine med de {count} målene som er lagret i denne malen.",
+      "cancel": "Avbryt"
+    },
+    "editor": {
+      "display": "Visning",
+      "show_in_diary": "Vis i dagbok",
+      "show_in_statistics": "Vis i statistikk",
+      "goal_behavior": "Måladferd",
+      "same_every_day": "Same mål hver dag",
+      "one_target": "Et mål for hver dag"
     }
   }
 }
