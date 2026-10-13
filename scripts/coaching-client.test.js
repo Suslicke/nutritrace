@@ -57,8 +57,8 @@ test('Goals tabs: Coach for a client, Clients for coaches', () => {
 });
 
 test('the fingerprint has the server\'s shape', () => {
-  assert.equal(signature({ role: 'user', as_client: null, requests: [], past: [], as_coach: none, unread: 0 }), 'user;-;-;0.0;-;0');
-  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], past: [{ id: 3 }], as_coach: { pending: 2, active: 3 }, unread: 4 }), 'coach;12;15,14;2.3;3;4');
+  assert.equal(signature({ role: 'user', as_client: null, requests: [], past: [], as_coach: none, unread: 0, awaiting: 0 }), 'user;-;-;0.0;-;0;0');
+  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], past: [{ id: 3 }], as_coach: { pending: 2, active: 3 }, unread: 4, awaiting: 3 }), 'coach;12;15,14;2.3;3;4;3');
   // The real server's header is compared with this in coaching-server.test.js.
 });
 
@@ -112,6 +112,19 @@ test('the message queue: a server hiccup waits, a refusal is marked, a delete fo
   assert.match(cm, /if \(!\(await store\.available\(\)\)\) \{/);
   // Sign-out clears the cursors with the rest.
   assert.match(store, /k\.startsWith\('nt:coach-cursor:'\)/);
+});
+
+test('the day\'s targets as the Diary resolves them (goal.achieved and the coach\'s view use it)', async () => {
+  const { dayTargets } = await import('../src/lib/goal-resolver.js');
+  const goals = {
+    calories: { sharedGoal: false, days: [2300, 2000, 2000, 2100, 2000, 2000, 2400], max: 2400 },
+    proteins: { sharedGoal: true, isPercent: true, max: 30, days: Array(7).fill(30) },
+    carbohydrates: { sharedGoal: true, isMin: true, min: 180, days: Array(7).fill(180) },
+  };
+  // 2026-10-13 is a Tuesday: 2000 kcal; protein 30% = 150 g; fat unset.
+  assert.deepEqual(dayTargets(goals, '2026-10-13'), { calories: 2000, proteins: 150, carbohydrates: 180, fat: null });
+  assert.deepEqual(dayTargets(goals, '2026-10-17'), { calories: 2400, proteins: 180, carbohydrates: 180, fat: null }, 'Saturday');
+  assert.deepEqual(dayTargets({ calories: 1800, fat: 60 }, '2026-10-13'), { calories: 1800, proteins: null, carbohydrates: null, fat: 60 }, 'plain numbers still read');
 });
 
 test('no request or timer for people not in coaching', () => {

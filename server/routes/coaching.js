@@ -15,7 +15,7 @@ import {
   NOTE_MAX, canCoach, roleOf, person, coachingState, endPairing,
   requireAccount, requireCoachRole, requireCoachOf,
 } from '../lib/coaching.js';
-import { resolveGoalFor, percentGoalToGrams } from '../../src/lib/goal-resolver.js';
+import { dayTargets } from '../../src/lib/goal-resolver.js';
 import { Nutrition } from '../../src/lib/nutrition.js';
 import { _bodyStatsWeightKg } from '../lib/adaptive-tdee.js';
 import fs from 'fs';
@@ -26,11 +26,13 @@ import {
   notifyMessage, notifyClientAnswer, notifyRequest, pairingById, photoPath, PHOTO_TYPES,
 } from '../lib/coaching-messages.js';
 import { UPLOAD_RESPONSE_HEADERS } from '../lib/upload-paths.js';
+import { recommendTargets, answerRecommendation, listForPairing, listForClient } from '../lib/coaching-recommendations.js';
+import { computeAdaptiveTdee } from '../lib/adaptive-tdee.js';
+import { TARGET_KEYS } from '../../src/lib/coach-targets.js';
 
 const router = Router();
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MACROS = [['proteins', 4], ['carbohydrates', 4], ['fat', 9]];
 const OVERVIEW_DAYS = 7;
 const WEIGHT_DAYS = 90;
 // A day is on target when its calories are within this share of the target.
@@ -57,17 +59,7 @@ function _today(req) {
 }
 
 /** Calories and the three macros for one day, the way the client's Diary resolves them. */
-function _targetsFor(goals, date) {
-  const calories = resolveGoalFor(goals?.calories, date);
-  const out = { calories: calories ?? null };
-  for (const [key, density] of MACROS) {
-    const g = goals?.[key];
-    const raw = g ? resolveGoalFor(g, date) : null;
-    if (raw == null) { out[key] = null; continue; }
-    out[key] = g.isPercent ? (calories != null ? percentGoalToGrams(raw, calories, density) : null) : raw;
-  }
-  return out;
-}
+const _targetsFor = (goals, date) => dayTargets(goals, date);
 
 function _dayTotals(items) {
   const t = Nutrition.sum((items || []).map(i => Nutrition.calculate(i)));
@@ -275,6 +267,18 @@ router.post('/pairings/:id/messages/read', requireAccount, wrap((req, res) => {
   const p = _clientPairing(req, res); if (p) _readMessages(p, req, res);
 }));
 
+// ── Recommendations, the client's side ──────────────────────────────────────
+// Everything recommended to you (pending first is the app's job), and your
+// answer. Accepting changes nothing here: the app applies it to your goals
+// on your device (it works offline) and they sync as usual.
+router.get('/recommendations', requireAccount, wrap((req, res) => {
+  res.json(listForClient(req.user.id));
+}));
+router.post('/recommendations/:id/answer', requireAccount, wrap((req, res) => {
+  try { res.json(answerRecommendation(req.params.id, req.user.id, req.body || {})); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.row ? { recommendation: e.row } : {}) }); }
+}));
+
 // Delete your own message, from either side ("Message deleted").
 router.delete('/messages/:uuid', requireAccount, wrap((req, res) => {
   try { res.json(messageOut(deleteMessage(String(req.params.uuid), req.user.id))); }
@@ -323,6 +327,32 @@ router.use('/clients/:clientId', requireCoachOf);
 router.get('/clients/:clientId/messages', wrap((req, res) => _listMessages(req.pairing, req, res)));
 router.post('/clients/:clientId/messages', wrap((req, res) => _sendMessage(req.pairing, req, res)));
 router.post('/clients/:clientId/messages/read', wrap((req, res) => _readMessages(req.pairing, req, res)));
+
+// Targets: what the client has now (the editor starts there, with their
+// adaptive TDEE beside it), what the coach recommended, and recommending.
+router.get('/clients/:clientId/targets', wrap((req, res) => {
+  const clientId = req.pairing.client_id;
+  const goals = _setting(clientId, 'goals', {}) || {};
+  let adaptive = null;
+  try {
+    const a = computeAdaptiveTdee(clientId);
+    adaptive = { ready: !!a.ready, tdee: a.tdee ?? null, days_available: a.daysAvailable, days_required: a.daysRequired, confidence: a.confidence ?? null, trend_kg_per_week: a.trendKgPerWeek ?? null };
+  } catch { /* not enough data */ }
+  res.json({
+    goals: Object.fromEntries(TARGET_KEYS.filter(k => goals[k]).map(k => [k, goals[k]])),
+    calorie_mode: _setting(clientId, 'calorieGoalMode', 'fixed') || 'fixed',
+    calorie_factor: _setting(clientId, 'calorieGoalFactor', 1) ?? 1,
+    adaptive,
+  });
+}));
+router.get('/clients/:clientId/recommendations', wrap((req, res) => {
+  res.json(listForPairing(req.pairing.id));
+}));
+router.post('/clients/:clientId/recommendations', wrap((req, res) => {
+  if ((req.body?.kind || 'targets') !== 'targets') return res.status(400).json({ error: 'Only targets can be recommended for now.' });
+  try { res.json(recommendTargets(req.pairing, req.user.id, req.body || {})); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
 
 router.get('/clients/:clientId/overview', wrap((req, res) => {
   const clientId = req.pairing.client_id;

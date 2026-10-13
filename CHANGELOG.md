@@ -18,6 +18,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **The goal.achieved webhook fires for goals set in the app.** It read each goal as a plain number, but the Goals page saves a goal with its settings (per weekday, percent of calories), so it never fired; protein and carbs also never matched the day's totals. It now uses the day's targets the way the Diary does, including targets by weekday and percent of calories.
 - **An invite can only give the User, Coach or Admin role.** Any other value was stored as it came and became the new account's role.
 - **The Android app says when a server isn't set up yet.** Connecting to a fresh install said the server couldn't be reached (or that only HTTPS works). Now it says to open the server in a browser and create the first account first; Android apps from before this get the same answer when they sign in. `/api/health` answers before setup too, with `setup_required: true`, so a container healthcheck passes from the first start.
 - **The Android app does less when nothing changed.** With Health Connect on, every 30-second sync sent the day's steps and other readings again, even when they hadn't changed, and downloaded them back. Now only a new value goes up. The connection check also stops while the app is hidden, the Diary and Wellness pages only reload when a sync brought something, and in the browser the settings refresh waits while the tab is in the background.

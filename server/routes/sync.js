@@ -20,6 +20,7 @@ import { mirrorWeightToBodyStats } from '../lib/wellness-mirror.js';
 import { cleanCreateKey, findByCreateKey, setCreateKey } from '../lib/create-keys.js';
 import { clientClock, parseUtc, pushWins as clockPushWins, editStamp, resolveNote } from '../lib/sync-clock.js';
 import { readablePairingIds, createMessage, deleteMessage, messageOut, notifyMessage, pairingById } from '../lib/coaching-messages.js';
+import { answerRecommendation, recommendationOut } from '../lib/coaching-recommendations.js';
 import { linkBase } from '../lib/public-url.js';
 
 // #199 (@tellis82): the POST /api/foods and POST /api/meals routes
@@ -198,6 +199,10 @@ router.get('/pull', wrap((req, res) => {
       ? db.prepare(`SELECT * FROM coach_messages WHERE updated_at >= ? AND pairing_id IN (${pairings.map(() => '?').join(',')}) ORDER BY updated_at, id`).all(sinceSql, ...pairings)
       : [];
     coachingOut.coach_messages = msgs.map(messageOut);
+    const recs = pairings.length
+      ? db.prepare(`SELECT * FROM coach_recommendations WHERE updated_at >= ? AND pairing_id IN (${pairings.map(() => '?').join(',')}) ORDER BY updated_at, id`).all(sinceSql, ...pairings)
+      : [];
+    coachingOut.coach_recommendations = recs.map(recommendationOut);
     coachingOut.coaching = { pairings };
   }
 
@@ -743,6 +748,16 @@ router.post('/push', wrap(async (req, res) => {
       } catch (e) {
         result.coach_messages.push({ uuid, error: e.message, status: e.status || 500 });
       }
+    }
+  }
+
+  // Answers to recommendations made on the phone (Accept works offline: the
+  // goals changed there and went up with the settings).
+  if (Array.isArray(req.body?.coach_answers) && u != null) {
+    result.coach_answers = [];
+    for (const a of req.body.coach_answers.slice(0, 200)) {
+      try { result.coach_answers.push({ id: a?.id, row: answerRecommendation(a?.id, u, a || {}) }); }
+      catch (e) { result.coach_answers.push({ id: a?.id, error: e.message, status: e.status || 500, ...(e.row ? { row: e.row } : {}) }); }
     }
   }
 

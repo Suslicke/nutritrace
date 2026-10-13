@@ -45,6 +45,8 @@ COPY src/lib/nutrition.js /src/lib/nutrition.js
 COPY src/lib/sleep-quality.js /src/lib/sleep-quality.js
 # Coaching resolves a client's targets for a day the way their Diary does.
 COPY src/lib/goal-resolver.js /src/lib/goal-resolver.js
+# Coaching checks a coach's recommended targets with the app's own rules.
+COPY src/lib/coach-targets.js /src/lib/coach-targets.js
 # Also ship the root package.json so the server can read APP_VERSION from
 # it at runtime when TRACEAPPS_APP_VERSION isn't injected via ARG below.
 # Keeps versioning working even for builds that don't pass the build-arg.

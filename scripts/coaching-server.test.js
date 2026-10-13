@@ -120,7 +120,9 @@ function clientRoutes() {
 const fill = (p, clientId) => '/api/coaching' + p.replace(':clientId', clientId).replace(':date', TODAY);
 // A valid body for every write, so only the guard decides the answer.
 let _n = 0;
-const bodyFor = (m) => (m === 'GET' ? undefined : { uuid: `privacy-${Date.now()}-${++_n}`, body: 'Hello' });
+const bodyFor = (m, p = '') => (m === 'GET' ? undefined
+  : /recommendations/.test(p) ? { payload: { goals: { calories: { max: 2000 } } } }
+  : { uuid: `privacy-${Date.now()}-${++_n}`, body: 'Hello' });
 
 // Any object that looks like a person must be { id, name } and nothing else.
 const ROW_KEYS = ['password_hash', 'email', 'username', 'birthday', 'gender', 'avatar_url', 'full_name', 'nickname', 'role_id'];
@@ -135,7 +137,7 @@ function assertNoUserRows(value, where) {
 test('the server says it supports coaching, and /me says where you stand', { skip: !ready }, async () => {
   assert.equal((await call(null, 'GET', '/api/auth/status')).data.coaching, 1);
   const me = (await call('plain', 'GET', '/api/auth/me')).data;
-  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, requests: [], past: [], as_coach: { pending: 0, active: 0, recent: 0, active_ids: [], unread: 0 }, unread: 0, awaiting: 0 });
+  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, requests: [], past: [], as_coach: { pending: 0, active: 0, recent: 0, active_ids: [], unread: 0 }, unread: 0, awaiting: 0, recommendations: 0 });
   assert.equal((await call('coach1', 'GET', '/api/auth/me')).data.coaching.can_coach, true);
 });
 
@@ -151,7 +153,7 @@ test('a request, the answer, and the privacy table for every client route', { sk
   assert.equal(pending.status, 'pending');
   assert.deepEqual(pending.coach, { id: ids.coach1, name: 'Sam Coach' });
   assert.equal(pending.note, 'Happy to help with your cut');
-  for (const [m, p] of routes) assert.equal((await call('coach1', m, fill(p, ids.client1), bodyFor(m))).status, 404, `pending: ${m} ${p}`);
+  for (const [m, p] of routes) assert.equal((await call('coach1', m, fill(p, ids.client1), bodyFor(m, p))).status, 404, `pending: ${m} ${p}`);
 
   await ok('client1', 'POST', `/api/coaching/pairings/${pending.id}/accept`);
   assert.equal((await pairingOf('client1')).status, 'active');
@@ -181,7 +183,7 @@ test('a request, the answer, and the privacy table for every client route', { sk
   const rows = [];
   for (const [m, p] of routes) {
     for (const [label, who, client, want] of table) {
-      const r = await call(who, m, fill(p, client ? ids[client] : 99999), bodyFor(m));
+      const r = await call(who, m, fill(p, client ? ids[client] : 99999), bodyFor(m, p));
       assert.equal(r.status, want, `${label}: ${m} ${p} -> ${r.status}`);
       if (want === 200) assertNoUserRows(r.data, `${m} ${p}`);
       rows.push(`${m} ${p} | ${label} | ${r.status}`);

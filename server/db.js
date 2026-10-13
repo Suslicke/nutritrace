@@ -1241,6 +1241,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_coach_messages_pairing ON coach_messages(pairing_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_coach_messages_updated ON coach_messages(updated_at);
 `);
+// What a coach recommends: targets now; day plans, meals and recipes later.
+// The payload holds copies of everything it recommends. Only Accepted
+// changes anything (on the client's device, which then syncs). A newer
+// target recommendation replaces a pending one; ending the pairing
+// withdraws what is pending. Expired (a day plan's date passed) is
+// computed, never stored.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_recommendations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    pairing_id    INTEGER NOT NULL REFERENCES coach_clients(id) ON DELETE CASCADE,
+    coach_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL CHECK (kind IN ('targets', 'day_plan', 'meal', 'recipe')),
+    date          TEXT,
+    payload       TEXT NOT NULL,
+    note          TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'withdrawn', 'replaced')),
+    response_note TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    responded_at  TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    deleted_at    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_coach_recs_pairing ON coach_recommendations(pairing_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_coach_recs_updated ON coach_recommendations(updated_at);
+`);
 // Before 1.5 shipped, dev builds allowed one pending or active row per client;
 // several pending requests are allowed now (the two indexes above).
 db.exec(`DROP INDEX IF EXISTS idx_coach_clients_open`);

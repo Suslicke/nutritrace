@@ -16,6 +16,7 @@
  * actual crossing.
  */
 import { dispatchWebhookEvent } from './webhooks.js';
+import { dayTargets } from '../../src/lib/goal-resolver.js';
 
 function _round1(n) {
   return Math.round((Number(n) || 0) * 10) / 10;
@@ -25,12 +26,21 @@ function _round1(n) {
  * Fire goal.achieved once per macro/calorie metric that crosses from
  * under-target to at-or-above-target between `before` and `after`.
  */
+// The webhook's metric names, and where each lives in the goals and the
+// day's totals (Nutrition.sum keys).
+const _METRICS = [['calories', 'calories'], ['protein', 'proteins'], ['carbs', 'carbohydrates'], ['fat', 'fat']];
+
 export function checkNutritionGoalCrossing(userId, date, goals, before, after) {
-  for (const metric of ['calories', 'protein', 'carbs', 'fat']) {
-    const target = Number(goals?.[metric]);
+  // The app saves each goal as an entry (per weekday, percent of calories),
+  // not a number, and totals carry proteins/carbohydrates: resolve the day's
+  // targets the way the Diary does. Reading goals.calories as a number made
+  // this never fire for goals set in the app, and macros never matched.
+  const targets = dayTargets(goals, date);
+  for (const [metric, key] of _METRICS) {
+    const target = Number(targets[key]);
     if (!Number.isFinite(target) || target <= 0) continue;
-    const beforeVal = _round1(before?.[metric]);
-    const actual = _round1(after?.[metric]);
+    const beforeVal = _round1(before?.[key] ?? before?.[metric]);
+    const actual = _round1(after?.[key] ?? after?.[metric]);
     if (beforeVal < target && actual >= target) {
       dispatchWebhookEvent(userId, 'goal.achieved', { date, metric, target, actual });
     }

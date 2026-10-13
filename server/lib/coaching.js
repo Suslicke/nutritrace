@@ -120,6 +120,11 @@ export function coachingState(userId) {
   counts.unread = coachActive.reduce((n, id) => n + unread(id), 0);
   const asClientUnread = row ? unread(row.id) : 0;
   const requests = rows.filter(r => r.status === 'pending');
+  // Recommendations waiting for this person's answer (from their coach).
+  const pendingRecs = db.prepare(`
+    SELECT COUNT(*) AS c FROM coach_recommendations r JOIN coach_clients cc ON cc.id = r.pairing_id
+     WHERE r.client_id = ? AND r.status = 'pending' AND cc.status = 'active' AND r.deleted_at IS NULL
+  `).get(userId).c;
   return {
     role,
     can_coach: canCoach(role),
@@ -146,7 +151,8 @@ export function coachingState(userId) {
     // For the dot on Goals: unread messages, and things waiting for this
     // person's answer (requests now; recommendations later).
     unread: asClientUnread + past.reduce((n, x) => n + x.unread, 0) + counts.unread,
-    awaiting: requests.length,
+    awaiting: requests.length + pendingRecs,
+    recommendations: pendingRecs,
   };
 }
 
@@ -160,16 +166,20 @@ export function coachingSignature(userId) {
   const c = s.as_client ? String(s.as_client.id) : '-';
   const r = s.requests.map(x => x.id).join(',') || '-';
   const p = s.past.map(x => x.id).join(',') || '-';
-  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active};${p};${s.unread}`;
+  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active};${p};${s.unread};${s.awaiting}`;
 }
 
-/** End a pairing (pending or active). Returns true when one was ended. */
+/** End a pairing (pending or active). What the coach recommended and the
+ *  client hasn't answered is withdrawn. Returns true when one was ended. */
 export function endPairing(pairingId, byUserId) {
   const r = db.prepare(`
     UPDATE coach_clients
        SET status = 'ended', ended_at = datetime('now'), ended_by = ?, updated_at = datetime('now')
      WHERE id = ? AND status IN ('pending', 'active')
   `).run(byUserId ?? null, pairingId);
+  if (r.changes > 0) {
+    db.prepare(`UPDATE coach_recommendations SET status = 'withdrawn', updated_at = datetime('now') WHERE pairing_id = ? AND status = 'pending'`).run(pairingId);
+  }
   return r.changes > 0;
 }
 

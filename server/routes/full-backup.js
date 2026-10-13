@@ -366,6 +366,17 @@ function restoreFromZip(zip) {
       note: null, requested_at: null, responded_at: null, ended_at: null, ended_by: null, updated_at: null, ...c,
     });
 
+    // Coaching recommendations (and their answers).
+    db.prepare('DELETE FROM coach_recommendations').run();
+    const recPairings = new Set(db.prepare('SELECT id FROM coach_clients').all().map(r => r.id));
+    const insRec = db.prepare(`
+      INSERT OR IGNORE INTO coach_recommendations (id, pairing_id, coach_id, client_id, kind, date, payload, note, status, response_note, created_at, responded_at, updated_at, deleted_at)
+      VALUES (@id, @pairing_id, @coach_id, @client_id, @kind, @date, @payload, @note, @status, @response_note, COALESCE(@created_at, datetime('now')), @responded_at, COALESCE(@updated_at, datetime('now')), @deleted_at)
+    `);
+    for (const r of (data.coach_recommendations || []).filter(x => recPairings.has(x.pairing_id))) insRec.run({
+      date: null, note: null, response_note: null, created_at: null, responded_at: null, updated_at: null, deleted_at: null, ...r,
+    });
+
     // Coaching conversations; their photos come back with the other images
     // (images/coaching/ in the archive).
     db.prepare('DELETE FROM coach_messages').run();
@@ -467,6 +478,7 @@ function dumpDatabase() {
     // Coaching pairings: who coaches whom, and requests waiting for an answer.
     coach_clients:    db.prepare('SELECT * FROM coach_clients').all(),
     coach_messages:   db.prepare('SELECT * FROM coach_messages').all(),
+    coach_recommendations: db.prepare('SELECT * FROM coach_recommendations').all(),
   };
 }
 
