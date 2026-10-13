@@ -261,6 +261,13 @@ test('the settings refresh carries a coaching fingerprint that changes with a re
   const r = await request('coach2', 'client3');
   const after = (await call('client3', 'GET', '/api/settings')).headers.get('x-nt-coaching');
   assert.notEqual(after, before);
+  // The app computes the same fingerprint from the state it holds, so it asks
+  // again only when the server's moved.
+  const src = readFileSync(new URL('../src/stores/coaching.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('export function coachingSignature'), src.indexOf('function _save'));
+  const appSig = new Function(`${body.replace('export ', '')}; return coachingSignature;`)();
+  assert.equal(appSig(await ok('client3', 'GET', '/api/coaching/state')), after);
+  assert.equal(appSig(await ok('coach2', 'GET', '/api/coaching/state')), (await call('coach2', 'GET', '/api/settings')).headers.get('x-nt-coaching'));
   await ok('client3', 'POST', `/api/coaching/pairings/${r.data.id}/decline`);
   assert.equal((await call('client3', 'GET', '/api/settings')).headers.get('x-nt-coaching'), before);
 });

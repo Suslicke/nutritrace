@@ -24,11 +24,19 @@ export const coachingState = writable(null);
 /** Android with no server: coaching has nowhere to happen. */
 export const coachingNeedsServer = () => isNative && !getServerUrl();
 
-export const coachTab = derived([coachingSupported, coachingState],
-  ([$ok, $s]) => !!($ok && $s?.as_client));
-export const clientsTab = derived([coachingSupported, coachingState],
-  ([$ok, $s]) => !!($ok && $s && ($s.role === 'coach'
-    || ($s.role === 'admin' && ((Number($s.as_coach?.pending) || 0) + (Number($s.as_coach?.active) || 0)) > 0))));
+/** Coach tab: someone with a coach or a request waiting for their answer. */
+export function showsCoachTab(supported, s) {
+  return !!(supported && s?.as_client);
+}
+/** Clients tab: the Coach role, or an admin who coaches (or asked) someone. */
+export function showsClientsTab(supported, s) {
+  if (!supported || !s) return false;
+  if (s.role === 'coach') return true;
+  return s.role === 'admin' && ((Number(s.as_coach?.pending) || 0) + (Number(s.as_coach?.active) || 0)) > 0;
+}
+
+export const coachTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsCoachTab($ok, $s));
+export const clientsTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsClientsTab($ok, $s));
 export const inCoaching = derived([coachTab, clientsTab], ([$a, $b]) => $a || $b);
 
 /** The same fingerprint the server sends, from a state the app holds. */
