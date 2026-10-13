@@ -32,7 +32,10 @@ export function showsCoachTab(supported, s) {
 export function showsClientsTab(supported, s) {
   if (!supported || !s) return false;
   if (s.role === 'coach') return true;
-  return s.role === 'admin' && ((Number(s.as_coach?.pending) || 0) + (Number(s.as_coach?.active) || 0)) > 0;
+  // An admin keeps the tab for a week after an answer, so a declined request
+  // or a client who left is seen there, as a Coach sees it.
+  const c = s.as_coach || {};
+  return s.role === 'admin' && ((Number(c.pending) || 0) + (Number(c.active) || 0) + (Number(c.recent) || 0)) > 0;
 }
 
 export const coachTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsCoachTab($ok, $s));
@@ -68,9 +71,19 @@ export function loadCachedCoaching(userId) {
 
 /** From /api/auth/status and /api/auth/me. `supported` undefined leaves it as is. */
 export function setCoachingFromServer({ supported, state, userId }) {
+  const before = _lastSaved(userId);
   if (supported !== undefined) coachingSupported.set(Number(supported) >= 1);
   if (state !== undefined) coachingState.set(state || null);
   _save(userId);
+  if (state !== undefined) _forgetFormerClients(before, state || null);
+}
+
+/** The state this account last saved on this device (survives a reload). */
+function _lastSaved(userId) {
+  try {
+    const kept = JSON.parse(localStorage.getItem(KEY) || 'null');
+    return kept && String(kept.user) === String(userId) ? kept.state : null;
+  } catch { return null; }
 }
 
 export function clearCoaching() {
@@ -88,11 +101,32 @@ export async function refreshCoaching() {
   if (!get(coachingSupported) || coachingNeedsServer()) return get(coachingState);
   try {
     const { NtApi } = await import('../lib/api.js');
+    const before = _lastSaved(localStorage.getItem('wl:userId')) || get(coachingState);
     const state = await NtApi.get('/api/coaching/state');
     coachingState.set(state || null);
     _save(localStorage.getItem('wl:userId'));
+    await _forgetFormerClients(before, state);
   } catch { /* offline: keep what is known */ }
   return get(coachingState);
+}
+
+/**
+ * A client left or was taken away: the copies of their views kept for a dead
+ * zone go now, not when the Clients list is next opened online.
+ */
+async function _forgetFormerClients(before, now) {
+  const was = Number(before?.as_coach?.active) || 0;
+  const is = Number(now?.as_coach?.active) || 0;
+  if (!(is < was) && (now?.can_coach || !was)) return;
+  try {
+    const { NtApi } = await import('../lib/api.js');
+    let keep = [];
+    if (now?.can_coach && is > 0) {
+      const rows = await NtApi.get(`/api/coaching/clients?today=${new Date().toLocaleDateString('sv-SE')}`);
+      keep = rows.filter(r => r.status === 'active').map(r => r.client.id);
+    }
+    await NtApi.forgetCoachingReads(keep);
+  } catch { /* offline: the next list load tidies up */ }
 }
 
 /** The settings refresh brought a fingerprint: ask again only when it moved. */
@@ -104,7 +138,7 @@ export function noteCoachingSignature(sig) {
 
 // The Android app shows its first screen before it has asked the server who
 // is signed in, so it starts from what this account knew last time; a Coach
-// or Clients link opened at launch then lands where it points.
+// or Clients link opened at launch then opens where it points.
 if (isNative) {
   try {
     const uid = localStorage.getItem('wl:userId');

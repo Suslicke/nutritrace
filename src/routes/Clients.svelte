@@ -25,7 +25,7 @@
 
   $: selectedId = params?.id != null ? Number(params.id) : null;
   $: selected = (rows || []).find(r => r.client.id === selectedId && r.status === 'active') || null;
-  // A link to someone who isn't an active client lands on the list.
+  // A link to someone who isn't an active client opens the list.
   $: if (rows && selectedId != null && !selected) replace('/goals/clients');
 
   onMount(async () => {
@@ -79,7 +79,7 @@
     {#if needsServer}
       <CoachingNeedsServer />
     {:else}
-      <div class="clients-layout" class:has-selection={!!selected}>
+      <div class="clients-layout" class:has-selection={!!selected || (selectedId != null && rows === null)}>
         <section class="clients-list-pane" aria-label={$_('coaching.clients.title')}>
           <div class="cl-head">
             <h2>{$_('coaching.clients.title')}</h2>
@@ -91,7 +91,9 @@
           {#if listErr}<p class="cl-msg">{listErr}</p>{/if}
           {#if rows === null}
             <p class="cl-msg">{$_('coaching.loading')}</p>
-          {:else if rows.length === 0 && !listErr}
+          {:else if rows.length === 0 && listErr}
+            <!-- The message above says why. -->
+          {:else if rows.length === 0}
             <div class="cl-empty">
               <span class="material-symbols-rounded" aria-hidden="true">groups</span>
               <p>{$_('coaching.clients.empty')}</p>

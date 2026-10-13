@@ -32,7 +32,11 @@
     try {
       const r = await NtApi.get(`/api/coaching/clients/${id}/overview?today=${todayLocal()}`);
       if (id === clientId) overview = r;
-    } catch (e) { if (id === clientId) overviewErr = coachingErrorText(e, $_); }
+    } catch (e) {
+      if (id === clientId) overviewErr = coachingErrorText(e, $_);
+      // No longer this coach's client: the copies kept for a dead zone go.
+      if (!e?.offline && /not found/i.test(String(e?.message))) NtApi.forgetCoachingReads([]).catch(() => {});
+    }
   }
 
   async function loadDay() {

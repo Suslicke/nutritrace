@@ -25,7 +25,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MACROS = [['proteins', 4], ['carbohydrates', 4], ['fat', 9]];
 const OVERVIEW_DAYS = 7;
 const WEIGHT_DAYS = 90;
-// A day is on target when its calories land within this share of the target.
+// A day is on target when its calories are within this share of the target.
 const ON_TARGET = 0.1;
 
 const _json = (s, fallback) => { try { return s == null ? fallback : JSON.parse(s); } catch { return fallback; } };
@@ -212,6 +212,8 @@ router.post('/pairings/:id/end', requireAccount, wrap((req, res) => {
 
 // ── Admin: see and end pairings ─────────────────────────────────────────────
 router.get('/admin/pairings', requireAccount, requireAdmin, wrap((req, res) => {
+  // The token's role can be older than an admin's change; ask the database.
+  if (roleOf(req.user.id) !== 'admin') return res.status(403).json({ error: 'Admin only' });
   const rows = db.prepare(`
     SELECT cc.id, cc.status, cc.requested_at, cc.responded_at,
            c.id AS coach_id, c.full_name AS coach_full, c.username AS coach_user,

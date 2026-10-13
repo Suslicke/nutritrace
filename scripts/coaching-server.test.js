@@ -128,7 +128,7 @@ function assertNoUserRows(value, where) {
 test('the server says it supports coaching, and /me says where you stand', { skip: !ready }, async () => {
   assert.equal((await call(null, 'GET', '/api/auth/status')).data.coaching, 1);
   const me = (await call('plain', 'GET', '/api/auth/me')).data;
-  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, as_coach: { pending: 0, active: 0 } });
+  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, as_coach: { pending: 0, active: 0, recent: 0 } });
   assert.equal((await call('coach1', 'GET', '/api/auth/me')).data.coaching.can_coach, true);
 });
 
@@ -201,6 +201,8 @@ test('a request, the answer, and the privacy table for every client route', { sk
   // The coach's list: active with a week summary, the declined and the
   // client-ended ones for a week; nothing of coach2's.
   const list = await ok('coach1', 'GET', `/api/coaching/clients?today=${TODAY}`);
+  // The answers the list still shows are counted, so an admin who coaches keeps the tab.
+  assert.deepEqual((await ok('coach1', 'GET', '/api/coaching/state')).as_coach, { pending: 0, active: 1, recent: 2 });
   assertNoUserRows(list, 'GET /clients');
   const byClient = Object.fromEntries(list.map((r) => [r.client.id, r]));
   assert.equal(byClient[ids.client1].status, 'active');
@@ -292,6 +294,12 @@ test('a Coach is a User everywhere else; losing the role ends their coaching', {
   assert.equal((await call('admin', 'PUT', `/api/auth/users/${ids.coach1}/role`, { role: 'trainer' })).status, 400);
   await ok('admin', 'PUT', `/api/auth/users/${ids.coach1}/role`, { role: 'coach' });
   assert.equal((await call('coach1', 'GET', '/api/coaching/clients')).status, 200);
+
+  // An admin made a User stops seeing every pairing at once, whatever the token says.
+  await ok('admin', 'PUT', `/api/auth/users/${ids.admin2}/role`, { role: 'user' });
+  assert.equal((await call('admin2', 'GET', '/api/coaching/admin/pairings')).status, 403);
+  await ok('admin', 'PUT', `/api/auth/users/${ids.admin2}/role`, { role: 'admin' });
+  assert.equal((await call('admin2', 'GET', '/api/coaching/admin/pairings')).status, 200);
 });
 
 test('an invite can name a coach; the request waits for the new person', { skip: !ready }, async () => {

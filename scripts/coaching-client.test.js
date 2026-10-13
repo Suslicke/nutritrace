@@ -50,6 +50,7 @@ test('Goals tabs: Coach for a client, Clients for coaches', () => {
   assert.equal(clientsTab(true, { role: 'coach', as_client: null, as_coach: none }), true, 'a Coach with no clients yet');
   assert.equal(clientsTab(true, { role: 'admin', as_client: null, as_coach: { pending: 1, active: 0 } }), true);
   assert.equal(clientsTab(true, { role: 'admin', as_client: null, as_coach: { pending: 0, active: 2 } }), true);
+  assert.equal(clientsTab(true, { role: 'admin', as_client: null, as_coach: { pending: 0, active: 0, recent: 1 } }), true, 'an answer from the last week');
   // A person can have a coach and be a coach.
   const both = { role: 'coach', as_client: { id: 9, status: 'active' }, as_coach: { pending: 0, active: 1 } };
   assert.equal(coachTab(true, both) && clientsTab(true, both), true);

@@ -480,6 +480,7 @@ function _coachingForget(activeClientIds = []) {
   try {
     for (const k of Object.keys(localStorage)) {
       if (!k.startsWith(_COACH_PREFIX)) continue;
+      if (!k.startsWith(`${_COACH_PREFIX}${localStorage.getItem('wl:userId') || ''}:`)) continue;
       const m = k.match(/:\/api\/coaching\/clients\/(\d+)\//);
       if (m && !keep.has(m[1])) { localStorage.removeItem(k); n++; }
     }

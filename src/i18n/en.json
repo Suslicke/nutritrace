@@ -2423,7 +2423,7 @@
       "status_ended": "Ended",
       "cancel_request": "Cancel Request",
       "cancel_title": "Cancel the Request to {name}?",
-      "cancel_message": "{name} won't see it any more.",
+      "cancel_message": "{name} won't see it anymore.",
       "cancelled": "Request to {name} cancelled",
       "end": "End Coaching",
       "end_title": "End Coaching for {name}?",

@@ -87,11 +87,19 @@ export function coachingState(userId) {
       FROM coach_clients cc JOIN users u ON u.id = cc.coach_id
      WHERE cc.client_id = ? AND cc.status IN ('pending', 'active')
   `).get(userId);
-  const counts = { pending: 0, active: 0 };
+  const counts = { pending: 0, active: 0, recent: 0 };
   for (const r of db.prepare(`
     SELECT status, COUNT(*) AS c FROM coach_clients
      WHERE coach_id = ? AND status IN ('pending', 'active') GROUP BY status
   `).all(userId)) counts[r.status] = r.c;
+  // Answers from the last week the coach's list still shows (a declined
+  // request, a client who left), so an admin who coaches keeps the tab to see them.
+  counts.recent = db.prepare(`
+    SELECT COUNT(*) AS c FROM coach_clients
+     WHERE coach_id = ?
+       AND ((status = 'declined' AND responded_at >= datetime('now', '-7 days'))
+         OR (status = 'ended' AND ended_by IS NOT coach_id AND ended_at >= datetime('now', '-7 days')))
+  `).get(userId).c;
   return {
     role,
     can_coach: canCoach(role),
