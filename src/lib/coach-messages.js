@@ -124,8 +124,8 @@ export async function sendMessage(conv, { body = '', image = null } = {}) {
     sync_status: 'pending',
   };
   await (await _store()).queue(row);
-  flushCoachMessages().catch(() => {});
-  return row;
+  const r = await flushCoachMessages().catch(() => ({ offline: true }));
+  return { ...row, offline: !!r?.offline };
 }
 
 /** Delete your own message ("Message deleted"); a delete made offline waits. */
@@ -138,12 +138,12 @@ export async function deleteOwnMessage(m) {
 let _flushing = null;
 /** Send everything waiting, oldest first. Stops at the first sign of no
  *  connection; a message the server refuses (the conversation closed) is
- *  kept and marked instead of retried forever. */
+ *  kept and marked instead of retried forever. Returns { sent, offline }. */
 export function flushCoachMessages() {
   if (_flushing) return _flushing;
   _flushing = (async () => {
     const store = await _store();
-    let sent = 0;
+    let sent = 0, offline = false;
     for (const m of await store.pending()) {
       try {
         if (m.sync_status === 'pending_delete') {
@@ -155,14 +155,14 @@ export function flushCoachMessages() {
         }
         sent++;
       } catch (e) {
-        if (e?.offline || !e?.message || /fetch|network|timeout|abort/i.test(e.message)) break;
+        if (e?.offline || !e?.message || /fetch|network|timeout|abort/i.test(e.message)) { offline = true; break; }
         // Already gone on the server: nothing left to delete.
         if (m.sync_status === 'pending_delete' && /not found/i.test(e.message)) { await store.upsert([{ ...m, deleted_at: m.deleted_at || _sqlNow() }]); continue; }
         await store.fail(m.uuid, e.message);
       }
     }
     if (sent && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-messages'));
-    return sent;
+    return { sent, offline };
   })().finally(() => { _flushing = null; });
   return _flushing;
 }

@@ -132,6 +132,14 @@ export async function refreshCoaching() {
  * zone go now, not when the Clients list is next opened online.
  */
 async function _forgetFormerClients(before, now) {
+  // Conversations kept on this device that this account may no longer read
+  // (a coach whose client left) go, with their photo copies.
+  const inBefore = before && (showsCoachTab(true, before) || showsClientsTab(true, before));
+  const inNow = now && (showsCoachTab(true, now) || showsClientsTab(true, now));
+  if (inBefore || inNow) {
+    const readable = [now?.as_client?.id, ...(now?.past || []).map(p => p.id), ...(now?.as_coach?.active_ids || [])].filter(x => x != null);
+    import('../lib/coach-messages.js').then(m => m.keepConversations(readable)).catch(() => {});
+  }
   const was = Number(before?.as_coach?.active) || 0;
   const is = Number(now?.as_coach?.active) || 0;
   if (!(is < was) && (now?.can_coach || !was)) return;

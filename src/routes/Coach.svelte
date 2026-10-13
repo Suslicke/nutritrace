@@ -172,13 +172,13 @@
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
   .consent-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 16px; }
-  .coach-card { display: flex; align-items: center; gap: 14px; }
+  .coach-card { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
   .coach-avatar {
     width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0;
     display: grid; place-items: center; font-size: 20px; font-weight: 700;
     background: var(--accent-dim); color: var(--accent);
   }
-  .coach-info { min-width: 0; }
+  .coach-info { min-width: 0; flex: 1 1 160px; }
   .coach-label { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
   .coach-name { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
   .coach-since { font-size: 13px; color: var(--text-3); margin-top: 2px; }

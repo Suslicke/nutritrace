@@ -7,7 +7,7 @@
   import { showSuccess, showError } from '../../stores/toast.js';
   import { DB } from '../../lib/db.js';
   import { scheduleSave } from '../../stores/settings.js';
-  import { coachingSupported, coachingState, inCoaching, coachTab } from '../../stores/coaching.js';
+  import { coachingSupported, inCoaching, coachTab, clientsTab } from '../../stores/coaching.js';
 
   function set(key, value) { DB.setSetting(key, value); scheduleSave(key, value); }
 
@@ -362,7 +362,7 @@
       {/if}
     </div>
 
-    {#if $coachingSupported && ($inCoaching || $coachingState?.can_coach)}
+    {#if $coachingSupported && $inCoaching}
       <p class="settings-group-heading">{$_('settings_notifications.coaching.heading')}</p>
       <p class="settings-group-sub">{$_('settings_notifications.coaching.sub')}</p>
       <div class="card settings-card">
@@ -393,7 +393,7 @@
             <Toggle checked={_notifCoachRec} on:change={e => { _notifCoachRec = e.detail; set('notifCoachRecommendation', e.detail); }} />
           </div>
         {/if}
-        {#if $coachingState?.can_coach}
+        {#if $clientsTab}
           <div class="setting-divider"></div>
           <div class="setting-row">
             <div>

@@ -55,7 +55,8 @@
     if (_checking || !conv) return;
     _checking = true;
     try {
-      await flushCoachMessages().catch(() => {});
+      const f = await flushCoachMessages().catch(() => null);
+      if (f?.offline) offline = true;
       const r = await refreshConversation(conv);
       offline = false;
       if (!readOnly) canSend = r.can_send;
@@ -110,11 +111,10 @@
     if (body.length > MESSAGE_MAX) { showError($_('coaching.chat.too_long', { values: { max: MESSAGE_MAX.toLocaleString() } })); return; }
     sending = true;
     try {
-      await sendMessage(conv, { body, image: photo });
+      const sent = await sendMessage(conv, { body, image: photo });
+      offline = sent.offline;
       text = ''; photo = null;
       await reload({ scroll: true });
-      // Settles once it went (or waits); the list shows which.
-      setTimeout(() => reload(), 1200);
     } catch { showError($_('coaching.something_failed')); }
     sending = false;
   }
