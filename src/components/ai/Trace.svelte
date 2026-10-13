@@ -36,6 +36,7 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { foldText } from '../../lib/search-text.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
+  import { formatDay } from '../../lib/coaching-view.js';
   import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
 
 
@@ -75,7 +76,7 @@
   function openCoachDraft() {
     const d = _coachDraftCard;
     if (!d) return;
-    coachDraft.set({ kind: d.kind, clientId: d.clientId, date: d.date, payload: d.payload, note: d.note });
+    coachDraft.set({ kind: d.kind, clientId: d.clientId, date: d.date, payload: d.payload, note: d.note, at: Date.now() });
     _coachDraftCard = null;
     panelOpen = false;
     import('svelte-spa-router').then(({ push }) => push(`/goals/clients/${d.clientId}`));
@@ -1952,6 +1953,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     _foodProposalCommitted = false;
     _foodProposalCommittedKind = '';
     _foodProposalCommittedMealIdx = null;
+    _coachDraftCard = null;
   }
 
   function quickAsk(q) { input = q; send(); }
@@ -2312,7 +2314,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
             <div class="ai-msg">
               <div class="ai-msg-avatar"><TraceFace size={24} /></div>
               <div class="ai-msg-body coach-draft" style="width:100%">
-                <div class="proposal-name">{$_(_coachDraftCard.kind === 'targets' ? 'coaching.trace.draft_targets' : 'coaching.trace.draft_plan', { values: { name: _coachDraftCard.clientName, date: _coachDraftCard.date || '' } })}</div>
+                <div class="proposal-name">{$_(_coachDraftCard.kind === 'targets' ? 'coaching.trace.draft_targets' : 'coaching.trace.draft_plan', { values: { name: _coachDraftCard.clientName, date: _coachDraftCard.date ? formatDay(_coachDraftCard.date, $dateFormat) : '' } })}</div>
                 <p class="coach-draft-sub">{$_('coaching.trace.draft_sub')}</p>
                 <div class="proposal-actions">
                   <button class="btn btn-secondary" on:click={() => _coachDraftCard = null}>{$_('coaching.trace.discard')}</button>

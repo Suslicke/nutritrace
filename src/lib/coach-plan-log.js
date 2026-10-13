@@ -57,10 +57,12 @@ export async function logPlanMeal(rec, mealSlot, logged = new Set()) {
   if (!todo.length) return 0;
   const { addDiaryItem } = await import('../stores/diary.js');
   const cat = await _catalog();
-  for (const { item, i } of todo) {
+  // New foods' Open Food Facts details, looked up together rather than one by one.
+  const fresh = await Promise.all(todo.map(({ item }) => (findOwn(item, cat) ? null : _newFood(item))));
+  for (const [n, { item, i }] of todo.entries()) {
     let food = findOwn(item, cat);
     if (!food) {
-      food = await NtApi.createFood({ ...(await _newFood(item)), created_at: new Date().toISOString() });
+      food = await NtApi.createFood({ ...(fresh[n] || foodFromPlanItem(item)), created_at: new Date().toISOString() });
       cat.foods = [food, ...cat.foods];
     }
     await addDiaryItem(planDiaryItem(item, food, rec.id, mealSlot, i), mealSlot, rec.date);

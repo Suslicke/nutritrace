@@ -1698,6 +1698,6 @@ test("Trace's coaching tools on the phone: a coach's drafts send nothing; a clie
     const out = (await tr.runCoachingTool('get_coach_recommendations', {}, { coach: false, client: true })).result;
     p.done({ out, text: JSON.stringify(out) });`);
   assert.equal(c.out.length, 1);
-  assert.deepEqual([c.out[0].kind, c.out[0].status, c.out[0].note, c.out[0].recommended_goals.calories.max], ['targets', 'pending', 'Slightly less', 2000]);
+  assert.deepEqual([c.out[0].kind, c.out[0].status, c.out[0].coach_note_text, c.out[0].recommended_goals.calories.max], ['targets', 'pending', 'Slightly less', 2000]);
   assert.doesNotMatch(c.text, /A private word/, 'never the conversation');
 });

@@ -2612,6 +2612,7 @@
     "client": {
       "request_title": "{name} wants to be your coach.",
       "request_body": "{name} will see your diary, your targets, your weight and your foods, meals and recipes.",
+      "request_trace": "If {name} asks their Trace about you, what it reads (your days, targets, weight and foods) goes to their AI provider. Your conversation never does.",
       "accept": "Accept",
       "decline": "Decline",
       "decline_title": "Decline {name}?",

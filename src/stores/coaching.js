@@ -25,9 +25,25 @@ export const coachRecommendations = writable([]);
 /**
  * A draft Trace prepared for a coach and the coach chose to open: the
  * client's Targets editor or Plans builder starts from it (the coach still
- * reviews and sends). { kind: 'targets' | 'day_plan', clientId, date, payload, note }
+ * reviews and sends). { kind: 'targets' | 'day_plan', clientId, date, payload, note, at }
+ * Used at once by the view it opens, or dropped: one left unused never
+ * turns up later.
  */
 export const coachDraft = writable(null);
+const DRAFT_TTL_MS = 2 * 60 * 1000;
+/** Whether a draft is for this kind and client and still fresh. */
+export function draftFor(d, kind, clientId) {
+  return !!d && d.kind === kind && d.clientId === clientId && Date.now() - (d.at || 0) < DRAFT_TTL_MS;
+}
+/** Take the draft for this view (it's used once); a stale one is dropped. */
+export function takeCoachDraft(kind, clientId) {
+  const d = get(coachDraft);
+  if (!d) return null;
+  if (Date.now() - (d.at || 0) >= DRAFT_TTL_MS) { coachDraft.set(null); return null; }
+  if (d.kind !== kind || d.clientId !== clientId) return null;
+  coachDraft.set(null);
+  return d;
+}
 
 /** Android with no server: coaching has nowhere to happen. */
 export const coachingNeedsServer = () => isNative && !getServerUrl();

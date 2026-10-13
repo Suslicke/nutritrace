@@ -288,7 +288,7 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
   const { apiUrl, isNative, getServerUrl, getAuthToken } = await import('./platform.js');
 
   let currentMessages = [...messages];
-  const MAX_ROUNDS = 5;
+  const MAX_ROUNDS = _maxRounds(tools);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const headers = { 'Content-Type': 'application/json' };
@@ -413,7 +413,7 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
   }));
 
   let currentMessages = [...messages];
-  const MAX_ROUNDS = 5;
+  const MAX_ROUNDS = _maxRounds(tools);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const body = {
@@ -475,7 +475,7 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
     { role: 'system', content: systemPrompt },
     ...messages,
   ];
-  const MAX_ROUNDS = 5;
+  const MAX_ROUNDS = _maxRounds(tools);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const selectedModel = model || AI_DEFAULT_MODELS.openai;
@@ -572,7 +572,7 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     return { role: msg.role === 'assistant' ? 'model' : 'user', parts };
   });
 
-  const MAX_ROUNDS = 5;
+  const MAX_ROUNDS = _maxRounds(tools);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const body = {
@@ -613,6 +613,11 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
 }
 
 // ── Tool execution ───────────────────────────────────────────────────────────
+
+// Tool rounds per answer. Coaching drafts need a few more (find the client,
+// read their days, search their foods, draft); everyone else keeps 5.
+const _COACHING_TOOL = /^(get_coaching_clients|get_client_summary|get_client_foods|draft_targets|draft_day_plan|get_coach_recommendations)$/;
+function _maxRounds(tools) { return (tools || []).some(t => _COACHING_TOOL.test(t?.name)) ? 8 : 5; }
 
 let _toolHandler = null;
 

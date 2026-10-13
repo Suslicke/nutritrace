@@ -17,7 +17,7 @@
   import Sheet from '../ui/Sheet.svelte';
   import PlanItemPicker from './PlanItemPicker.svelte';
   import PlanCard from './PlanCard.svelte';
-  import { coachDraft } from '../../stores/coaching.js';
+  import { coachDraft, takeCoachDraft } from '../../stores/coaching.js';
 
   export let row;                  // { id, client: { id, name } }
   export let recommendations = [];
@@ -45,27 +45,32 @@
 
   // A draft Trace prepared, opened by the coach: its date, meals and note
   // (the coach still reviews and sends).
-  let drafted = false;
-  $: if ($coachDraft && $coachDraft.kind === 'day_plan' && $coachDraft.clientId === clientId && $coachDraft.date) date = $coachDraft.date;
+  let drafted = false, _draftAt = null;   // `${client}:${date}` the Trace draft is for
+  $: if ($coachDraft && clientId) _takeDraft();
+  function _takeDraft() {
+    const t = takeCoachDraft('day_plan', clientId);
+    if (!t) return;
+    date = t.date;
+    draft = {};
+    for (const m of t.payload?.meals || []) draft[m.meal] = m.items.map(it => ({ ...it }));
+    note = t.note || '';
+    drafted = true;
+    _draftAt = `${clientId}:${t.date}`;
+  }
 
   function _startFrom(cid, d, plan) {
     const key = `${cid}:${d}:${plan?.id ?? '-'}`;
     if (key === draftFor) return;
     draftFor = key;
+    // The draft stays while its day is shown, also when that day's plans
+    // load after it (the coach replaces that plan by sending).
+    if (drafted && _draftAt === `${cid}:${d}`) return;
     draft = {};
-    const t = $coachDraft;
-    if (t && t.kind === 'day_plan' && t.clientId === cid && t.date === d) {
-      coachDraft.set(null);
-      for (const m of t.payload?.meals || []) draft[m.meal] = m.items.map(it => ({ ...it }));
-      note = t.note || '';
-      drafted = true;
-      return;
-    }
-    drafted = false;
+    drafted = false; _draftAt = null;
     for (const m of plan?.payload?.meals || []) draft[m.meal] = m.items.map(it => ({ ...it }));
     note = plan?.note || '';
   }
-  function clearDraft() { draftFor = null; drafted = false; _startFrom(clientId, date, current); }
+  function clearDraft() { draftFor = null; drafted = false; _draftAt = null; _startFrom(clientId, date, current); }
 
   async function loadDay(cid, d) {
     const key = `${cid}:${d}`;
@@ -120,6 +125,7 @@
       const n = Array.isArray(made) ? made.length : 1;
       showSuccess(n > 1 ? $_('coaching.plans.sent_days', { values: { name, count: n } }) : $_('coaching.plans.sent', { values: { name } }));
       copyOpen = false;
+      drafted = false; _draftAt = null;
       dispatch('sent');
     } catch (e) { showError(coachingErrorText(e, $_)); }
     busy = false;

@@ -12,7 +12,7 @@
   import Conversation from './Conversation.svelte';
   import TargetsEditor from './TargetsEditor.svelte';
   import PlanBuilder from './PlanBuilder.svelte';
-  import { coachDraft } from '../../stores/coaching.js';
+  import { coachDraft, draftFor } from '../../stores/coaching.js';
 
   export let row;            // the list row: { id, status, client: { id, name }, ... }
   export let showBack = true;
@@ -29,7 +29,8 @@
   $: clientId = row?.client?.id;
   $: if (clientId && clientId !== loadedFor) { loadedFor = clientId; tab = 'overview'; dayDate = todayLocal(); day = null; loadOverview(); loadRecs(); }
   // A draft Trace prepared and the coach opened: its tab.
-  $: if ($coachDraft && $coachDraft.clientId === clientId) tab = $coachDraft.kind === 'targets' ? 'targets' : 'plans';
+  $: if (draftFor($coachDraft, 'targets', clientId)) tab = 'targets';
+  $: if (draftFor($coachDraft, 'day_plan', clientId)) tab = 'plans';
 
   // What this coach recommended to this client (the Targets tab and the
   // cards in the conversation).
@@ -119,6 +120,8 @@
     </button>
   </div>
 
+  <!-- A new client starts every tab afresh (no editor kept from the last one). -->
+  {#key clientId}
   {#if tab === 'chat'}
     <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} mealNames={overview?.meal_names || DEFAULT_MEALS} />
   {:else if tab === 'plans'}
@@ -242,6 +245,7 @@
       {/if}
     {/if}
   {/if}
+  {/key}
 </div>
 
 <style>

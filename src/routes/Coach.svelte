@@ -133,6 +133,7 @@
             <h2 id="consent-title-{req.id}" class="consent-title">{$_('coaching.client.request_title', { values: { name: req.coach.name } })}</h2>
           </div>
           <p class="consent-body">{$_('coaching.client.request_body', { values: { name: req.coach.name } })}</p>
+          <p class="consent-trace">{$_('coaching.client.request_trace', { values: { name: req.coach.name } })}</p>
           {#if req.note}
             <blockquote class="consent-note">{req.note}</blockquote>
           {/if}
@@ -192,6 +193,7 @@
   .consent-icon { font-size: 28px; color: var(--accent); flex-shrink: 0; }
   .consent-title { font-size: 17px; font-weight: 700; margin: 0; }
   .consent-body { margin: 12px 0 0; color: var(--text-2); line-height: 1.45; }
+  .consent-trace { margin: 8px 0 0; font-size: 13px; color: var(--text-3); line-height: 1.4; }
   .consent-note {
     margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--border-strong);
     background: var(--surface-2); border-radius: var(--radius-sm); color: var(--text-1);

@@ -13,7 +13,7 @@
   import { TARGET_KEYS } from '../../lib/coach-targets.js';
   import { coachingErrorText } from '../../lib/coaching-view.js';
   import WeightTrend from './WeightTrend.svelte';
-  import { coachDraft } from '../../stores/coaching.js';
+  import { coachDraft, takeCoachDraft } from '../../stores/coaching.js';
   import TargetsCard from './TargetsCard.svelte';
 
   export let row;              // { id, client: { id, name } }
@@ -56,7 +56,6 @@
     try {
       current = await NtApi.get(`/api/coaching/clients/${row.client.id}/targets`);
       startFrom(current.goals);
-      fromDraft();
     } catch (e) { loadErr = coachingErrorText(e, $_); }
   }
   onMount(load);
@@ -64,10 +63,11 @@
   // A draft Trace prepared, opened by the coach: the editor starts from it
   // (the coach still reviews and sends).
   let drafted = false;
+  // Once this client's targets are here (also when the editor was already open).
+  $: if (current && $coachDraft) fromDraft();
   function fromDraft() {
-    const d = $coachDraft;
-    if (!d || d.kind !== 'targets' || d.clientId !== row.client.id) return;
-    coachDraft.set(null);
+    const d = takeCoachDraft('targets', row.client.id);
+    if (!d) return;
     for (const [key, g] of Object.entries(d.payload?.goals || {})) {
       if (!ed[key]) continue;
       const shared = g.sharedGoal !== false;
@@ -128,7 +128,7 @@
     try {
       await NtApi.post(`/api/coaching/clients/${row.client.id}/recommendations`, { kind: 'targets', payload, note: note.trim() || undefined });
       showSuccess($_('coaching.targets.sent', { values: { name: row.client.name } }));
-      note = ''; mode = '';
+      note = ''; mode = ''; drafted = false;
       startFrom(current?.goals);
       dispatch('sent');
     } catch (e) { showError(coachingErrorText(e, $_)); }
