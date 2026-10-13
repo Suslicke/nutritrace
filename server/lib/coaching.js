@@ -81,12 +81,14 @@ export function requireCoachOf(req, res, next) {
 /** Where this person stands in coaching, for their own screens. */
 export function coachingState(userId) {
   const role = roleOf(userId);
-  const row = db.prepare(`
+  const rows = db.prepare(`
     SELECT cc.id, cc.status, cc.note, cc.requested_at, cc.responded_at,
            u.id AS coach_id, u.full_name, u.username
       FROM coach_clients cc JOIN users u ON u.id = cc.coach_id
      WHERE cc.client_id = ? AND cc.status IN ('pending', 'active')
-  `).get(userId);
+     ORDER BY cc.requested_at DESC, cc.id DESC
+  `).all(userId);
+  const row = rows.find(r => r.status === 'active');
   const counts = { pending: 0, active: 0, recent: 0 };
   for (const r of db.prepare(`
     SELECT status, COUNT(*) AS c FROM coach_clients
@@ -103,6 +105,7 @@ export function coachingState(userId) {
   return {
     role,
     can_coach: canCoach(role),
+    // The coach, once accepted.
     as_client: row ? {
       id: row.id,
       status: row.status,
@@ -111,6 +114,13 @@ export function coachingState(userId) {
       requested_at: row.requested_at,
       responded_at: row.responded_at || null,
     } : null,
+    // Requests waiting for this person's answer, newest first.
+    requests: rows.filter(r => r.status === 'pending').map(r => ({
+      id: r.id,
+      coach: person(r.coach_id, r.full_name, r.username),
+      note: r.note || null,
+      requested_at: r.requested_at,
+    })),
     as_coach: counts,
   };
 }
@@ -122,8 +132,9 @@ export function coachingState(userId) {
  */
 export function coachingSignature(userId) {
   const s = coachingState(userId);
-  const c = s.as_client ? `${s.as_client.id}.${s.as_client.status}` : '-';
-  return `${s.role || '-'};${c};${s.as_coach.pending}.${s.as_coach.active}`;
+  const c = s.as_client ? String(s.as_client.id) : '-';
+  const r = s.requests.map(x => x.id).join(',') || '-';
+  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active}`;
 }
 
 /** End a pairing (pending or active). Returns true when one was ended. */

@@ -167,14 +167,18 @@ router.post('/requests', requireCoachRole, wrap((req, res) => {
   if (!Number.isInteger(clientId) || clientId === req.user.id) return res.status(400).json({ error: 'Choose someone to coach.' });
   const client = db.prepare('SELECT id, full_name, username FROM users WHERE id = ?').get(clientId);
   if (!client) return res.status(400).json({ error: 'Choose someone to coach.' });
+  const name = person(client.id, client.full_name, client.username).name;
+  // Only this coach's own pairings decide the answer: whether the person has
+  // another coach or other requests is never said.
+  const own = db.prepare(`SELECT status FROM coach_clients WHERE coach_id = ? AND client_id = ? AND status IN ('pending', 'active')`).get(req.user.id, clientId);
+  if (own?.status === 'active') return res.status(409).json({ error: `${name} is already your client.` });
+  if (own?.status === 'pending') return res.status(409).json({ error: `You already asked ${name}.` });
   let id;
   try {
     id = db.prepare(`INSERT INTO coach_clients (coach_id, client_id, status, note) VALUES (?, ?, 'pending', ?)`)
       .run(req.user.id, clientId, _note(req.body?.note)).lastInsertRowid;
   } catch (e) {
-    if (/UNIQUE/i.test(String(e?.message))) {
-      return res.status(409).json({ error: `${person(client.id, client.full_name, client.username).name} can't take a coaching request right now.` });
-    }
+    if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: `You already asked ${name}.` });
     throw e;
   }
   const row = _pairingRow(id);
@@ -191,8 +195,18 @@ function _answer(status) {
       endPairing(row.id, null);
       return res.status(409).json({ error: 'This person no longer coaches.' });
     }
-    db.prepare(`UPDATE coach_clients SET status = ?, responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'`)
-      .run(status, row.id);
+    // One coach at a time: leave the one you have before accepting another.
+    const LEAVE_FIRST = 'Leave your coach before you accept another.';
+    if (status === 'active' && db.prepare(`SELECT 1 FROM coach_clients WHERE client_id = ? AND status = 'active'`).get(req.user.id)) {
+      return res.status(409).json({ error: LEAVE_FIRST, code: 'leave_first' });
+    }
+    try {
+      db.prepare(`UPDATE coach_clients SET status = ?, responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'`)
+        .run(status, row.id);
+    } catch (e) {
+      if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: LEAVE_FIRST, code: 'leave_first' });
+      throw e;
+    }
     res.json(coachingState(req.user.id));
   });
 }

@@ -18,7 +18,7 @@ const KEY = 'nt:coaching';
 
 /** The server knows coaching (its /api/auth/status says so). */
 export const coachingSupported = writable(false);
-/** { role, can_coach, as_client: { id, status, coach, note, ... } | null, as_coach: { pending, active } } */
+/** { role, can_coach, as_client: active pairing | null, requests: [{ id, coach, note, requested_at }], as_coach: { pending, active, recent } } */
 export const coachingState = writable(null);
 
 /** Android with no server: coaching has nowhere to happen. */
@@ -26,7 +26,7 @@ export const coachingNeedsServer = () => isNative && !getServerUrl();
 
 /** Coach tab: someone with a coach or a request waiting for their answer. */
 export function showsCoachTab(supported, s) {
-  return !!(supported && s?.as_client);
+  return !!(supported && (s?.as_client || s?.requests?.length));
 }
 /** Clients tab: the Coach role, or an admin who coaches (or asked) someone. */
 export function showsClientsTab(supported, s) {
@@ -45,8 +45,9 @@ export const inCoaching = derived([coachTab, clientsTab], ([$a, $b]) => $a || $b
 /** The same fingerprint the server sends, from a state the app holds. */
 export function coachingSignature(s) {
   if (!s) return null;
-  const c = s.as_client ? `${s.as_client.id}.${s.as_client.status}` : '-';
-  return `${s.role || '-'};${c};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0}`;
+  const c = s.as_client ? String(s.as_client.id) : '-';
+  const r = (s.requests || []).map(x => x.id).join(',') || '-';
+  return `${s.role || '-'};${c};${r};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0}`;
 }
 
 function _save(userId) {

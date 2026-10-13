@@ -106,7 +106,11 @@ test.before(async () => {
 test.after(() => { proc?.kill(); if (dir) rmSync(dir, { recursive: true, force: true }); });
 
 const request = (coach, client, note) => call(coach, 'POST', '/api/coaching/requests', { client_id: ids[client], note });
-const pairingOf = async (client) => (await ok(client, 'GET', '/api/coaching/state')).as_client;
+// The client's coach, else their newest request (as { id, status, coach }).
+const pairingOf = async (client) => {
+  const s = await ok(client, 'GET', '/api/coaching/state');
+  return s.as_client || (s.requests[0] ? { ...s.requests[0], status: 'pending' } : null);
+};
 
 // Routes under /clients/:clientId, read from the source so none is missed.
 function clientRoutes() {
@@ -128,7 +132,7 @@ function assertNoUserRows(value, where) {
 test('the server says it supports coaching, and /me says where you stand', { skip: !ready }, async () => {
   assert.equal((await call(null, 'GET', '/api/auth/status')).data.coaching, 1);
   const me = (await call('plain', 'GET', '/api/auth/me')).data;
-  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, as_coach: { pending: 0, active: 0, recent: 0 } });
+  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, requests: [], as_coach: { pending: 0, active: 0, recent: 0 } });
   assert.equal((await call('coach1', 'GET', '/api/auth/me')).data.coaching.can_coach, true);
 });
 
@@ -231,13 +235,40 @@ test('a request, the answer, and the privacy table for every client route', { sk
   assert.deepEqual(all.map((p) => p.client.id).sort(), [ids.client1, ids.client2].sort());
 });
 
-test('one coach per client, and only the right people answer or end', { skip: !ready }, async () => {
-  const second = await request('coach2', 'client1');
-  assert.equal(second.status, 409);
-  assert.doesNotMatch(second.data.error, /Sam/, 'the other coach is not named');
+test('asking never says who has a coach; one coach is enforced at Accept', { skip: !ready }, async () => {
+  // client1 has coach1. coach2's request to them answers exactly as one to
+  // someone with no coach (plain): nothing tells coach2 who is coached.
+  const toCoached = await request('coach2', 'client1');
+  const toFree = await request('coach2', 'plain');
+  assert.equal(toCoached.status, 200);
+  assert.equal(toFree.status, 200);
+  assert.deepEqual(Object.keys(toCoached.data).sort(), Object.keys(toFree.data).sort());
+  assert.equal(toCoached.data.status, 'pending');
+  // Asking twice is refused, but only from the coach's own requests.
+  const twice = await request('coach2', 'client1');
+  assert.equal(twice.status, 409);
+  assert.match(twice.data.error, /You already asked/);
+  assert.equal((await request('coach1', 'client1')).status, 409, 'already your client');
   assert.equal((await request('coach1', 'coach1')).status, 400, 'no coaching yourself');
+  // The client sees both: their coach and the new request, which can't be
+  // accepted until they leave their coach.
+  const st = await ok('client1', 'GET', '/api/coaching/state');
+  assert.equal(st.as_client.coach.id, ids.coach1);
+  assert.deepEqual(st.requests.map((r) => r.coach.id), [ids.coach2]);
+  const blocked = await call('client1', 'POST', `/api/coaching/pairings/${toCoached.data.id}/accept`);
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.data.code, 'leave_first');
+  assert.equal((await ok('client1', 'GET', '/api/coaching/state')).as_client.coach.id, ids.coach1, 'nothing changed');
+  // Several coaches may ask the same person.
+  const third = await request('coach1', 'plain');
+  assert.equal(third.status, 200);
+  assert.deepEqual((await ok('plain', 'GET', '/api/coaching/state')).requests.map((r) => r.coach.id).sort(), [ids.coach1, ids.coach2].sort());
+  await ok('plain', 'POST', `/api/coaching/pairings/${toFree.data.id}/decline`);
+  await ok('coach1', 'POST', `/api/coaching/pairings/${third.data.id}/end`);
+  await ok('client1', 'POST', `/api/coaching/pairings/${toCoached.data.id}/decline`);
 
   const p = await pairingOf('client1');
+  assert.equal(p.status, 'active');
   assert.equal((await call('coach1', 'POST', `/api/coaching/pairings/${p.id}/accept`)).status, 404, 'the coach cannot accept for the client');
   assert.equal((await call('coach2', 'POST', `/api/coaching/pairings/${p.id}/end`)).status, 404, 'another coach cannot end it');
   assert.equal((await call('plain', 'POST', `/api/coaching/pairings/${p.id}/end`)).status, 404);
@@ -249,7 +280,7 @@ test('one coach per client, and only the right people answer or end', { skip: !r
   assert.equal((await call('coach1', 'GET', `/api/coaching/clients/${ids.client1}/overview`)).status, 404);
   assert.equal((await call('admin2', 'POST', `/api/coaching/pairings/${p.id}/end`)).status, 409);
 
-  // Leaving: the client ends it; then a new request is possible.
+  // No coach now: a new request can be accepted.
   const again = await request('coach2', 'client1');
   assert.equal(again.status, 200);
   // The coach can take back a request before it is answered.
@@ -284,7 +315,8 @@ test('a Coach is a User everywhere else; losing the role ends their coaching', {
   await ok('coach1', 'GET', '/api/foods');
 
   const r = await request('coach1', 'client2');
-  assert.equal(r.status, 409, 'client2 has coach2');
+  assert.equal(r.status, 200, 'asking someone with a coach is allowed');
+  await ok('coach1', 'POST', `/api/coaching/pairings/${r.data.id}/end`);
   const r5 = await request('coach1', 'client3');
   await ok('client3', 'POST', `/api/coaching/pairings/${r5.data.id}/accept`);
   const change = await ok('admin', 'PUT', `/api/auth/users/${ids.coach1}/role`, { role: 'user' });

@@ -40,12 +40,12 @@ test('Goals tabs: nothing for people not in coaching', () => {
   }
   // Single-user mode, Android local mode, an older server: no state or no support.
   assert.equal(clientsTab(true, null), false);
-  assert.equal(coachTab(false, { role: 'user', as_client: { id: 1, status: 'pending' }, as_coach: none }), false);
+  assert.equal(coachTab(false, { role: 'user', as_client: null, requests: [{ id: 1 }], as_coach: none }), false);
   assert.equal(clientsTab(false, { role: 'coach', as_client: null, as_coach: none }), false);
 });
 
 test('Goals tabs: Coach for a client, Clients for coaches', () => {
-  assert.equal(coachTab(true, { role: 'user', as_client: { id: 3, status: 'pending' }, as_coach: none }), true);
+  assert.equal(coachTab(true, { role: 'user', as_client: null, requests: [{ id: 3 }], as_coach: none }), true, 'a request to answer');
   assert.equal(coachTab(true, { role: 'user', as_client: { id: 3, status: 'active' }, as_coach: none }), true);
   assert.equal(clientsTab(true, { role: 'coach', as_client: null, as_coach: none }), true, 'a Coach with no clients yet');
   assert.equal(clientsTab(true, { role: 'admin', as_client: null, as_coach: { pending: 1, active: 0 } }), true);
@@ -57,11 +57,9 @@ test('Goals tabs: Coach for a client, Clients for coaches', () => {
 });
 
 test('the fingerprint has the server\'s shape', () => {
-  assert.equal(signature({ role: 'user', as_client: null, as_coach: none }), 'user;-;0.0');
-  assert.equal(signature({ role: 'coach', as_client: { id: 12, status: 'pending' }, as_coach: { pending: 2, active: 3 } }), 'coach;12.pending;2.3');
-  const server = read('../server/lib/coaching.js');
-  assert.match(server, /return `\$\{s\.role \|\| '-'\};\$\{c\};\$\{s\.as_coach\.pending\}\.\$\{s\.as_coach\.active\}`;/);
-  assert.match(server, /const c = s\.as_client \? `\$\{s\.as_client\.id\}\.\$\{s\.as_client\.status\}` : '-';/);
+  assert.equal(signature({ role: 'user', as_client: null, requests: [], as_coach: none }), 'user;-;-;0.0');
+  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], as_coach: { pending: 2, active: 3 } }), 'coach;12;15,14;2.3');
+  // The real server's header is compared with this in coaching-server.test.js.
 });
 
 function keepList(src, re) {

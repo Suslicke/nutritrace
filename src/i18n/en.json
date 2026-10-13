@@ -2395,7 +2395,8 @@
       "leave_title": "Leave {name}?",
       "leave_message": "{name} will no longer see your diary, targets, weight, foods, meals or recipes.",
       "left": "You left {name}",
-      "none": "You don't have a coach."
+      "none": "You don't have a coach.",
+      "leave_first": "You can have one coach at a time. Leave {coach} before you accept {name}."
     },
     "request": {
       "title": "Add Client",

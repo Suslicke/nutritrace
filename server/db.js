@@ -1195,8 +1195,9 @@ try {
 
 // ── Coaching (1.5) ─────────────────────────────────────────────────────────
 // A coach and a client. The coach asks, the client accepts or declines, and
-// either side (or an admin) can end it. One pending or active row per client,
-// so a client with a coach can't take a second one until they leave the
+// either side (or an admin) can end it. A client can hold several requests
+// (one per coach), so asking never reveals who already has a coach, but only
+// one active coach: a second request can be accepted only after leaving the
 // first. Both people cascade: deleting either account removes the pairing.
 // Only adds: no existing table is rebuilt and no column changed.
 db.exec(`
@@ -1212,10 +1213,15 @@ db.exec(`
     ended_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_clients_open
-    ON coach_clients(client_id) WHERE status IN ('pending', 'active');
   CREATE INDEX IF NOT EXISTS idx_coach_clients_coach ON coach_clients(coach_id, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_clients_one_active
+    ON coach_clients(client_id) WHERE status = 'active';
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_clients_one_request
+    ON coach_clients(coach_id, client_id) WHERE status = 'pending';
 `);
+// Before 1.5 shipped, dev builds allowed one pending or active row per client;
+// several pending requests are allowed now (the two indexes above).
+db.exec(`DROP INDEX IF EXISTS idx_coach_clients_open`);
 // An admin's invite can name a coach: the request is made when the new
 // account is created and waits for the person to answer it.
 if (!columnExists('invite_tokens', 'coach_id')) {
