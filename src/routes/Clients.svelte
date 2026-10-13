@@ -7,7 +7,7 @@
   import { push, replace } from 'svelte-spa-router';
   import { NtApi } from '../lib/api.js';
   import { bannerStyle, dateFormat } from '../stores/settings.js';
-  import { coachingNeedsServer, refreshCoaching, clientsTab, coachingState } from '../stores/coaching.js';
+  import { coachingNeedsServer, refreshCoaching, clientsTab, coachingState, coachingSupported } from '../stores/coaching.js';
   import { confirmDialog } from '../stores/confirmDialog.js';
   import { showSuccess, showError } from '../stores/toast.js';
   import { formatDay, localDay, todayLocal, coachingErrorText } from '../lib/coaching-view.js';
@@ -30,6 +30,8 @@
 
   onMount(async () => {
     if (needsServer) { loaded = true; return; }
+    // A server from before coaching: nothing to show here.
+    if (!$coachingSupported) { replace('/goals'); return; }
     await Promise.all([loadList(), refreshCoaching()]);
     loaded = true;
   });

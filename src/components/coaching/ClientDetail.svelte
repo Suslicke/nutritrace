@@ -117,13 +117,13 @@
                 <span class="cd-day-name">{weekday(d.date)}<span class="cd-day-date">{formatDay(d.date, $dateFormat)}</span></span>
                 {#if d.logged}
                   <span class="cd-day-main">
-                    <span class="cd-day-kcal">{energy(d.totals.calories)}{#if d.targets.calories} <span class="cd-of">/ {energy(d.targets.calories)}</span>{/if}</span>
+                    <span class="cd-day-kcal"><span class="nw">{energy(d.totals.calories)}</span>{#if d.targets.calories}<span class="cd-of nw">{' / '}{energy(d.targets.calories)}</span>{/if}</span>
                     {#if d.targets.calories}
                       <span class="cd-bar" aria-hidden="true"><span style="width:{pct(d.totals.calories, d.targets.calories)}%"></span></span>
                     {/if}
                     <span class="cd-day-macros">
                       {#each MACROS as [k, label]}
-                        <span>{$_(label)} {grams(d.totals[k])}{#if d.targets[k] != null} / {grams(d.targets[k])}{/if}</span>
+                        <span class="nw">{$_(label)} {grams(d.totals[k])}{#if d.targets[k] != null}{' / '}{grams(d.targets[k])}{/if}</span>
                       {/each}
                     </span>
                   </span>
@@ -167,12 +167,12 @@
       <section class="card cd-card cd-totals">
         <div class="cd-total-row">
           <span>{$_('coaching.diary.calories')}</span>
-          <strong>{energy(day.totals.calories)}{#if day.targets.calories} <span class="cd-of">/ {energy(day.targets.calories)}</span>{/if}</strong>
+          <strong>{energy(day.totals.calories)}{#if day.targets.calories}<span class="cd-of">{' / '}{energy(day.targets.calories)}</span>{/if}</strong>
         </div>
         {#each MACROS as [k, label]}
           <div class="cd-total-row">
             <span>{$_(label)}</span>
-            <span>{grams(day.totals[k])}{#if day.targets[k] != null} <span class="cd-of">/ {grams(day.targets[k])}</span>{/if}</span>
+            <span>{grams(day.totals[k])}{#if day.targets[k] != null}<span class="cd-of">{' / '}{grams(day.targets[k])}</span>{/if}</span>
           </div>
         {/each}
         {#if day.water_ml}
@@ -192,7 +192,7 @@
             <ul class="cd-items">
               {#each m.items as it}
                 <li>
-                  <div class="cd-item-name">{it.name}{#if it.brand}<span class="cd-item-brand"> · {it.brand}</span>{/if}</div>
+                  <div class="cd-item-name">{it.name}{#if it.brand}<span class="cd-item-brand">{' · '}{it.brand}</span>{/if}</div>
                   <div class="cd-item-sub">{amount(it)}{amount(it) ? ' · ' : ''}{energy(it.calories)}</div>
                 </li>
               {/each}
@@ -242,6 +242,7 @@
   .cd-day-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .cd-day-kcal { font-size: 14px; font-weight: 600; }
   .cd-of { color: var(--text-3); font-weight: 400; }
+  .nw { white-space: nowrap; }
   .cd-bar { display: block; height: 4px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
   .cd-bar span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
   .cd-day-macros { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--text-3); }
