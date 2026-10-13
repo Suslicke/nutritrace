@@ -116,7 +116,9 @@ const _num = (v, d = null) => (Number.isFinite(Number(v)) && v !== null && v !==
  * on Accept.
  */
 const _LOCAL_IMG = /^\/uploads\/[\w.-]+$/;
-const _SOURCE_ORIGIN_KEY = { cooktrace: 'cooktraceBaseUrl', mealie: 'mealieBaseUrl' };
+const _SOURCE_ORIGIN_KEY = new Map([['cooktrace', 'cooktraceBaseUrl'], ['mealie', 'mealieBaseUrl']]);
+// The app waits 15 s for an answer: the picture gets at most 5 of them.
+const _SEND_IMAGE_TIMEOUT_MS = 5000;
 
 /**
  * The picture a sent meal carries: its own upload, or an image it links to
@@ -129,11 +131,15 @@ async function _sentImage(meal, coachId, { allowPrivate = false } = {}) {
   if (!url) return null;
   if (_LOCAL_IMG.test(url)) return url;
   if (!/^https?:\/\//i.test(url)) return null;
-  const key = _SOURCE_ORIGIN_KEY[meal.source_app];
+  const key = _SOURCE_ORIGIN_KEY.get(meal.source_app);
   const saved = key ? db.prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = ? AND deleted_at IS NULL`).get(coachId, key) : null;
   const origin = (saved?.value || '').replace(/^"|"$/g, '');
-  const local = await localizeImage(url, { trustedOrigins: origin ? [origin] : [], allowPrivate });
-  return typeof local === 'string' && _LOCAL_IMG.test(local) ? local : null;
+  const local = await localizeImage(url, { trustedOrigins: origin ? [origin] : [], allowPrivate, timeoutMs: _SEND_IMAGE_TIMEOUT_MS });
+  if (typeof local !== 'string' || !_LOCAL_IMG.test(local)) return null;
+  // The coach's meal keeps the downloaded picture, as saving it would (so
+  // the next send doesn't download it again).
+  db.prepare(`UPDATE meals SET img_url = ?, updated_at = datetime('now') WHERE id = ? AND img_url = ?`).run(local, meal.id, meal.img_url);
+  return local;
 }
 
 export async function recommendMealItem(pairing, coachId, body, { allowPrivateImages = false } = {}) {
@@ -162,6 +168,8 @@ export async function recommendMealItem(pairing, coachId, body, { allowPrivateIm
   };
   const note = _note(body?.note);
   const id = db.transaction(() => {
+    // Still coaching after the picture's download (the client may have left meanwhile).
+    if (db.prepare(`SELECT status FROM coach_clients WHERE id = ?`).get(pairing.id)?.status !== 'active') throw _bad('Client not found', 404, 'client_not_found');
     const rid = db.prepare(`
       INSERT INTO coach_recommendations (pairing_id, coach_id, client_id, kind, payload, note)
       VALUES (?, ?, ?, ?, ?, ?)

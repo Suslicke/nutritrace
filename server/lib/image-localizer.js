@@ -82,7 +82,8 @@ export async function localizeImage(img_url, opts = {}) {
 
     // Download the image
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    // 15 s unless the caller needs an answer sooner (Send to Client: 5 s).
+    const timer = setTimeout(() => controller.abort(), Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 15000);
     let response, buffer;
     try {
       response = await fetchChecked(img_url, {

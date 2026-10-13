@@ -113,7 +113,9 @@ async function _activeClients({ fresh = false } = {}) {
   return rows;
 }
 async function _client(id) {
-  const c = (await _activeClients()).find(r => r.client.id === Number(id));
+  // A client who accepted moments ago: read the list afresh once.
+  const c = (await _activeClients()).find(r => r.client.id === Number(id))
+    || (await _activeClients({ fresh: true })).find(r => r.client.id === Number(id));
   if (!c) throw new Error('No active client with that id. Use get_coaching_clients.');
   return c;
 }

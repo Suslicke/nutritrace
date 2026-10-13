@@ -64,7 +64,7 @@ test.before(async () => {
   base = `http://127.0.0.1:${port}`;
   proc = spawn(process.execPath, ['index.js'], {
     cwd: fileURLToPath(new URL('../server/', import.meta.url)),
-    env: { ...cleanEnv(), PORT: String(port), DB_PATH: join(dir, 'nt.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test', LOG_LEVEL: 'error', UPDATE_CHECK: 'off', MCP_ENABLED: '1', PUBLIC_API_ENABLED: '1', WEBHOOKS_ENABLED: '1', ALLOW_PRIVATE_WEBHOOK_URLS: '1', ALLOW_PRIVATE_IMAGE_URLS: '1' },
+    env: { ...cleanEnv(), PORT: String(port), DB_PATH: join(dir, 'nt.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test', LOG_LEVEL: 'error', UPDATE_CHECK: 'off', MCP_ENABLED: '1', PUBLIC_API_ENABLED: '1', WEBHOOKS_ENABLED: '1', ALLOW_PRIVATE_WEBHOOK_URLS: '1' },
     stdio: 'ignore',
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(base + '/api/auth/status')).ok) break; } catch { /* not up */ } await sleep(100); }
@@ -147,18 +147,24 @@ test('a coach sends their own recipe or meal, with sharing off; only their own, 
 
 test('a meal\'s picture from elsewhere goes with it, downloaded the safe way: an image, or nothing', { skip: !ready }, async () => {
   const at = `http://127.0.0.1:${sink.address().port}`;
-  const send = async (name, img_url) => {
+  const send = async (name, img_url, source_app = null) => {
     const meal = await ok('coach', 'POST', '/api/meals', { name, is_recipe: true, portion: 200, unit: 'g', nutrition: { calories: 300 }, items: [] });
-    // As a CookTrace import keeps it: a link, not an upload.
-    serverDb().prepare('UPDATE meals SET img_url = ? WHERE id = ?').run(img_url, meal.id);
-    return (await ok('coach', 'POST', recPath(), { kind: 'recipe', meal_id: meal.id })).payload.meal.img_url;
+    // As an import keeps it: a link, not an upload.
+    serverDb().prepare('UPDATE meals SET img_url = ?, source_app = ? WHERE id = ?').run(img_url, source_app, meal.id);
+    return { meal, img: (await ok('coach', 'POST', recPath(), { kind: 'recipe', meal_id: meal.id })).payload.meal.img_url };
   };
-  const pic = await send('Pictured Bowl', `${at}/pic.png`);
-  assert.match(pic, /^\/uploads\/[\w.-]+\.png$/, 'downloaded into this server\'s uploads');
-  assert.deepEqual(readFileSync(join(dir, 'uploads', pic.slice('/uploads/'.length))), PNG);
-  assert.equal(await send('Not a Picture', `${at}/page.png`), null, 'not an image: nothing');
-  assert.equal(await send('Gone Picture', `${at}/gone.png`), null, 'not there: nothing');
-  assert.equal(await send('Odd Link', 'javascript:alert(1)'), null);
+  // A private address, for a coach who isn't an admin, with no opt-in: never fetched.
+  assert.equal((await send('Private Picture', `${at}/pic.png`)).img, null, 'the address checks refuse it');
+  // From the coach's own CookTrace (saved in Settings): their home network is trusted.
+  await ok('coach', 'PUT', '/api/settings', { key: 'cooktraceBaseUrl', value: at });
+  const sent = await send('Pictured Bowl', `${at}/pic.png`, 'cooktrace');
+  assert.match(sent.img, /^\/uploads\/[\w.-]+\.png$/, 'downloaded into this server\'s uploads');
+  assert.deepEqual(readFileSync(join(dir, 'uploads', sent.img.slice('/uploads/'.length))), PNG);
+  assert.equal(serverDb().prepare('SELECT img_url FROM meals WHERE id = ?').get(sent.meal.id).img_url, sent.img, 'the coach\'s meal keeps it, as a save would');
+  assert.equal((await send('Not a Picture', `${at}/page.png`, 'cooktrace')).img, null, 'not an image: nothing');
+  assert.equal((await send('Gone Picture', `${at}/gone.png`, 'cooktrace')).img, null, 'not there: nothing');
+  assert.equal((await send('Odd Source', `${at}/pic.png`, 'constructor')).img, null, 'an odd source name is just no trusted origin');
+  assert.equal((await send('Odd Link', 'javascript:alert(1)')).img, null);
 });
 
 test('Accept: the client\'s own copy, with its source and its ingredients\' foods, once; Decline makes nothing', { skip: !ready }, async () => {

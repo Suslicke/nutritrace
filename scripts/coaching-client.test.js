@@ -220,7 +220,7 @@ test('coaching errors are said from en.json: every code the server and the share
     for (const line of read(f).split('\n').filter(l => /json\(\{ error/.test(l))) assert.match(line, /code/, line.trim());
   }
   const { coachingErrorText } = await import('../src/lib/coaching-view.js');
-  const t = (k, o) => { const v = k.split('.').reduce((x, p) => x?.[p], en); return typeof v === 'string' ? v.replace(/\{(\w+)\}/g, (_, n) => o?.values?.[n] ?? '') : k; };
+  const t = (k, o) => { const v = k.split('.').reduce((x, p) => x?.[p], en); return typeof v === 'string' ? v.replace(/\{(\w+)(?:, number)?\}/g, (_, n) => o?.values?.[n] ?? '') : k; };
   assert.equal(coachingErrorText({ code: 'already_asked', params: { name: 'Jo' }, message: 'You already asked Jo.' }, t), 'You already asked Jo.');
   assert.equal(coachingErrorText({ code: 'plan_meal_too_many', params: { max: 30 } }, t), 'A meal can hold up to 30 items.');
   assert.equal(coachingErrorText({ code: 'something_new', message: 'Raw English' }, t), en.coaching.something_failed, 'an unknown code: the general words, never raw text');
