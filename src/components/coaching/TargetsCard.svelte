@@ -108,8 +108,9 @@
     {#if rows.some(r => r.byWeekday)}
       <button class="tc-days-toggle" on:click={() => showDays = !showDays} aria-expanded={showDays}>
         <span class="material-symbols-rounded" aria-hidden="true">{showDays ? 'expand_less' : 'expand_more'}</span>
-        {$_('coaching.targets.by_weekday')} <span class="tc-sub-inline">{$_('coaching.targets.varies')}</span>
+        {$_('coaching.targets.by_weekday')}
       </button>
+      <span class="tc-sub">{$_('coaching.targets.varies')}</span>
       {#if showDays}
         <div class="tc-days" transition:slide={{ duration: 150 }}>
           <table class="tc-table tc-week">
@@ -187,8 +188,7 @@
   .tc-new { font-weight: 700; }
   .tc-diff { color: var(--text-2); white-space: nowrap; }
   .tc-sub { display: block; font-size: 11px; color: var(--text-3); font-weight: 400; }
-  .tc-days-toggle { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; padding: 8px 0 0; cursor: pointer; }
-  .tc-sub-inline { color: var(--text-3); font-weight: 400; }
+  .tc-days-toggle { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; padding: 8px 0 0; cursor: pointer; white-space: nowrap; }
   .tc-days { overflow-x: auto; }
   .tc-week th, .tc-week td { text-align: center; padding: 4px; }
   .tc-week tbody th { text-align: left; white-space: nowrap; }
