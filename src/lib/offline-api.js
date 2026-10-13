@@ -64,7 +64,9 @@ function _dbName() {
   } catch { /* private mode */ }
   return `nutritrace-offline-${user || 'single'}`;
 }
-const _STORES = ['diary', 'foods', 'meals', 'recipes', 'activity', 'activity_sums', 'fasts', 'reads', 'outbox', 'meta'];
+const _STORES = ['diary', 'foods', 'meals', 'recipes', 'activity', 'activity_sums', 'fasts', 'reads', 'outbox', 'meta',
+  // Coaching (1.5): conversations kept for a dead zone, and recommendations.
+  'coach_messages', 'coach_recommendations'];
 
 function _db() {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -75,7 +77,7 @@ function _db() {
   // what was kept with it rather than leaving it in a database nothing reads.
   const leaving = _dbPromise?.name && _dbPromise.name !== name ? _dbPromise.name : null;
   const p = new Promise((resolve) => {
-    const req = indexedDB.open(name, 4);
+    const req = indexedDB.open(name, 5);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('diary')) db.createObjectStore('diary', { keyPath: 'date' });
@@ -88,6 +90,10 @@ function _db() {
       if (!db.objectStoreNames.contains('reads')) db.createObjectStore('reads', { keyPath: 'key' });
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
       if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'seq', autoIncrement: true });
+      // Version 5: coaching. Added, never rebuilt, so a 1.4 database keeps
+      // everything it had (and its queue) through the upgrade.
+      if (!db.objectStoreNames.contains('coach_messages')) db.createObjectStore('coach_messages', { keyPath: 'uuid' });
+      if (!db.objectStoreNames.contains('coach_recommendations')) db.createObjectStore('coach_recommendations', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => resolve(null);
@@ -556,12 +562,24 @@ export async function clearOffline() {
   await _tx('reads', 'readwrite', s => s.clear());
   await _tx('activity_sums', 'readwrite', s => s.clear());
   await _tx('outbox', 'readwrite', s => s.clear());
+  await _tx('coach_messages', 'readwrite', s => s.clear());
+  await _tx('coach_recommendations', 'readwrite', s => s.clear());
   _ops = [];
   _swapped = {};
   _dbPromise = null;
   try { localStorage.removeItem(_USER_KEY); } catch { /* private mode */ }
   _publish({ syncing: false, error: null });
 }
+
+/**
+ * The coaching stores, for lib/coach-messages.js: kept in this account's
+ * database so they share its sign-out and account rules.
+ */
+export const coachStore = {
+  all: (store) => _all(store),
+  put: (store, rows) => _tx(store, 'readwrite', s => { for (const r of rows) s.put(r); }),
+  del: (store, keys) => _tx(store, 'readwrite', s => { for (const k of keys) s.delete(k); }),
+};
 
 // ── The wrapper ──────────────────────────────────────────────────────
 /**

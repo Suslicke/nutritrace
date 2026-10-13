@@ -78,6 +78,8 @@ export const USER_PREFS = new Set([
   'notifBedtime','notifBedtimeTime','notifBedtimeWindDown','notifBedtimeWindDownMin','notifBedtimeSmart',
   'notifWeeklySummary','weeklySummaryDay','weeklySummaryTime',
   'notifWellnessAlerts','notifWorkoutSummary','notifSyncFailures',
+  // Coaching (on unless turned off; the server sends these)
+  'notifCoachMessage','notifCoachMessageEmail','notifCoachRecommendation','notifClientAnswer',
   'appriseUrl','appriseTag','gotifyUrl','gotifyToken','ntfyUrl','ntfyTopic','ntfyToken',
   // UI behavior prefs that should match across devices
   'accentColor','startPage','goalCelebrations','pageBanners','bannerStyle','bannerAnimation','language',

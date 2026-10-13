@@ -13,6 +13,7 @@
   import { formatDay, localDay, coachingErrorText } from '../lib/coaching-view.js';
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
   import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
+  import Conversation from '../components/coaching/Conversation.svelte';
 
   const needsServer = coachingNeedsServer();
   let loaded = false;
@@ -22,6 +23,11 @@
   $: pairing = $coachingState?.as_client || null;
   $: coachName = pairing?.coach?.name || '';
   $: requests = $coachingState?.requests || [];
+  // Coaching that ended: its conversation stays readable here.
+  $: past = $coachingState?.past || [];
+  let pastId = null;
+  $: if (!past.some(p => p.id === pastId)) pastId = past[0]?.id ?? null;
+  $: shownPast = past.find(p => p.id === pastId) || null;
 
   onMount(async () => {
     if (!needsServer) await refreshCoaching();
@@ -130,6 +136,22 @@
 
       {#if pairing}
         <p class="coach-sees">{$_('coaching.client.coach_sees', { values: { name: coachName } })}</p>
+        <Conversation conv={{ pairingId: pairing.id, side: 'client' }} otherName={coachName} />
+      {:else if shownPast}
+        <section class="past">
+          <h2 class="past-title">{$_('coaching.client.past_title')}</h2>
+          {#if past.length > 1}
+            <div class="past-pick" role="tablist">
+              {#each past as p (p.id)}
+                <button class="past-chip" class:active={p.id === pastId} role="tab" aria-selected={p.id === pastId} on:click={() => pastId = p.id}>
+                  {p.coach.name}{#if p.unread} <span class="unread-pill">{p.unread}</span>{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <p class="coach-sees">{$_('coaching.client.past_body', { values: { name: shownPast.coach.name, date: formatDay(localDay(shownPast.ended_at), $dateFormat) } })}</p>
+          <Conversation conv={{ pairingId: shownPast.id, side: 'client' }} otherName={shownPast.coach.name} readOnly />
+        </section>
       {:else if loaded && !requests.length}
         <p class="coach-empty">{$_('coaching.client.none')}</p>
       {/if}
@@ -138,7 +160,7 @@
 </div>
 
 <style>
-  .coach-page { max-width: 640px; }
+  .coach-page { max-width: 720px; }
   .card { border-left: 3px solid var(--accent); padding: 16px; margin-top: 12px; }
   .consent-head { display: flex; align-items: center; gap: 12px; }
   .consent-icon { font-size: 28px; color: var(--accent); flex-shrink: 0; }
@@ -166,4 +188,10 @@
   .consent-blocked .material-symbols-rounded { font-size: 18px; color: var(--info, var(--accent)); flex-shrink: 0; }
   .leave-btn .material-symbols-rounded { font-size: 18px; }
   .coach-empty { color: var(--text-3); margin-top: 24px; text-align: center; }
+  .past { margin-top: 16px; }
+  .past-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); margin: 0 0 8px; font-weight: 700; }
+  .past-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .past-chip { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-2); border-radius: var(--radius-full); padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .past-chip.active { border-color: var(--accent); color: var(--accent); }
+  .unread-pill { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-text, #fff); font-size: 11px; font-weight: 700; text-align: center; }
 </style>

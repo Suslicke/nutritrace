@@ -237,6 +237,49 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_fasts_sync       ON fasts(sync_status);
   CREATE INDEX IF NOT EXISTS idx_fasts_server     ON fasts(server_id);
 
+  -- Coaching (server mode): the conversations this account can read, kept
+  -- for a dead zone. A message written here waits with sync_status
+  -- 'pending' and its own uuid (the server stores a uuid once); a delete
+  -- waits as 'pending_delete'. image_local holds a photo not sent yet.
+  CREATE TABLE IF NOT EXISTS coach_messages (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id         INTEGER,
+    uuid              TEXT NOT NULL UNIQUE,
+    pairing_id        INTEGER NOT NULL,
+    sender_id         INTEGER,
+    body              TEXT,
+    image             TEXT,
+    image_local       TEXT,
+    post_path         TEXT,
+    recommendation_id INTEGER,
+    read_at           TEXT,
+    created_at        TEXT,
+    updated_at        TEXT,
+    deleted_at        TEXT,
+    error             TEXT,
+    sync_status       TEXT DEFAULT 'synced'
+  );
+  CREATE INDEX IF NOT EXISTS idx_coach_messages_pairing ON coach_messages(pairing_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_coach_messages_sync    ON coach_messages(sync_status);
+
+  -- Coach recommendations (from 1.5's targets and day plans), same shape.
+  CREATE TABLE IF NOT EXISTS coach_recommendations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id     INTEGER,
+    pairing_id    INTEGER,
+    kind          TEXT,
+    date          TEXT,
+    payload       TEXT,
+    note          TEXT,
+    status        TEXT,
+    response_note TEXT,
+    created_at    TEXT,
+    responded_at  TEXT,
+    updated_at    TEXT,
+    deleted_at    TEXT,
+    sync_status   TEXT DEFAULT 'synced'
+  );
+
   CREATE INDEX IF NOT EXISTS idx_foods_user ON foods(user_id);
   CREATE INDEX IF NOT EXISTS idx_foods_server ON foods(server_id);
   CREATE INDEX IF NOT EXISTS idx_meals_user ON meals(user_id);
@@ -1761,6 +1804,7 @@ export async function dbCountUnsynced() {
     + (await n(`SELECT COUNT(*) AS n FROM fasts WHERE sync_status = 'pending'`))
     + (await n(`SELECT COUNT(*) AS n FROM diary_tombstones WHERE sync_status = 'pending'`))
     + (await n(`SELECT COUNT(*) AS n FROM diary_completion_ops`))
+    + (await n(`SELECT COUNT(*) AS n FROM coach_messages WHERE sync_status IN ('pending', 'pending_delete')`))
     + (await n(`SELECT COUNT(*) AS n FROM user_settings WHERE sync_status = 'pending' AND user_id = ${LOCAL_USER_ID}`));
 }
 
@@ -1771,7 +1815,8 @@ export async function dbCountUnsynced() {
 // only, and Android runs just the first statement of each piece, so
 // several statements on one line silently did one (_runEach).
 const _CLEAR_TABLES = ['foods', 'meals', 'diary', 'diary_tombstones', 'diary_completion_ops',
-  'wellness_data', 'workouts', 'user_settings', 'activity_log', 'fasts', 'sync_log'];
+  'wellness_data', 'workouts', 'user_settings', 'activity_log', 'fasts', 'sync_log',
+  'coach_messages', 'coach_recommendations'];
 async function _runEach(db, statements) {
   for (const sql of statements) await db.run(sql, []);
 }
@@ -2485,3 +2530,77 @@ function _parseJson(val, fallback) {
 }
 
 export { LOCAL_USER_ID };
+
+// ── Coaching messages (server mode) ───────────────────────────────────────
+// The phone's copy of the conversations this account can read. Rows from
+// the server are keyed by uuid, the same id a message written here went up
+// with, so a message sent from here and pulled back is one row.
+
+const _MSG_COLS = ['server_id', 'uuid', 'pairing_id', 'sender_id', 'body', 'image', 'image_local', 'post_path',
+  'recommendation_id', 'read_at', 'created_at', 'updated_at', 'deleted_at', 'error', 'sync_status'];
+
+/** One conversation, oldest first. */
+export async function dbCoachMessages(pairingId) {
+  const db = await getDb();
+  return _rows(await db.query(`SELECT * FROM coach_messages WHERE pairing_id = ? ORDER BY created_at, id`, [Number(pairingId)]));
+}
+
+/** Messages from the server: the server's copy wins, unless this phone has a
+ *  delete of its own still waiting. */
+export async function dbUpsertCoachMessages(rows = []) {
+  const db = await getDb();
+  for (const m of rows) {
+    if (!m?.uuid) continue;
+    const local = _row(await db.query(`SELECT sync_status FROM coach_messages WHERE uuid = ?`, [m.uuid]));
+    if (local?.sync_status === 'pending_delete' && !m.deleted_at) continue;
+    await db.run(`DELETE FROM coach_messages WHERE uuid = ?`, [m.uuid]);
+    await db.run(
+      `INSERT INTO coach_messages (server_id, uuid, pairing_id, sender_id, body, image, recommendation_id, read_at, created_at, updated_at, deleted_at, sync_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+      [m.id ?? null, m.uuid, m.pairing_id, m.sender_id ?? null, m.body ?? null, m.image ?? null, m.recommendation_id ?? null,
+        m.read_at ?? null, m.created_at ?? null, m.updated_at ?? null, m.deleted_at ?? null]
+    );
+  }
+}
+
+/** A message written here: waits as 'pending' until it reaches the server. */
+export async function dbQueueCoachMessage(row) {
+  const db = await getDb();
+  const cols = _MSG_COLS.filter(c => row[c] !== undefined);
+  await db.run(`INSERT OR REPLACE INTO coach_messages (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map(c => row[c]));
+}
+
+export async function dbPendingCoachMessages() {
+  const db = await getDb();
+  return _rows(await db.query(`SELECT * FROM coach_messages WHERE sync_status IN ('pending', 'pending_delete') ORDER BY created_at, id`, []));
+}
+
+/** A message that could not go (the conversation closed): kept, marked. */
+export async function dbFailCoachMessage(uuid, error) {
+  const db = await getDb();
+  await db.run(`UPDATE coach_messages SET sync_status = 'failed', error = ? WHERE uuid = ?`, [String(error || ''), uuid]);
+}
+
+/** Your own message deleted here: gone at once if it never went up, else
+ *  shown as deleted and the delete waits for the server. */
+export async function dbDeleteCoachMessage(uuid) {
+  const db = await getDb();
+  const r = _row(await db.query(`SELECT sync_status FROM coach_messages WHERE uuid = ?`, [uuid]));
+  if (!r) return;
+  if (r.sync_status === 'pending' || r.sync_status === 'failed') {
+    await db.run(`DELETE FROM coach_messages WHERE uuid = ?`, [uuid]);
+    return;
+  }
+  await db.run(`UPDATE coach_messages SET body = NULL, image = NULL, image_local = NULL, deleted_at = ?, sync_status = 'pending_delete' WHERE uuid = ?`, [_now(), uuid]);
+}
+
+/** Conversations this account may no longer read (a coach whose client left)
+ *  are dropped. Returns the photos they held, so their copies go too. */
+export async function dbKeepCoachConversations(pairingIds = []) {
+  const db = await getDb();
+  const keep = (pairingIds || []).map(Number).filter(Number.isFinite);
+  const where = keep.length ? `pairing_id NOT IN (${keep.map(() => '?').join(',')})` : '1 = 1';
+  const photos = _rows(await db.query(`SELECT image FROM coach_messages WHERE ${where} AND image IS NOT NULL`, keep)).map(r => r.image);
+  await db.run(`DELETE FROM coach_messages WHERE ${where}`, keep);
+  return photos;
+}

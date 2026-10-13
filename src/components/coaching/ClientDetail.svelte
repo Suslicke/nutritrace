@@ -9,6 +9,7 @@
   import { energyUnit, weightUnit, dateFormat } from '../../stores/settings.js';
   import { formatDay, localDay, shiftDay, todayLocal, weekday, weightIn, coachingErrorText } from '../../lib/coaching-view.js';
   import WeightTrend from './WeightTrend.svelte';
+  import Conversation from './Conversation.svelte';
 
   export let row;            // the list row: { id, status, client: { id, name }, ... }
   export let showBack = true;
@@ -93,9 +94,14 @@
   <div class="cd-tabs" role="tablist">
     <button class="cd-tab" class:active={tab === 'overview'} role="tab" aria-selected={tab === 'overview'} on:click={() => tab = 'overview'}>{$_('coaching.clients.tab_overview')}</button>
     <button class="cd-tab" class:active={tab === 'diary'} role="tab" aria-selected={tab === 'diary'} on:click={() => tab = 'diary'}>{$_('coaching.clients.tab_diary')}</button>
+    <button class="cd-tab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} on:click={() => tab = 'chat'}>
+      {$_('coaching.clients.tab_conversation')}{#if row.unread && tab !== 'chat'} <span class="cd-unread" aria-label={$_('coaching.unread', { values: { n: row.unread } })}>{row.unread}</span>{/if}
+    </button>
   </div>
 
-  {#if tab === 'overview'}
+  {#if tab === 'chat'}
+    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} />
+  {:else if tab === 'overview'}
     {#if overviewErr}
       <p class="cd-msg">{overviewErr}</p>
     {:else if !overview}
@@ -229,6 +235,7 @@
     border-bottom: 2px solid transparent;
   }
   .cd-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .cd-unread { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-text, #fff); font-size: 11px; font-weight: 700; }
   .cd-msg { color: var(--text-3); text-align: center; margin: 24px 0; }
   .card.cd-card { padding: 14px 16px; margin-top: 12px; }
   .cd-card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); margin: 0 0 8px; font-weight: 700; }

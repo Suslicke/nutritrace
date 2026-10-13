@@ -24,9 +24,15 @@ export const coachingState = writable(null);
 /** Android with no server: coaching has nowhere to happen. */
 export const coachingNeedsServer = () => isNative && !getServerUrl();
 
-/** Coach tab: someone with a coach or a request waiting for their answer. */
+/** Coach tab: someone with a coach, a request waiting for their answer, or
+ *  a past coach's conversation (it stays readable for the client). */
 export function showsCoachTab(supported, s) {
-  return !!(supported && (s?.as_client || s?.requests?.length));
+  return !!(supported && (s?.as_client || s?.requests?.length || s?.past?.length));
+}
+
+/** The dot on Goals: unread messages, or something waiting for an answer. */
+export function showsBadge(supported, s) {
+  return !!(supported && s && ((Number(s.unread) || 0) > 0 || (Number(s.awaiting) || 0) > 0));
 }
 /** Clients tab: the Coach role, or an admin who coaches (or asked) someone. */
 export function showsClientsTab(supported, s) {
@@ -41,6 +47,10 @@ export function showsClientsTab(supported, s) {
 export const coachTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsCoachTab($ok, $s));
 export const clientsTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsClientsTab($ok, $s));
 export const inCoaching = derived([coachTab, clientsTab], ([$a, $b]) => $a || $b);
+export const coachingBadge = derived([coachingSupported, coachingState], ([$ok, $s]) => showsBadge($ok, $s));
+/** Unread on the Coach tab (as a client) and the Clients tab (as a coach). */
+export const coachUnread = derived(coachingState, ($s) => (Number($s?.as_client?.unread) || 0) + ($s?.past || []).reduce((n, p) => n + (Number(p.unread) || 0), 0));
+export const clientsUnread = derived(coachingState, ($s) => Number($s?.as_coach?.unread) || 0);
 
 /** The same fingerprint the server sends, from a state the app holds. */
 export function coachingSignature(s) {
@@ -78,6 +88,10 @@ export function setCoachingFromServer({ supported, state, userId }) {
   if (state !== undefined) coachingState.set(state || null);
   _save(userId);
   if (state !== undefined) _forgetFormerClients(before, state || null);
+  // Someone in coaching opening the app: anything written offline goes now.
+  if (state && (showsCoachTab(true, state) || showsClientsTab(true, state))) {
+    import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
+  }
 }
 
 /** The state this account last saved on this device (survives a reload). */
@@ -91,6 +105,7 @@ function _lastSaved(userId) {
 export function clearCoaching() {
   coachingSupported.set(false);
   coachingState.set(null);
+  import('../lib/coach-photos.js').then(m => m.clearCoachPhotos()).catch(() => {});
   try {
     localStorage.removeItem(KEY);
     // The Android app's copies of a coach's views (lib/api-cached.js).
@@ -146,4 +161,12 @@ if (isNative) {
     const uid = localStorage.getItem('wl:userId');
     if (uid && getServerUrl()) loadCachedCoaching(uid);
   } catch { /* private mode */ }
+}
+
+// Messages written in the browser with no connection go when it comes back,
+// or when the app is opened again. Only waiting messages make a request.
+if (typeof window !== 'undefined' && !isNative) {
+  const flush = () => import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
+  window.addEventListener('online', flush);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); });
 }

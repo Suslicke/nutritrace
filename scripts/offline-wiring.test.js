@@ -134,8 +134,12 @@ test('a row created offline is changed by its real id after the queue goes up', 
 
 test('new mirror stores reach testers who already have the database', () => {
   // Bumped whenever a store is added, or onupgradeneeded never runs for them.
-  assert.match(offline, /indexedDB\.open\(name, 4\)/);
+  assert.match(offline, /indexedDB\.open\(name, 5\)/);
   assert.match(offline, /objectStoreNames\.contains\('fasts'\)/);
+  // Version 5: coaching's two stores, added (a 1.4 database keeps its queue).
+  assert.match(offline, /if \(!db\.objectStoreNames\.contains\('coach_messages'\)\) db\.createObjectStore\('coach_messages', \{ keyPath: 'uuid' \}\);/);
+  assert.match(offline, /if \(!db\.objectStoreNames\.contains\('coach_recommendations'\)\) db\.createObjectStore\('coach_recommendations', \{ keyPath: 'id' \}\);/);
+  assert.match(offline, /_tx\('coach_messages', 'readwrite', s => s\.clear\(\)\)/);
   assert.match(offline, /objectStoreNames\.contains\('reads'\)/);
   assert.match(offline, /objectStoreNames\.contains\('meta'\)/);
   // and sign-out clears it with the rest

@@ -25,6 +25,7 @@ import {
   dbGetPendingDiaryTombstones, dbMarkTombstonesSynced, dbApplyServerTombstones,
   dbLinkDiaryItems, dbApplyServerDeletions, dbGetCompletionOps, dbDeleteCompletionOp,
   dbApplyServerWinner, dbSetClockOffset, dbInstallId, createKeyOf,
+  dbPendingCoachMessages, dbUpsertCoachMessages, dbFailCoachMessage,
 } from './db-native.js';
 import { localDataIsThisAccount, serverKeepsNotes, accountGeneration } from './local-account.js';
 import { get, writable } from 'svelte/store';
@@ -309,7 +310,10 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
   // ExerciseSession) that don't have a server_id yet. The rule is
   // `server_id IS NULL` — see dbGetPendingWorkouts. #91.
   const workouts = await dbGetPendingWorkouts();
-  const hasPending = pending.foods.length || pending.meals.length || pending.diary.length || activity.length || fasts.length || wellness.length || workouts.length || pendingSettings.length;
+  // Coaching messages written here (and deletes of your own), each with the
+  // uuid it was made with: the server stores one uuid once.
+  const coachMsgs = await dbPendingCoachMessages().catch(() => []);
+  const hasPending = pending.foods.length || pending.meals.length || pending.diary.length || activity.length || fasts.length || wellness.length || workouts.length || pendingSettings.length || coachMsgs.length;
   // Option C: pending per-uuid deletions must ride along with the diary
   // rows in the same push so the server's merge treats them as explicit
   // tombstones. Load once, index by date, consume below.
@@ -490,6 +494,11 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
   // This phone's clock right now: the server sets it against its own, so
   // a phone running slow or fast doesn't lose (or win) edits on time.
   payload.client_now = new Date().toISOString();
+  if (coachMsgs.length) {
+    payload.coach_messages = coachMsgs.map(m => (m.sync_status === 'pending_delete'
+      ? { uuid: m.uuid, deleted_at: m.deleted_at || new Date().toISOString() }
+      : { uuid: m.uuid, pairing_id: m.pairing_id, body: m.body, image: m.image_local || undefined }));
+  }
   if (!live()) return false;
   const sentAt = Date.now();
   const res = await fetch(apiUrl('/api/sync/push'), {
@@ -612,6 +621,21 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
     }
   }
 
+  // Coaching messages: the server's copy of each (sent, or already there).
+  // One it refused (the conversation closed) stays here, marked; an older
+  // server (no coach_messages in its answer) leaves them waiting.
+  if (Array.isArray(result.coach_messages) && live()) {
+    const n = { dbUpsertCoachMessages, dbFailCoachMessage };
+    for (const r of result.coach_messages) {
+      try {
+        const mine = coachMsgs.find(m => m.uuid === r.uuid);
+        if (r.row) await n.dbUpsertCoachMessages([r.row]);
+        else if (r.status === 404 && mine?.sync_status === 'pending_delete') await n.dbUpsertCoachMessages([{ ...mine, deleted_at: new Date().toISOString() }]);
+        else if (r.status && r.status < 500) await n.dbFailCoachMessage(r.uuid, r.error);
+      } catch (e) { console.warn('[sync] coaching message result:', e?.message || e); }
+    }
+  }
+
   _dlog('[sync] push complete');
   return true;
 }
@@ -657,7 +681,8 @@ async function pullChanges({ signal = null, gen = accountGeneration() } = {}) {
   // large library over slow network still fits comfortably; anything
   // beyond 30s is a wedged connection, not a legitimate transfer.
   const sentAt = Date.now();
-  const res = await fetch(apiUrl(`/api/sync/pull?since=${encodeURIComponent(lastSync)}`), {
+  // coaching=1: conversations come too (servers before 1.5 ignore it).
+  const res = await fetch(apiUrl(`/api/sync/pull?since=${encodeURIComponent(lastSync)}&coaching=1`), {
     headers: _headers(token),
     signal: _deadline(signal),
   });
@@ -785,6 +810,22 @@ async function pullChanges({ signal = null, gen = accountGeneration() } = {}) {
   }
 
   // Chat history — pull only, notify the AI Assistant component via event
+  // Coaching conversations: kept on the phone; one this account may no
+  // longer read (a coach whose client left) goes, with its photo copies.
+  let coachChanged = 0;
+  if (Array.isArray(data.coach_messages) && live()) {
+    try {
+      const cm = await import('./coach-messages.js');
+      await cm.storeSyncedMessages(data.coach_messages);
+      if (Array.isArray(data.coaching?.pairings)) await cm.keepConversations(data.coaching.pairings);
+      coachChanged = data.coach_messages.length;
+      if (coachChanged && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('nt:coach-messages'));
+        import('../stores/coaching.js').then(c => c.refreshCoaching()).catch(() => {});
+      }
+    } catch (e) { _pullErr('coach_messages', {}, e); }
+  }
+
   const newChat = data.chat_history || [];
   if (newChat.length && typeof window !== 'undefined' && live()) {
     window.dispatchEvent(new CustomEvent('nt:chat-updated', { detail: { messages: newChat } }));
@@ -798,7 +839,7 @@ async function pullChanges({ signal = null, gen = accountGeneration() } = {}) {
 
   const totalChanges = (data.foods?.length || 0) + (data.meals?.length || 0) + (data.diary?.length || 0) + (data.activity?.length || 0) + (data.wellness?.length || 0) + pulledSettings.length + (data.workouts?.length || 0) + newChat.length
     // Rows that only went away count too: a page still showing them reloads.
-    + (data.fasts?.length || 0) + (data.diary_tombstones?.length || 0)
+    + (data.fasts?.length || 0) + (data.diary_tombstones?.length || 0) + coachChanged
     + Object.values(data.deletions || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0);
   _dlog(`[sync] pull complete: ${data.foods?.length || 0} foods, ${data.meals?.length || 0} meals, ${data.diary?.length || 0} diary, ${data.activity?.length || 0} activity, ${data.wellness?.length || 0} wellness, ${pulledSettings.length} settings, ${data.workouts?.length || 0} workouts, ${newChat.length} chat`);
   return totalChanges > 0;

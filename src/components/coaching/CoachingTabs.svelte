@@ -3,7 +3,7 @@
   // nothing here, so Goals looks exactly as it did.
   import { _ } from 'svelte-i18n';
   import { location, push } from 'svelte-spa-router';
-  import { coachTab, clientsTab, inCoaching } from '../../stores/coaching.js';
+  import { coachTab, clientsTab, inCoaching, coachUnread, clientsUnread } from '../../stores/coaching.js';
 
   // Shown on the Coach and Clients pages even while the state is still
   // loading, so arriving there by link never strands anyone.
@@ -12,9 +12,9 @@
   $: current = $location.startsWith('/goals/clients') ? 'clients'
     : $location.startsWith('/goals/coach') ? 'coach' : 'goals';
   $: tabs = [
-    { key: 'goals', path: '/goals', icon: 'flag', label: $_('coaching.tabs.goals') },
-    ...($coachTab || (force && current === 'coach') ? [{ key: 'coach', path: '/goals/coach', icon: 'sports', label: $_('coaching.tabs.coach') }] : []),
-    ...($clientsTab || (force && current === 'clients') ? [{ key: 'clients', path: '/goals/clients', icon: 'groups', label: $_('coaching.tabs.clients') }] : []),
+    { key: 'goals', path: '/goals', icon: 'flag', label: $_('coaching.tabs.goals'), unread: 0 },
+    ...($coachTab || (force && current === 'coach') ? [{ key: 'coach', path: '/goals/coach', icon: 'sports', label: $_('coaching.tabs.coach'), unread: $coachUnread }] : []),
+    ...($clientsTab || (force && current === 'clients') ? [{ key: 'clients', path: '/goals/clients', icon: 'groups', label: $_('coaching.tabs.clients'), unread: $clientsUnread }] : []),
   ];
 </script>
 
@@ -26,6 +26,7 @@
         on:click={() => { if (current !== t.key) push(t.path); }}>
         <span class="material-symbols-rounded" aria-hidden="true">{t.icon}</span>
         <span>{t.label}</span>
+        {#if t.unread}<span class="tab-unread" aria-label={$_('coaching.unread', { values: { n: t.unread } })}>{t.unread}</span>{/if}
       </button>
     {/each}
   </div>
@@ -63,6 +64,7 @@
     transition: background var(--dur-fast), color var(--dur-fast);
   }
   .coaching-tab .material-symbols-rounded { font-size: 18px; flex-shrink: 0; }
+  .tab-unread { min-width: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-text, #fff); font-size: 11px; font-weight: 700; line-height: 18px; }
   .coaching-tab:hover:not(.active) { color: var(--text-1); }
   .coaching-tab.active {
     background: var(--surface-1);

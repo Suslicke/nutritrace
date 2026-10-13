@@ -2174,6 +2174,18 @@
     }
   },
   "settings_notifications": {
+    "coaching": {
+      "heading": "Coaching",
+      "sub": "Sent through your push service below.",
+      "message": "New Message",
+      "message_desc": "When your coach or a client sends you a message.",
+      "email": "Email Me Too",
+      "email_desc": "At most one email per conversation every 30 minutes, saying who wrote. Needs an email on your account and email set up on the server.",
+      "recommendation": "New Recommendation",
+      "recommendation_desc": "When your coach recommends targets or a day plan.",
+      "answer": "Client's Answer",
+      "answer_desc": "When someone accepts or declines your request, or leaves."
+    },
     "toast": {
       "test_sent": "Test sent, check your device",
       "test_failed": "Test failed: {error}"
@@ -2368,6 +2380,32 @@
     "loading": "Loading…",
     "needs_connection": "This needs a connection. Try again once you're back online.",
     "something_failed": "That didn't work. Try again.",
+    "unread": "{n} unread",
+    "badge": "Coaching needs your attention",
+    "chat": {
+      "aria": "Conversation with {name}",
+      "empty": "No messages yet. Say hello to {name}.",
+      "empty_closed": "No messages.",
+      "closed": "This coaching has ended. The conversation can be read but not added to.",
+      "placeholder": "Message {name}",
+      "send": "Send",
+      "add_photo": "Add Photo",
+      "remove_photo": "Remove Photo",
+      "photo": "Photo",
+      "photo_offline": "Shown when you're back online",
+      "photo_unreadable": "That photo couldn't be read.",
+      "too_long": "A message can be up to {max} characters.",
+      "count": "{n} of {max}",
+      "sending": "Sending",
+      "waiting": "Waiting for a connection",
+      "not_sent": "Not sent",
+      "read": "Read",
+      "deleted": "Message deleted",
+      "delete": "Delete Message",
+      "delete_title": "Delete This Message?",
+      "delete_message": "{name} will see \"Message deleted\" in its place.",
+      "offline": "You're offline. Messages you write now are sent when you're back online."
+    },
     "tabs": {
       "aria": "Goals and Coaching",
       "goals": "Goals",
@@ -2396,7 +2434,9 @@
       "leave_message": "{name} will no longer see your diary, targets, weight, foods, meals or recipes.",
       "left": "You left {name}",
       "none": "You don't have a coach.",
-      "leave_first": "You can have one coach at a time. Leave {coach} before you accept {name}."
+      "leave_first": "You can have one coach at a time. Leave {coach} before you accept {name}.",
+      "past_title": "Past Coaching",
+      "past_body": "Your coaching with {name} ended on {date}. The conversation stays here for you."
     },
     "request": {
       "title": "Add Client",
@@ -2432,7 +2472,8 @@
       "ended": "Coaching for {name} ended",
       "coaching_since": "Coaching since {date}",
       "tab_overview": "Overview",
-      "tab_diary": "Diary"
+      "tab_diary": "Diary",
+      "tab_conversation": "Conversation"
     },
     "macro": {
       "protein": "Protein",

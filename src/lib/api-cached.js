@@ -409,6 +409,7 @@ export const NtApiCached = {
   // don't ship a stray JSON-stringified number as the request body, and put
   // the 30s timeout in its actual position.
   async del(path) {
+    if (_COACHING.test(path)) return _coachingFetch('DELETE', path);
     if (path.startsWith('/api/fasts')) return _fastsCachedDelete(path);
     return _serverFetch('DELETE', path, null, 30000);
   },

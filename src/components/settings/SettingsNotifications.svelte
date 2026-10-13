@@ -7,6 +7,7 @@
   import { showSuccess, showError } from '../../stores/toast.js';
   import { DB } from '../../lib/db.js';
   import { scheduleSave } from '../../stores/settings.js';
+  import { coachingSupported, coachingState, inCoaching, coachTab } from '../../stores/coaching.js';
 
   function set(key, value) { DB.setSetting(key, value); scheduleSave(key, value); }
 
@@ -31,6 +32,12 @@
   let _notifWellness = DB.getSetting('notifWellnessAlerts',  false);
   let _notifWorkouts = DB.getSetting('notifWorkoutSummary',  false);
   let _notifSync     = DB.getSetting('notifSyncFailures',    false);
+  // Coaching: on unless turned off (the server sends them through the push
+  // service below). Shown only to people in coaching.
+  let _notifCoachMsg   = DB.getSetting('notifCoachMessage',        true) !== false;
+  let _notifCoachEmail = DB.getSetting('notifCoachMessageEmail',   false) === true;
+  let _notifCoachRec   = DB.getSetting('notifCoachRecommendation', true) !== false;
+  let _notifClientAns  = DB.getSetting('notifClientAnswer',        true) !== false;
   let _notifLocal    = DB.getSetting('notifLocalEnabled',     true);
   let _notifPushService = DB.getSetting('notifPushService', 'none');
   let _gotifyUrl     = DB.getSetting('gotifyUrl',            '');
@@ -354,6 +361,50 @@
        </div>
       {/if}
     </div>
+
+    {#if $coachingSupported && ($inCoaching || $coachingState?.can_coach)}
+      <p class="settings-group-heading">{$_('settings_notifications.coaching.heading')}</p>
+      <p class="settings-group-sub">{$_('settings_notifications.coaching.sub')}</p>
+      <div class="card settings-card">
+        <div class="setting-row">
+          <div>
+            <span class="setting-label">{$_('settings_notifications.coaching.message')}</span>
+            <div class="setting-desc">{$_('settings_notifications.coaching.message_desc')}</div>
+          </div>
+          <Toggle checked={_notifCoachMsg} on:change={e => { _notifCoachMsg = e.detail; set('notifCoachMessage', e.detail); }} />
+        </div>
+        {#if _notifCoachMsg}
+          <div class="setting-divider"></div>
+          <div class="setting-row">
+            <div>
+              <span class="setting-label">{$_('settings_notifications.coaching.email')}</span>
+              <div class="setting-desc">{$_('settings_notifications.coaching.email_desc')}</div>
+            </div>
+            <Toggle checked={_notifCoachEmail} on:change={e => { _notifCoachEmail = e.detail; set('notifCoachMessageEmail', e.detail); }} />
+          </div>
+        {/if}
+        {#if $coachTab}
+          <div class="setting-divider"></div>
+          <div class="setting-row">
+            <div>
+              <span class="setting-label">{$_('settings_notifications.coaching.recommendation')}</span>
+              <div class="setting-desc">{$_('settings_notifications.coaching.recommendation_desc')}</div>
+            </div>
+            <Toggle checked={_notifCoachRec} on:change={e => { _notifCoachRec = e.detail; set('notifCoachRecommendation', e.detail); }} />
+          </div>
+        {/if}
+        {#if $coachingState?.can_coach}
+          <div class="setting-divider"></div>
+          <div class="setting-row">
+            <div>
+              <span class="setting-label">{$_('settings_notifications.coaching.answer')}</span>
+              <div class="setting-desc">{$_('settings_notifications.coaching.answer_desc')}</div>
+            </div>
+            <Toggle checked={_notifClientAns} on:change={e => { _notifClientAns = e.detail; set('notifClientAnswer', e.detail); }} />
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <p class="settings-group-heading">{$_('settings_notifications.sections.alerts_summaries')}</p>
     <p class="settings-group-sub">Milestone alerts and periodic summary reports.</p>

@@ -39,6 +39,14 @@
   // client gone): back to Goals rather than an empty page.
   $: if (loaded && !needsServer && $coachingState && !$clientsTab) replace('/goals');
 
+  // A message read or arrived (the unread count moved): the list's counts follow.
+  let _lastUnread;
+  $: if (loaded && $coachingState?.as_coach && $coachingState.as_coach.unread !== _lastUnread) {
+    const first = _lastUnread === undefined;
+    _lastUnread = $coachingState.as_coach.unread;
+    if (!first) loadList();
+  }
+
   async function loadList() {
     listErr = '';
     try {
@@ -106,7 +114,7 @@
                     <button class="cl-open" on:click={() => push(`/goals/clients/${r.client.id}`)}>
                       <span class="cl-avatar" aria-hidden="true">{r.client.name.slice(0, 1).toUpperCase()}</span>
                       <span class="cl-info">
-                        <span class="cl-name">{r.client.name}</span>
+                        <span class="cl-name">{r.client.name}{#if r.unread} <span class="cl-unread" aria-label={$_('coaching.unread', { values: { n: r.unread } })}>{r.unread}</span>{/if}</span>
                         <span class="cl-sub">
                           {r.last_logged ? $_('coaching.clients.last_logged', { values: { date: formatDay(r.last_logged, $dateFormat) } }) : $_('coaching.clients.never_logged')}
                           {#if r.week?.judged}· {$_('coaching.clients.on_target', { values: { on: r.week.on_target, days: r.week.judged } })}{/if}
@@ -191,6 +199,7 @@
   .cl-sub { font-size: 12px; color: var(--text-3); }
   .cl-chip { display: inline-block; padding: 1px 8px; border-radius: var(--radius-full); background: var(--surface-3); color: var(--text-2); font-weight: 600; margin-right: 4px; }
   .cl-chev { color: var(--text-3); }
+  .cl-unread { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--accent-text, #fff); font-size: 11px; font-weight: 700; text-align: center; vertical-align: 1px; }
   .cl-cancel { flex-shrink: 0; font-size: 13px; }
   .cl-placeholder { text-align: center; color: var(--text-3); padding: 64px 16px; }
   .cl-placeholder .material-symbols-rounded { font-size: 40px; }
