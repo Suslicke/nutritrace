@@ -1424,3 +1424,68 @@ test('a coaching message written offline on the phone is stored once; the conver
     p.done((await cm.loadConversation({ pairingId: ${req.id}, side: 'client' })).length);`);
   assert.equal(c3, 2);
 });
+
+// Coaching targets (1.5): a coach's recommendation comes down with the sync;
+// accepted with no connection, the goals change on the phone and the answer
+// waits; the next sync sends both. Undo brings the goals back exactly.
+test('targets accepted offline on the phone: goals change there, the answer and the goals reach the server; Undo restores them exactly', async (t) => {
+  if (skip(t)) return;
+  const coach = await account('tess', A), client = await account('troy', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  const START = {
+    calories: { sharedGoal: false, isMin: false, isPercent: false, showInDiary: true, showInStats: true, days: [2300, 2000, 2000, 2100, 2000, 2000, 2400], max: 2400 },
+    proteins: { sharedGoal: true, isMin: false, isPercent: true, showInDiary: false, showInStats: true, days: Array(7).fill(30), max: 30 },
+  };
+  await http(client, 'PUT', '/api/settings', { key: 'goals', value: START });
+  await http(client, 'PUT', '/api/settings', { key: 'calorieGoalMode', value: 'adaptive' });
+  const rec = await http(coach, 'POST', `/api/coaching/clients/${CL.id}/recommendations`, { payload: { goals: { calories: { max: 1900 }, proteins: { max: 150 } } } });
+  const r = phone('targets', client, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+    const { loadServerSettings } = await import(p.src + 'stores/settings.js');
+    await loadServerSettings();
+    await p.sync();
+    const cr = await import(p.src + 'lib/coach-recommendations.js');
+    const recs = await cr.loadRecommendations();
+    const mine = recs.find(x => x.id === ${rec.id});
+    await p.offline(async () => { await cr.acceptTargets(mine, { t: (k, o) => 'Before coach change, ' + o.values.date, date: 'today' }); });
+    const waiting = (await p.dbn.dbPendingCoachAnswers()).map(a => a.status);
+    await p.sleep(1200);
+    await p.sync();
+    const { get } = await import('svelte/store');
+    const s = await import(p.src + 'stores/settings.js');
+    const tplNames = get(s.goalTemplates).map(x => x.name);
+    p.done({ pulled: !!mine, waiting, tplNames, after: (await cr.loadRecommendations()).find(x => x.id === ${rec.id}).status });`);
+  assert.equal(r.pulled, true, 'the recommendation came with the sync');
+  assert.deepEqual(r.waiting, ['accepted'], 'the answer waited while offline');
+  assert.deepEqual(r.tplNames, ['Before coach change, today']);
+  assert.equal(r.after, 'accepted');
+  assert.equal(q(`SELECT status FROM coach_recommendations WHERE id = ?`, rec.id)[0].status, 'accepted');
+  const goalsNow = JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'goals'`, CL.id)[0].value);
+  assert.equal(goalsNow.calories.max, 1900);
+  assert.equal(goalsNow.proteins.isPercent, false);
+  assert.equal(goalsNow.proteins.showInDiary, false, 'show/hide stays');
+  assert.equal(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'calorieGoalMode'`, CL.id)[0].value), 'fixed');
+  // Undo on the phone; the server ends with the goals exactly as they were.
+  const u = phone('targets', client, `
+    const cr = await import(p.src + 'lib/coach-recommendations.js');
+    const mine = (await cr.loadRecommendations()).find(x => x.id === ${rec.id});
+    const { get } = await import('svelte/store');
+    const s = await import(p.src + 'stores/settings.js');
+    // What the app does when it opens: this account's settings come down
+    // (the template Accept saved went up with them).
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await s.loadServerSettings();
+    const undone = cr.undoTargets(mine);
+    await p.sleep(1200);
+    await p.sync();
+    p.done({ undone, templates: get(s.goalTemplates).length });`);
+  assert.equal(u.undone, true, JSON.stringify(u));
+  assert.deepEqual(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'goals'`, CL.id)[0].value), START);
+  assert.equal(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'calorieGoalMode'`, CL.id)[0].value), 'adaptive');
+});
