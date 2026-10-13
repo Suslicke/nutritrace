@@ -1469,7 +1469,7 @@
 <!-- Share this meal or recipe (only when an admin has sharing on), and Send
      to Client (only for a coach with clients). -->
 <ShareSheet bind:open={_shareOpen} kind="meals" item={meal} on:shared={(e) => { meal.visibility = e.detail.visibility; meal = meal; }} />
-<SendToClientSheet bind:open={_sendOpen} {meal} {isRecipe} />
+<SendToClientSheet bind:open={_sendOpen} {meal} isRecipe={isRecipe || !!meal.is_recipe} />
 
 <style>
   .editor-page {

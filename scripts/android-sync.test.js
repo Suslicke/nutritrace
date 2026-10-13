@@ -1602,3 +1602,44 @@ test('a day plan accepted and logged offline on the phone: the same items as a m
   const coachView = (await http(coach, 'GET', `/api/coaching/clients/${CL.id}/recommendations`)).find(x => x.id === plan.id);
   assert.deepEqual(coachView.logged_meals, [0]);
 });
+
+// Send to Client (1.5): a recipe the coach sent, accepted on the phone with
+// no connection; the next sync sends the answer, the server makes the
+// client's copy (with its ingredient's food), and the pull brings both.
+test('a sent recipe accepted offline on the phone: the copy is made on the server and comes down to the phone', async (t) => {
+  if (skip(t)) return;
+  const coach = await account('sr-coach', A), client = await account('sr-client', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  const oats = await http(coach, 'POST', '/api/foods', { name: 'Sent Oats', portion: 50, unit: 'g', nutrition: { calories: 190 } });
+  const bowl = await http(coach, 'POST', '/api/meals', { name: 'Sent Bowl', is_recipe: true, portion: 300, unit: 'g', nutrition: { calories: 285 }, items: [{ ...oats, quantity: 1 }] });
+  const rec = await http(coach, 'POST', `/api/coaching/clients/${CL.id}/recommendations`, { kind: 'recipe', meal_id: bowl.id });
+  const r = phone('sendrecipe', client, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+    await p.sync();
+    const cr = await import(p.src + 'lib/coach-recommendations.js');
+    const mine = (await cr.loadRecommendations()).find(x => x.id === ${rec.id});
+    let answered;
+    await p.offline(async () => { answered = await cr.answerPlan(mine, 'accepted'); });
+    const { NtApi } = await import(p.src + 'lib/api.js');
+    const before = (await NtApi.getRecipes()).map(m => m.name);
+    await p.sleep(1200);
+    await p.sync();
+    await p.sleep(1200);
+    await p.sync();
+    const recipes = await NtApi.getRecipes();
+    const foods = await NtApi.getFoods();
+    p.done({ kind: mine.kind, offline: answered.offline, before, recipes: recipes.map(m => m.name),
+      foods: foods.filter(f => f.name === 'Sent Oats').map(f => [f.source_app, f.source_external_id]) });`);
+  assert.equal(r.kind, 'recipe');
+  assert.equal(r.offline, true, 'the answer waited');
+  assert.deepEqual(r.before, [], 'no copy while offline');
+  assert.deepEqual(r.recipes, ['Sent Bowl'], 'the copy came down');
+  assert.deepEqual(r.foods, [['coach', `food:${oats.id}`]], 'with its ingredient\'s food');
+  assert.deepEqual(q(`SELECT name, source_id FROM meals WHERE user_id = ?`, CL.id), [{ name: 'Sent Bowl', source_id: bowl.id }]);
+});
