@@ -58,6 +58,7 @@ import { seedAiFromEnv } from './ai.js';
 import { initUpdateCheckSetting } from './lib/update-check.js';
 import { seedOidcFromEnv } from './lib/oidc-env.js';
 import { APP_VERSION } from './routes/version-source.js';
+import { caloriesOutFor } from './lib/effective-goal.js';
 
 // Initialise DB (runs schema)
 import db from './db.js';
@@ -317,31 +318,8 @@ router.get('/api/wellness/latest', (req, res) => {
 router.get('/api/wellness/calories-out', (req, res) => {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  const { date } = req.query;
-  // date param = the diary date; we want the day before
-  const base = date ? new Date(date + 'T12:00:00Z') : new Date();
-  base.setUTCDate(base.getUTCDate() - 1);
-  const yesterday = base.toISOString().slice(0, 10);
-  // Wearables provide true daily TDEE (BMR + activity). LiftTrace is a
-  // per-workout slice that only covers the workout's incremental burn,
-  // so it's the LOWEST priority — it fills in when no wearable has data
-  // for the date. The lifttraceOverlapFill setting (default ON) lets
-  // users flip that: when OFF, LT wins over wearables (use this if your
-  // wearable misses lifting sessions and you trust LT's estimate more).
-  const overlapFill = _readBoolSetting(userId, 'lifttraceOverlapFill', true);
-  const PRIORITY = overlapFill
-    ? ['garmin', 'health_connect', 'fitbit', 'lifttrace']
-    : ['lifttrace', 'garmin', 'health_connect', 'fitbit'];
-  const rows = db.prepare(
-    `SELECT source, value FROM wellness_data
-     WHERE user_id=? AND date=? AND metric_type='calories_out'`
-  ).all(userId, yesterday);
-  let result = null;
-  for (const src of PRIORITY) {
-    const row = rows.find(r => r.source === src);
-    if (row) { result = { calories_out: row.value, source: src, date: yesterday }; break; }
-  }
-  res.json(result || { calories_out: null, source: null, date: yesterday });
+  // date param = the diary date; the day before is read (lib/effective-goal.js).
+  res.json(caloriesOutFor(userId, req.query.date));
 });
 
 function _readBoolSetting(userId, key, defaultValue) {

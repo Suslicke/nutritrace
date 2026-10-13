@@ -17,6 +17,7 @@
  */
 import { dispatchWebhookEvent } from './webhooks.js';
 import { dayTargets } from '../../src/lib/goal-resolver.js';
+import { effectiveCalorieGoal } from './effective-goal.js';
 
 function _round1(n) {
   return Math.round((Number(n) || 0) * 10) / 10;
@@ -33,10 +34,15 @@ const _METRICS = [['calories', 'calories'], ['protein', 'proteins'], ['carbs', '
 export function checkNutritionGoalCrossing(userId, date, goals, before, after) {
   // The app saves each goal as an entry (per weekday, percent of calories),
   // not a number, and totals carry proteins/carbohydrates: resolve the day's
-  // targets the way the Diary does. Reading goals.calories as a number made
-  // this never fire for goals set in the app, and macros never matched.
-  const targets = dayTargets(goals, date);
+  // targets the way the Diary does (with Dynamic or Adaptive, the day's
+  // effective calorie goal). Reading goals.calories as a number made this
+  // never fire for goals set in the app, and macros never matched.
+  // Only a minimum is achieved by reaching it; reaching a maximum isn't.
+  // (A goal saved as a plain number, an older format, counts as reached.)
+  const targets = dayTargets(goals, date, { calories: effectiveCalorieGoal(userId, date, goals).calories });
   for (const [metric, key] of _METRICS) {
+    const entry = goals?.[key];
+    if (entry == null || (typeof entry === 'object' && !entry.isMin)) continue;
     const target = Number(targets[key]);
     if (!Number.isFinite(target) || target <= 0) continue;
     const beforeVal = _round1(before?.[key] ?? before?.[metric]);

@@ -136,6 +136,13 @@ test('recommended targets: the comparison, the mode, a recommendation of a mode 
   assert.equal(rows[1].currentPercent, 30, 'the percent shows beside its grams');
   assert.equal(rows[1].byWeekday, true);
   assert.deepEqual(rows[1].proposedDays, [140, 150, 150, 150, 150, 150, 160]);
+  // Dynamic or Adaptive: "now" is today's effective goal (2150), and percent
+  // macros follow it, as in the Diary.
+  const eff = t.comparisonRows(now, rec, 2, { caloriesNow: 2150 });
+  assert.deepEqual(eff.map((r) => [r.key, r.current, r.diff]), [['calories', 2150, -350], ['proteins', 161, -11]]);
+  const card = read('../src/components/coaching/TargetsCard.svelte');
+  assert.match(card, /coaching\.targets\.now_effective/);
+  assert.match(card, /\$: effectiveMode = !coachView && rec\.status === 'pending' && \(\$calorieGoalMode === 'dynamic' \|\| \$calorieGoalMode === 'adaptive'\)/, 'fetched only for a pending card with Dynamic or Adaptive');
   assert.equal(t.acceptSwitchesToFixed('adaptive', rec), true);
   assert.equal(t.acceptSwitchesToFixed('fixed', rec), false);
   assert.equal(t.acceptSwitchesToFixed('adaptive', { mode: 'adaptive', goals: rec.goals }), false, 'a recommended mode is used as it is');

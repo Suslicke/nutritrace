@@ -82,6 +82,8 @@ export function answerRecommendation(id, clientId, { status, response_note } = {
      WHERE id = ? AND status = 'pending'
   `).run(status, _note(response_note), r.id).changes;
   const out = _row(r.id);
+  // Answered (from Goals, the Diary or the conversation): its message is read.
+  db.prepare(`UPDATE coach_messages SET read_at = datetime('now'), updated_at = datetime('now') WHERE recommendation_id = ? AND read_at IS NULL`).run(r.id);
   if (changed) _notifyCoach(out);
   return recommendationOut(out);
 }

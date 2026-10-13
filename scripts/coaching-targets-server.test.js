@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { applyTargets, beforeTemplate, matchesTemplate } from '../src/lib/coach-targets.js';
+import { dayTargets } from '../src/lib/goal-resolver.js';
 
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 let ready = false;
@@ -151,8 +152,13 @@ test('a recommendation: pending, in the conversation, replaced by a newer one, a
   assert.equal((await call('coach', 'POST', `/api/coaching/recommendations/${second.id}/answer`, { status: 'accepted' })).status, 404);
 
   received.length = 0;
+  const unreadBefore = (await ok('client', 'GET', '/api/coaching/state')).unread;
   const answered = await ok('client', 'POST', `/api/coaching/recommendations/${second.id}/answer`, { status: 'accepted', response_note: 'Deal' });
   assert.equal(answered.status, 'accepted');
+  // Answering reads its message: the dot and counts clear.
+  assert.equal((await ok('client', 'GET', '/api/coaching/state')).unread, unreadBefore - 1);
+  const read = (await ok('client', 'GET', `/api/coaching/pairings/${ids.pairing}/messages`)).messages.find((m) => m.recommendation_id === second.id);
+  assert.ok(read.read_at, 'its message is read');
   assert.equal(answered.response_note, 'Deal');
   assert.equal((await call('client', 'POST', `/api/coaching/recommendations/${second.id}/answer`, { status: 'declined' })).status, 409, 'answered once');
   assert.ok(await waitFor(() => received.some((p) => p.path === '/push-coach' && p.body === 'Cleo Client accepted your recommended targets.')));
@@ -187,15 +193,15 @@ test('Accept then Undo brings per-weekday, percent and Adaptive targets back exa
   const result = JSON.parse(JSON.parse(frame).result.content[0].text);
   assert.deepEqual(result.goals.calories, goals.calories);
 
-  // goal.achieved fires against the new calorie target (1900, not 2000+).
+  // goal.achieved reads what Accept wrote: calories (1900) and fat (25% of
+  // 1900 = 53 g) are maximums now, so reaching them isn't an achievement;
+  // the carbs minimum (180, untouched) is.
   received.length = 0;
   await ok('client', 'POST', '/api/admin/webhooks', { url: `http://127.0.0.1:${sink.address().port}/hook`, events: ['goal.achieved'] });
-  // Fat is 25% of calories now: 1900 * 0.25 / 9 = 53 g.
-  await ok('client', 'PUT', `/api/diary/${TODAY}`, { items: [{ uuid: 'g1', name: 'Big Lunch', meal: 1, portion: 1, unit: 'serving', quantity: 1, nutrition: { calories: 1950, proteins: 10, carbohydrates: 10, fat: 60 } }], water: [], body_stats: {}, notes: '' });
-  assert.ok(await waitFor(() => received.filter((p) => p.path === '/hook').length >= 2), 'goal.achieved delivered');
-  const hooks = received.filter((p) => p.path === '/hook').map((p) => JSON.parse(p.body)).map((h) => h.data ?? h.payload);
-  const byMetric = Object.fromEntries(hooks.map((h) => [h.metric, h.target]));
-  assert.deepEqual(byMetric, { calories: 1900, fat: 53 });
+  await ok('client', 'PUT', `/api/diary/${TODAY}`, { items: [{ uuid: 'g1', name: 'Big Lunch', meal: 1, portion: 1, unit: 'serving', quantity: 1, nutrition: { calories: 1950, proteins: 10, carbohydrates: 200, fat: 60 } }], water: [], body_stats: {}, notes: '' });
+  assert.ok(await waitFor(() => received.filter((p) => p.path === '/hook').length >= 1), 'goal.achieved delivered');
+  await sleep(300);
+  assert.deepEqual(hooksByMetric(), { carbs: 180 });
 
   // Undo applies the template: everything as it was, exactly.
   await ok('client', 'PUT', '/api/settings', { key: 'goals', value: tpl.goals });
@@ -205,6 +211,68 @@ test('Accept then Undo brings per-weekday, percent and Adaptive targets back exa
   assert.equal(back.calorieGoalMode, 'adaptive');
   assert.equal(back.calorieGoalFactor, 0.8, 'the factor was never touched');
   assert.ok(matchesTemplate(tpl, back.goals, back.calorieGoalMode));
+});
+
+const hooksByMetric = () => Object.fromEntries(received.filter((p) => p.path === '/hook').map((p) => JSON.parse(p.body)).map((h) => h.data ?? h.payload).map((h) => [h.metric, h.target]));
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString('sv-SE'); };
+let lunches = 0;
+const lunch = (calories, proteins = 0, fat = 0) => ({ items: calories ? [{ uuid: `lunch-${++lunches}`, name: 'Lunch', meal: 1, portion: 1, unit: 'serving', quantity: 1, nutrition: { calories, proteins, carbohydrates: 0, fat } }] : [], water: [], body_stats: {}, notes: '' });
+/** Today's diary becomes this one lunch (what was there is deleted in the same save). */
+const eatToday = async (...a) => {
+  const now = await ok('client', 'GET', `/api/diary/${TODAY}`);
+  await ok('client', 'PUT', `/api/diary/${TODAY}`, { ...lunch(...a), deleted_uuids: { items: (now?.items || []).map((i) => i.uuid) } });
+};
+
+test('goal.achieved: only minimum goals, against the day\'s calorie goal as the Diary shows it with Dynamic or Adaptive', { skip: !ready }, async () => {
+  const Database = serverRequire('better-sqlite3');
+  const days = (v) => Array(7).fill(v);
+  // Eat at least 2000 (a minimum), protein at least 20% of calories, fat at most 50 g.
+  const goals = {
+    calories: { sharedGoal: true, isMin: true, isPercent: false, days: days(2000), min: 2000 },
+    proteins: { sharedGoal: true, isMin: true, isPercent: true, days: days(20), min: 20 },
+    fat: { sharedGoal: true, isMin: false, isPercent: false, days: days(50), max: 50 },
+  };
+  await ok('client', 'PUT', '/api/settings', { key: 'goals', value: goals });
+
+  // Dynamic: yesterday's calories out 2500, factor 1.1: today's goal is 2750.
+  await ok('client', 'PUT', '/api/settings', { key: 'calorieGoalMode', value: 'dynamic' });
+  await ok('client', 'PUT', '/api/settings', { key: 'calorieGoalFactor', value: 1.1 });
+  const sql = new Database(join(dir, 'nt.db'));
+  const yesterday = new Date(TODAY + 'T12:00:00Z'); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  sql.prepare(`INSERT INTO wellness_data (user_id, date, source, metric_type, value) VALUES (?, ?, 'garmin', 'calories_out', 2500)`).run(ids.client, yesterday.toISOString().slice(0, 10));
+  sql.close();
+  assert.equal((await ok('client', 'GET', `/api/wellness/calories-out?date=${TODAY}`)).calories_out, 2500, 'the Diary reads the same number');
+  const protein = dayTargets(goals, TODAY, { calories: 2750 }).proteins;
+  await eatToday(0);
+  received.length = 0;
+  // Past the base 2000 but short of 2750: nothing for calories; protein
+  // (20% of 2750) reached; fat over its maximum is no achievement.
+  await eatToday(2600, protein + 1, 80);
+  assert.ok(await waitFor(() => received.some((p) => p.path === '/hook')));
+  await sleep(300);
+  assert.deepEqual(hooksByMetric(), { protein });
+  received.length = 0;
+  await eatToday(2800, protein + 1, 80);
+  assert.ok(await waitFor(() => received.some((p) => p.path === '/hook')));
+  await sleep(300);
+  assert.deepEqual(hooksByMetric(), { calories: 2750 });
+
+  // Adaptive: 25 days of 2400 at a steady 80 kg learn a TDEE near 2400.
+  await ok('client', 'PUT', '/api/settings', { key: 'calorieGoalMode', value: 'adaptive' });
+  await ok('client', 'PUT', '/api/settings', { key: 'calorieGoalFactor', value: 1 });
+  for (let n = 1; n <= 25; n++) await ok('client', 'PUT', `/api/diary/${daysAgo(n)}`, { ...lunch(2400), body_stats: { weight: 80, weight_unit: 'kg' } });
+  await eatToday(0);
+  const learned = await ok('client', 'GET', '/api/goals/adaptive-tdee');
+  assert.ok(learned.ready && learned.tdee > 2000, `adaptive ready: ${JSON.stringify(learned)}`);
+  received.length = 0;
+  await eatToday(2100);
+  await sleep(500);
+  assert.deepEqual(hooksByMetric(), {}, 'past the base 2000, short of the learned goal');
+  await eatToday(learned.tdee + 100);
+  assert.ok(await waitFor(() => received.some((p) => p.path === '/hook')));
+  await sleep(300);
+  const tdeeNow = (await ok('client', 'GET', '/api/goals/adaptive-tdee')).tdee;
+  assert.deepEqual(hooksByMetric(), { calories: Math.round(tdeeNow) });
 });
 
 test('ending coaching withdraws what is pending; answers made offline arrive by sync push; sync and backup carry them', { skip: !ready }, async () => {

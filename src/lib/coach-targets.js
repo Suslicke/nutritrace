@@ -149,15 +149,17 @@ function _grams(entry, calEntry, key, wd) {
  * Rows for the card: per target, what it is now and what is recommended,
  * for one weekday (and whether either varies by weekday). Percent targets
  * also give their grams at that day's calorie target. Values are numbers;
- * the card formats them.
+ * the card formats them. `caloriesNow` is today's effective calorie goal
+ * with Dynamic or Adaptive (what the Diary shows): "now" is read from it.
  */
-export function comparisonRows(currentGoals, payload, weekday = new Date().getDay()) {
+export function comparisonRows(currentGoals, payload, weekday = new Date().getDay(), { caloriesNow = null } = {}) {
   const cur = currentGoals || {};
   const recGoals = payload?.goals || {};
   const after = applyTargets(cur, null, payload).goals;
+  const calNow = caloriesNow != null ? { max: caloriesNow } : cur.calories;
   return TARGET_KEYS.filter(k => recGoals[k]).map(key => {
     const c = cur[key] || null, r = after[key];
-    const cv = key === 'calories' ? _dayValue(c, weekday) : _grams(c || {}, cur.calories, key, weekday);
+    const cv = key === 'calories' ? (caloriesNow ?? _dayValue(c, weekday)) : _grams(c || {}, calNow, key, weekday);
     const rv = key === 'calories' ? _dayValue(r, weekday) : _grams(r, after.calories, key, weekday);
     return {
       key,

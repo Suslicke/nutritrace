@@ -6,7 +6,8 @@
   import { createEventDispatcher } from 'svelte';
   import { slide } from 'svelte/transition';
   import { _ } from 'svelte-i18n';
-  import { goals, calorieGoalMode, energyUnit, dateFormat, goalTemplates } from '../../stores/settings.js';
+  import { goals, calorieGoalMode, calorieGoalFactor, energyUnit, dateFormat, goalTemplates } from '../../stores/settings.js';
+  import { NtApi } from '../../lib/api.js';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { Nutrition } from '../../lib/nutrition.js';
   import { comparisonRows, acceptSwitchesToFixed } from '../../lib/coach-targets.js';
@@ -30,7 +31,25 @@
   // What "now" means: today's goals while pending; what they were before
   // Accept once it's applied.
   $: base = coachView ? {} : rec.status === 'accepted' && tpl ? tpl.goals : $goals;
-  $: rows = comparisonRows(base, rec.payload);
+  // With Dynamic or Adaptive, "now" for calories is today's effective goal
+  // (what the Diary shows), labeled with the mode.
+  $: effectiveMode = !coachView && rec.status === 'pending' && ($calorieGoalMode === 'dynamic' || $calorieGoalMode === 'adaptive') ? $calorieGoalMode : null;
+  let effectiveRaw = null, _effectiveFor = '';
+  $: _loadEffective(effectiveMode);
+  async function _loadEffective(mode) {
+    const key = mode ? `${mode}:${todayLocal()}` : '';
+    if (key === _effectiveFor) return;
+    _effectiveFor = key; effectiveRaw = null;
+    if (!mode) return;
+    try {
+      const r = mode === 'dynamic'
+        ? (await NtApi.get(`/api/wellness/calories-out?date=${todayLocal()}`))?.calories_out
+        : await NtApi.get('/api/goals/adaptive-tdee').then(a => (a?.ready ? a.tdee : null));
+      if (_effectiveFor === key) effectiveRaw = r ?? null;
+    } catch { /* the stored goal is shown */ }
+  }
+  $: caloriesNow = effectiveMode && effectiveRaw != null ? Math.round(effectiveRaw * ($calorieGoalFactor || 1)) : null;
+  $: rows = comparisonRows(base, rec.payload, undefined, { caloriesNow });
   $: switches = rec.status === 'pending' && !coachView && acceptSwitchesToFixed($calorieGoalMode, rec.payload);
   // Undo is offered wherever Accept changed the goals (also when the server
   // later refused it and they weren't put back automatically).
@@ -100,7 +119,7 @@
           <tr>
             <th scope="row">{$_(LABEL[row.key])}</th>
             {#if !coachView}
-              <td>{fmt(row, row.current)}{#if row.currentPercent != null}<span class="tc-sub">{$_('coaching.targets.percent_of', { values: { pct: row.currentPercent } })}</span>{/if}</td>
+              <td>{fmt(row, row.current)}{#if row.key === 'calories' && caloriesNow != null && row.current != null}<span class="tc-sub">{$_('coaching.targets.now_effective', { values: { mode: $_(MODE[effectiveMode]) } })}</span>{/if}{#if row.currentPercent != null}<span class="tc-sub">{$_('coaching.targets.percent_of', { values: { pct: row.currentPercent } })}</span>{/if}</td>
             {/if}
             <td class="tc-new">{fmt(row, row.proposed)}{#if row.proposedPercent != null}<span class="tc-sub">{$_('coaching.targets.percent_of', { values: { pct: row.proposedPercent } })}</span>{/if}</td>
             {#if !coachView}<td class="tc-diff">{diff(row)}</td>{/if}

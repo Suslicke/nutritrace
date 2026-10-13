@@ -2387,6 +2387,7 @@
       "card_title_coach": "Targets Recommended",
       "target": "Target",
       "now": "Now",
+      "now_effective": "today, {mode}",
       "recommended": "Recommended",
       "change": "Change",
       "calories": "Calories",

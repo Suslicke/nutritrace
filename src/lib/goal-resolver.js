@@ -133,10 +133,12 @@ export function macroGoalGrams(g, calGoal, density) {
  *
  * @returns {{ calories: number|null, proteins: number|null, carbohydrates: number|null, fat: number|null }}
  */
-export function dayTargets(goals, dateStr) {
+export function dayTargets(goals, dateStr, { calories: caloriesNow } = {}) {
   const g = goals || {};
   const plain = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const calories = plain(g.calories) ?? resolveGoalFor(g.calories, dateStr) ?? null;
+  // `calories` overrides the stored goal: the day's effective goal with
+  // Dynamic or Adaptive (percent macros follow it, as in the Diary).
+  const calories = caloriesNow ?? plain(g.calories) ?? resolveGoalFor(g.calories, dateStr) ?? null;
   const out = { calories };
   for (const [key, density] of [['proteins', 4], ['carbohydrates', 4], ['fat', 9]]) {
     const e = g[key];

@@ -116,9 +116,15 @@ export function flushAnswers() {
       }
     }
     if (sent && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
+    if (sent) _refreshCounts();
     return { sent, offline };
   })().finally(() => { _flushing = null; });
   return _flushing;
+}
+
+/** An answer marks its message read on the server: the dot and counts follow. */
+function _refreshCounts() {
+  import('../stores/coaching.js').then(m => m.refreshCoaching()).catch(() => {});
 }
 
 const _templateName = (t, date) => t('coaching.targets.template_name', { values: { date } });
@@ -158,6 +164,7 @@ export async function acceptTargets(rec, { note = '', t, date = new Date().toLoc
     try {
       const row = await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status: 'accepted', response_note: note || undefined });
       await store.upsert([row]);
+      _refreshCounts();
     } catch (e) {
       const status = Number(e?.status) || 0;
       if (!(e?.offline || !status || status >= 500)) {
@@ -190,6 +197,7 @@ export async function declineTargets(rec, { note = '' } = {}) {
   const store = await _store();
   if (!(await store.available())) {
     await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status: 'declined', response_note: note || undefined });
+    _refreshCounts();
     return { offline: false };
   }
   await store.answer(rec.id, 'declined', note);
