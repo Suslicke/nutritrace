@@ -1354,3 +1354,73 @@ test('the connection check and the sync stop while the app is hidden, and syncs 
     assert.match(readFileSync(new URL(f, import.meta.url), 'utf8'), /e\?\.detail\?\.changed === false/, f);
   }
 });
+
+// Coaching messages on the phone (1.5): written with no connection, kept on
+// the phone with their own uuid, and stored once on the server however often
+// they go (a direct send whose answer was lost, then the sync push). The
+// phone keeps the conversation from the pull; a coach whose client left
+// loses it from the phone too.
+test('a coaching message written offline on the phone is stored once; the conversation stays on the phone; a former coach loses it', async (t) => {
+  if (skip(t)) return;
+  const coach = await account('cora', A), client = await account('cliff', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  await http(coach, 'POST', `/api/coaching/clients/${CL.id}/messages`, { uuid: 'from-coach-0001', body: 'Hi Cliff' });
+
+  // The phone's direct send reaches the server but its answer is lost; the
+  // next sync carries the same message again.
+  let drop = 1;
+  const px = await proxy(r => (r.method === 'POST' && /\/api\/coaching\/pairings\/\d+\/messages$/.test(r.url) && drop-- > 0 ? { dropReply: true } : null));
+  let r;
+  try {
+    r = await phoneAsync('coachmsg', client, `
+      const la = await import(p.src + 'lib/local-account.js');
+      localStorage.setItem('wl:userId', '${CL.id}');
+      await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+      await p.sync();
+      const cm = await import(p.src + 'lib/coach-messages.js');
+      const conv = { pairingId: ${req.id}, side: 'client' };
+      const pulled = (await cm.loadConversation(conv)).map(m => m.body);
+      let row;
+      await p.offline(async () => { row = await cm.sendMessage(conv, { body: 'Written in a dead zone' }); await cm.flushCoachMessages(); });
+      const waiting = (await cm.loadConversation(conv)).find(m => m.uuid === row.uuid).sync_status;
+      await cm.flushCoachMessages();             // reaches the server, answer lost
+      const afterLost = (await cm.loadConversation(conv)).find(m => m.uuid === row.uuid).sync_status;
+      await p.sync();                            // the push sends it again
+      const after = (await cm.loadConversation(conv)).filter(m => m.uuid === row.uuid);
+      p.done({ pulled, waiting, afterLost, after: after.map(m => m.sync_status), uuid: row.uuid });`, { NT_SERVER: px.url });
+  } finally { await px.close(); }
+  assert.deepEqual(r.pulled, ['Hi Cliff'], 'the pull brought the conversation');
+  assert.equal(r.waiting, 'pending', 'kept on the phone while offline');
+  assert.equal(r.afterLost, 'pending', 'still waiting: the answer never came');
+  assert.deepEqual(r.after, ['synced']);
+  assert.deepEqual(q(`SELECT COUNT(*) AS n FROM coach_messages WHERE uuid = ?`, r.uuid), [{ n: 1 }], 'stored once');
+  assert.deepEqual(q(`SELECT body FROM coach_messages WHERE pairing_id = ? ORDER BY id`, req.id).map(x => x.body), ['Hi Cliff', 'Written in a dead zone']);
+
+  // The coach's phone holds the conversation, then the client leaves.
+  const c1 = phone('coachside', coach, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CO.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CO)}, { confirm: async () => true });
+    await p.sync();
+    const cm = await import(p.src + 'lib/coach-messages.js');
+    p.done((await cm.loadConversation({ pairingId: ${req.id}, side: 'coach', clientId: ${CL.id} })).length);`);
+  assert.equal(c1, 2);
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/end`);
+  const c2 = phone('coachside', coach, `
+    await p.sync();
+    const cm = await import(p.src + 'lib/coach-messages.js');
+    const db = await p.dbn.getDb();
+    p.done({ kept: (await cm.loadConversation({ pairingId: ${req.id}, side: 'coach', clientId: ${CL.id} })).length,
+      rows: (await db.query('SELECT COUNT(*) AS n FROM coach_messages', [])).values[0].n });`);
+  assert.deepEqual(c2, { kept: 0, rows: 0 }, 'the coach loses it on the phone too');
+  // The client keeps theirs.
+  const c3 = phone('coachmsg', client, `
+    await p.sync();
+    const cm = await import(p.src + 'lib/coach-messages.js');
+    p.done((await cm.loadConversation({ pairingId: ${req.id}, side: 'client' })).length);`);
+  assert.equal(c3, 2);
+});
