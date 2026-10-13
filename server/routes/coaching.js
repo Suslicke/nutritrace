@@ -23,7 +23,7 @@ import path from 'path';
 import { linkBase } from '../lib/public-url.js';
 import {
   canRead, canWrite, createMessage, deleteMessage, markRead, listMessages, messageOut,
-  notifyMessage, notifyClientAnswer, pairingById, photoPath, PHOTO_TYPES,
+  notifyMessage, notifyClientAnswer, notifyRequest, pairingById, photoPath, PHOTO_TYPES,
 } from '../lib/coaching-messages.js';
 import { UPLOAD_RESPONSE_HEADERS } from '../lib/upload-paths.js';
 
@@ -191,6 +191,7 @@ router.post('/requests', requireCoachRole, wrap((req, res) => {
     throw e;
   }
   const row = _pairingRow(id);
+  notifyRequest(req.user.id, clientId);
   res.json({ id: row.id, status: row.status, client: person(client.id, client.full_name, client.username), requested_at: row.requested_at });
 }));
 

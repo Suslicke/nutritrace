@@ -239,8 +239,10 @@ test('read receipts and unread counts', { skip: !ready }, async () => {
 test('notifications: a push per message and per answer, email at most every 30 minutes', { skip: !ready }, async () => {
   pushes.length = 0; mails.length = 0;
   await ok('coach', 'POST', coachPath(), { uuid: uuid(), body: 'Ping' });
-  assert.ok(await waitFor(() => pushes.some((p) => p.path === '/nt-client' && /Ping/.test(p.body))), JSON.stringify(pushes));
-  assert.match(pushes.find((p) => p.path === '/nt-client').title || '', /Message from Sam Coach|UTF-8/);
+  assert.ok(await waitFor(() => pushes.some((p) => p.path === '/nt-client')), JSON.stringify(pushes));
+  const push = pushes.find((p) => p.path === '/nt-client');
+  assert.equal(push.body, 'New message from Sam Coach');
+  assert.doesNotMatch(JSON.stringify(push), /Ping/, 'never the message itself');
   // Turned off: nothing.
   await ok('client', 'PUT', '/api/settings', { key: 'notifCoachMessage', value: false });
   pushes.length = 0;
@@ -259,13 +261,30 @@ test('notifications: a push per message and per answer, email at most every 30 m
   assert.equal(mails.length, 1, 'one email for three messages');
   assert.match(mails[0], /To: client@example\.com/i);
   assert.doesNotMatch(mails[0], /One|Two|Three/, 'the message itself is not in the email');
+  // A request reaches the person asked: who, never the note.
+  await ok('plain', 'PUT', '/api/settings', { key: 'notifPushService', value: 'ntfy' });
+  await ok('plain', 'PUT', '/api/settings', { key: 'ntfyUrl', value: `http://127.0.0.1:${ntfyPort}` });
+  await ok('plain', 'PUT', '/api/settings', { key: 'ntfyTopic', value: 'nt-plain' });
+  pushes.length = 0;
+  const r = await ok('coach2', 'POST', '/api/coaching/requests', { client_id: ids.plain, note: 'Secret plan inside' });
+  assert.ok(await waitFor(() => pushes.some((p) => p.path === '/nt-plain')));
+  assert.equal(pushes.find((p) => p.path === '/nt-plain').body, 'Kim Coach wants to be your coach.');
+  assert.doesNotMatch(JSON.stringify(pushes), /Secret plan/);
+  // Under New Recommendation: turned off, no push.
+  await ok('plain', 'PUT', '/api/settings', { key: 'notifCoachRecommendation', value: false });
+  await ok('plain', 'POST', `/api/coaching/pairings/${r.id}/decline`);
+  pushes.length = 0;
+  const r1 = await ok('coach2', 'POST', '/api/coaching/requests', { client_id: ids.plain });
+  await sleep(400);
+  assert.equal(pushes.filter((p) => p.path === '/nt-plain').length, 0);
+  await ok('coach2', 'POST', `/api/coaching/pairings/${r1.id}/end`);
   // A client's answer reaches the coach.
   pushes.length = 0;
-  const r = await ok('coach2', 'POST', '/api/coaching/requests', { client_id: ids.plain });
+  const r2 = await ok('coach2', 'POST', '/api/coaching/requests', { client_id: ids.plain });
   await ok('coach2', 'PUT', '/api/settings', { key: 'notifPushService', value: 'ntfy' });
   await ok('coach2', 'PUT', '/api/settings', { key: 'ntfyUrl', value: `http://127.0.0.1:${ntfyPort}` });
   await ok('coach2', 'PUT', '/api/settings', { key: 'ntfyTopic', value: 'nt-coach2' });
-  await ok('plain', 'POST', `/api/coaching/pairings/${r.id}/decline`);
+  await ok('plain', 'POST', `/api/coaching/pairings/${r2.id}/decline`);
   assert.ok(await waitFor(() => pushes.some((p) => p.path === '/nt-coach2' && /declined/.test(p.body))));
 });
 

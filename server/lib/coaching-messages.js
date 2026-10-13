@@ -202,14 +202,16 @@ function _name(id) {
 /**
  * A new message: a push through the person's ntfy, Gotify or Apprise (on
  * unless they turned it off), and an email if they asked for one, at most
- * once per 30 minutes per conversation. Never throws.
+ * once per 30 minutes per conversation. Both say who wrote, never what.
+ * Never throws.
  */
 export async function notifyMessage(p, row, appBase) {
   try {
     const to = row.sender_id === p.coach_id ? p.client_id : p.coach_id;
     const from = _name(row.sender_id);
-    const snippet = row.body ? (row.body.length > 140 ? `${row.body.slice(0, 139)}…` : row.body) : 'Sent a photo';
-    await pushNotifyDefaultOn(to, 'notifCoachMessage', `Message from ${from}`, snippet, 5).catch(() => {});
+    // Who wrote, never what: a push service (a public ntfy topic, say) is
+    // outside the server, and the message stays in the app.
+    await pushNotifyDefaultOn(to, 'notifCoachMessage', 'Coaching', `New message from ${from}`, 5).catch(() => {});
     if (_setting(to, 'notifCoachMessage') === false || _setting(to, 'notifCoachMessageEmail') !== true) return;
     if (!appBase || !isEmailConfigured()) return;
     const email = db.prepare('SELECT email FROM users WHERE id = ?').get(to)?.email;
@@ -222,6 +224,16 @@ export async function notifyMessage(p, row, appBase) {
     await sendCoachMessage(email, from, link);
   } catch (e) {
     logger.warn(`[coaching] message notification failed: ${e?.message || e}`);
+  }
+}
+
+/** A coach asked: the person hears who (never the note), under New
+ *  Recommendation (on unless turned off). */
+export async function notifyRequest(coachId, clientId) {
+  try {
+    await pushNotifyDefaultOn(clientId, 'notifCoachRecommendation', 'Coaching', `${_name(coachId)} wants to be your coach.`, 5);
+  } catch (e) {
+    logger.warn(`[coaching] request notification failed: ${e?.message || e}`);
   }
 }
 

@@ -2178,11 +2178,11 @@
       "heading": "Coaching",
       "sub": "Sent through your push service below.",
       "message": "New Message",
-      "message_desc": "When your coach or a client sends you a message.",
+      "message_desc": "When your coach or a client sends you a message. Says who wrote, not what.",
       "email": "Email Me Too",
       "email_desc": "At most one email per conversation every 30 minutes, saying who wrote. Needs an email on your account and email set up on the server.",
       "recommendation": "New Recommendation",
-      "recommendation_desc": "When your coach recommends targets or a day plan.",
+      "recommendation_desc": "When a coach asks to coach you, or your coach recommends targets or a day plan.",
       "answer": "Client's Answer",
       "answer_desc": "When someone accepts or declines your request, or leaves."
     },
