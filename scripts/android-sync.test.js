@@ -1584,7 +1584,7 @@ test('a day plan accepted and logged offline on the phone: the same items as a m
     await p.sync();
     await p.sleep(1200);
     await p.sync();
-    p.done({ offline: answered.offline, localLogged: [...loggedMeals(local, ${plan.id})], copies,
+    p.done({ offline: answered.offline, localLogged: [...loggedMeals(local, plan)], copies,
       status: (await cr.loadRecommendations()).find(x => x.id === ${plan.id}).status });`);
   assert.equal(r.offline, true, 'the answer waited');
   assert.deepEqual(r.localLogged, [0], 'Log This turned to Logged on the phone');
@@ -1595,7 +1595,8 @@ test('a day plan accepted and logged offline on the phone: the same items as a m
   const strip = (it) => { const { uuid: _u, addedAt: _a, source: _s, updatedAt: _t, ...rest } = it; return rest; };
   assert.equal(items(TODAY).length, 2);
   assert.deepEqual(items(TODAY).map(strip), items(OTHER).map(strip), 'the same items as a manual add');
-  assert.ok(items(TODAY).every(i => i.source === `coach:plan:${plan.id}` && typeof i.food_server_id === 'number'));
+  assert.deepEqual(items(TODAY).map(i => i.source), ['0.0', '0.1'].map(k => `coach:plan:${plan.id}:${k}`));
+  assert.ok(items(TODAY).every(i => typeof i.food_server_id === 'number'));
   const copies = q(`SELECT id, source_app, source_external_id FROM foods WHERE user_id = ? AND name = 'Coach Granola' AND deleted_at IS NULL`, CL.id);
   assert.deepEqual(copies.map(c => [c.source_app, c.source_external_id]), [['coach', `food:${granola.id}`]], 'copied once, with its source');
   const coachView = (await http(coach, 'GET', `/api/coaching/clients/${CL.id}/recommendations`)).find(x => x.id === plan.id);

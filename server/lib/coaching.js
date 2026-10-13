@@ -120,13 +120,17 @@ export function coachingState(userId) {
   counts.unread = coachActive.reduce((n, id) => n + unread(id), 0);
   const asClientUnread = row ? unread(row.id) : 0;
   const requests = rows.filter(r => r.status === 'pending');
-  // Recommendations waiting for this person's answer (from their coach). A
-  // day plan past its date is Expired, not waiting (the server can't know
-  // the person's date, so it counts until the day after, in any time zone).
+  // Recommendations waiting for this person's answer (from their coach).
+  // `awaiting` (the dot) leaves day plans out: one past its date is Expired,
+  // and only the person's device knows their date, so the app counts those
+  // itself. `recommendations` counts them all, so an answer anywhere shows.
   const pendingRecs = db.prepare(`
     SELECT COUNT(*) AS c FROM coach_recommendations r JOIN coach_clients cc ON cc.id = r.pairing_id
      WHERE r.client_id = ? AND r.status = 'pending' AND cc.status = 'active' AND r.deleted_at IS NULL
-       AND (r.kind != 'day_plan' OR r.date >= date('now', '-1 day'))
+  `).get(userId).c;
+  const pendingNotPlans = db.prepare(`
+    SELECT COUNT(*) AS c FROM coach_recommendations r JOIN coach_clients cc ON cc.id = r.pairing_id
+     WHERE r.client_id = ? AND r.status = 'pending' AND cc.status = 'active' AND r.deleted_at IS NULL AND r.kind != 'day_plan'
   `).get(userId).c;
   return {
     role,
@@ -154,7 +158,7 @@ export function coachingState(userId) {
     // For the dot on Goals: unread messages, and things waiting for this
     // person's answer (requests now; recommendations later).
     unread: asClientUnread + past.reduce((n, x) => n + x.unread, 0) + counts.unread,
-    awaiting: requests.length + pendingRecs,
+    awaiting: requests.length + pendingNotPlans,
     recommendations: pendingRecs,
     // The newest recommendation made to this person: a replacement keeps the
     // count the same, so this is what tells the app to look again.

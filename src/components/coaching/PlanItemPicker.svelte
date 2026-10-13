@@ -9,7 +9,8 @@
   import { NtApi, API } from '../../lib/api.js';
   import { Nutrition } from '../../lib/nutrition.js';
   import { energyUnit } from '../../stores/settings.js';
-  import { planItemFrom, planItemsFromMeal } from '../../lib/coach-plans.js';
+  import { planItemFrom, planItemsFromMeal, cleanPlanPayload } from '../../lib/coach-plans.js';
+  import { showError } from '../../stores/toast.js';
   import { coachingErrorText } from '../../lib/coaching-view.js';
 
   export let open = false;
@@ -67,7 +68,11 @@
     if (source === 'off') items = [planItemFrom(x, 'off')];
     else if (kind === 'meals') items = planItemsFromMeal(x, whose);
     else items = [planItemFrom(x, `${whose}_${kind === 'recipes' ? 'recipe' : 'food'}`)];
-    if (items.length) dispatch('pick', { items, name: x.name });
+    // Only what a plan can carry: an Open Food Facts product needs its
+    // barcode, a food its id on the server (one made on a phone and not
+    // synced yet has none).
+    if (!items.length || cleanPlanPayload({ meals: [{ meal: 0, items }] }).error) { showError($_('coaching.plans.cant_add', { values: { name: x.name } })); return; }
+    dispatch('pick', { items, name: x.name });
     open = false;
   }
 </script>

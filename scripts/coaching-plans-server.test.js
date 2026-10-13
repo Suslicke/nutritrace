@@ -29,7 +29,15 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { cleanPlanPayload, planItemFrom, planItemsFromMeal, findOwn, foodFromPlanItem, planDiaryItem, loggedMeals, shownStatus, planTotals } from '../src/lib/coach-plans.js';
+import { cleanPlanPayload, planItemFrom, planItemsFromMeal, findOwn, foodFromPlanItem, planDiaryItem, loggedMeals, loggedItems, shownStatus, planTotals } from '../src/lib/coach-plans.js';
+// The dot's count of waiting day plans, from the app's store itself.
+const plansWaiting = (() => {
+  const src = readFileSync(new URL('../src/stores/coaching.js', import.meta.url), 'utf8');
+  const start = src.indexOf('export function plansWaiting');
+  let depth = 0, i = src.indexOf('{', src.indexOf(')', start));
+  for (; i < src.length; i++) { if (src[i] === '{') depth++; else if (src[i] === '}' && --depth === 0) break; }
+  return new Function(`${src.slice(start, i + 1).replace('export ', '')}; return plansWaiting;`)();
+})();
 import { Nutrition } from '../src/lib/nutrition.js';
 
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -189,18 +197,31 @@ test('one plan per date; Copy to Other Days makes one per day with one notificat
   assert.ok(await waitFor(() => received.some((p) => p.path === '/push-coach' && p.body === `Cleo Client declined your day plan for ${day(2)}.`)));
   assert.equal((await ok('client', 'GET', '/api/coaching/state')).unread, before - 1, 'its message is read');
 
-  // Past its date: Expired, shown from the date; no longer waiting for an answer.
+  // Past its date: Expired, shown from the date; no longer waiting for an
+  // answer. The server's `awaiting` leaves day plans to the device (only it
+  // knows the person's date); `recommendations` counts them, so a change shows.
   const sqlite = new (serverRequire('better-sqlite3'))(join(dir, 'nt.db'));
-  const awaiting = () => ok('client', 'GET', '/api/coaching/state').then((s) => s.awaiting);
-  const was = await awaiting();
+  const st = await ok('client', 'GET', '/api/coaching/state');
+  assert.equal(st.awaiting, 0, 'no requests or targets waiting; plans are counted on the device');
+  assert.equal(st.recommendations, 2);
+  const waitingBefore = plansWaiting(await ok('client', 'GET', '/api/coaching/recommendations'), TODAY);
   sqlite.prepare(`UPDATE coach_recommendations SET date = ? WHERE id = ?`).run(day(-3), copies[2].id);
   sqlite.close();
-  assert.equal(await awaiting(), was - 1, 'an expired plan stops the dot');
+  assert.equal(plansWaiting(await ok('client', 'GET', '/api/coaching/recommendations'), TODAY), waitingBefore - 1, 'an expired plan stops the dot');
   const expired = (await ok('client', 'GET', '/api/coaching/recommendations')).find((r) => r.id === copies[2].id);
   assert.equal(expired.status, 'pending', 'nothing changes it on the server');
   assert.equal(shownStatus(expired, TODAY), 'expired');
   assert.equal(shownStatus({ ...expired, date: TODAY }, TODAY), 'pending', 'its own day is not past');
   ids.plan1 = copies[0].id;
+  // Dates: from yesterday (today somewhere) to a year ahead.
+  assert.equal((await call('coach', 'POST', recPath(), { kind: 'day_plan', date: day(-5), payload: plan })).status, 400, 'long past');
+  assert.equal((await call('coach', 'POST', recPath(), { kind: 'day_plan', date: day(400), payload: plan })).status, 400, 'too far ahead');
+  // One plan per date, accepted ones too: the new one replaces it.
+  await ok('client', 'POST', `/api/coaching/recommendations/${copies[0].id}/answer`, { status: 'accepted' });
+  const [newer] = await ok('coach', 'POST', recPath(), { kind: 'day_plan', date: day(1), payload: plan });
+  const now = await ok('client', 'GET', '/api/coaching/recommendations');
+  assert.equal(now.find((r) => r.id === copies[0].id).status, 'replaced');
+  assert.equal(now.filter((r) => r.kind === 'day_plan' && r.date === day(1) && ['pending', 'accepted'].includes(r.status)).map((r) => r.id).join(), String(newer.id));
 });
 
 test('logging parity: a plan\'s items logged as the app logs them match the same foods added by hand, in totals, Statistics, the API, sync and meal.logged; foods the client lacks are copied once, with their source', { skip: !ready }, async () => {
@@ -226,10 +247,10 @@ test('logging parity: a plan\'s items logged as the app logs them match the same
   async function logMeal(slot) {
     const meal = payload.meals.find((m) => m.meal === slot);
     const items = [];
-    for (const it of meal.items) {
+    for (const [i, it] of meal.items.entries()) {
       let food = findOwn(it, await myCatalog());
       if (!food) food = await ok('client', 'POST', '/api/foods', foodFromPlanItem(it));
-      items.push(addDiaryItem(planDiaryItem(it, food, plan.id), slot));
+      items.push(addDiaryItem(planDiaryItem(it, food, plan.id, slot, i), slot));
     }
     const now = await ok('client', 'GET', `/api/diary/${TODAY}`);
     await saveDay(TODAY, [...now.items, ...items]);
@@ -258,7 +279,7 @@ test('logging parity: a plan\'s items logged as the app logs them match the same
   const strip = (it) => { const { uuid: _u, addedAt: _a, source: _s, ...rest } = it; return rest; };
   const dayOf = async (d) => (await ok('client', 'GET', `/api/diary/${d}`)).items;
   assert.deepEqual((await dayOf(TODAY)).map(strip), (await dayOf(OTHER)).map(strip));
-  assert.ok((await dayOf(TODAY)).every((i) => i.source === `coach:plan:${plan.id}`));
+  assert.deepEqual((await dayOf(TODAY)).map((i) => i.source), [0, 1, '2.0', '2.1'].map((k, n) => `coach:plan:${plan.id}:${n < 2 ? `0.${k}` : k}`));
   assert.ok((await dayOf(OTHER)).every((i) => !('source' in i)));
   // Totals: the day's, what Statistics reads (every day, summed the app's way), the API's.
   const sum = (items) => Nutrition.sum(items.map((i) => Nutrition.calculate(i)));
@@ -283,11 +304,15 @@ test('logging parity: a plan\'s items logged as the app logs them match the same
   // The coach sees which meals were logged; deleting one brings Log This back.
   const logged = async () => (await ok('coach', 'GET', recPath())).find((r) => r.id === plan.id).logged_meals;
   assert.deepEqual(await logged(), [0, 2]);
-  assert.deepEqual([...loggedMeals(await dayOf(TODAY), plan.id)].sort(), [0, 2], 'the client\'s card reads the same');
+  assert.deepEqual([...loggedMeals(await dayOf(TODAY), plan)].sort(), [0, 2], 'the client\'s card reads the same');
+  // One item deleted: its meal isn't logged any more, and only it is missing.
+  const shakeItem = (await dayOf(TODAY)).find((i) => i.name === 'Whey Shake');
+  await saveDay(TODAY, (await dayOf(TODAY)).filter((i) => i.uuid !== shakeItem.uuid), [shakeItem.uuid]);
+  assert.deepEqual(await logged(), [0]);
+  assert.deepEqual([...loggedMeals(await dayOf(TODAY), plan)], [0]);
+  assert.deepEqual([...loggedItems(await dayOf(TODAY), plan.id)].sort(), ['0.0', '0.1', '2.0']);
   const evening = (await dayOf(TODAY)).filter((i) => i.meal === 2).map((i) => i.uuid);
   await saveDay(TODAY, (await dayOf(TODAY)).filter((i) => i.meal !== 2), evening);
-  assert.deepEqual(await logged(), [0]);
-  assert.deepEqual([...loggedMeals(await dayOf(TODAY), plan.id)], [0]);
 
   // Logged again: the copies made before are used, never a second one.
   await logMeal(2);
@@ -300,8 +325,9 @@ test('logging parity: a plan\'s items logged as the app logs them match the same
   assert.notEqual(again.id, granola.id);
   assert.equal(again.source_external_id, `food:${coachFood.id}`);
   // A phone that made its own copy meanwhile: the push finds the one here.
-  const pushed = await ok('client', 'POST', '/api/sync/push', { foods: [{ client_id: 77, server_id: null, ...foodFromPlanItem(payload.meals[0].items[1]) }] });
+  const pushed = await ok('client', 'POST', '/api/sync/push', { foods: [{ client_id: 77, server_id: null, ...foodFromPlanItem(payload.meals[0].items[1]), name: 'Granola (phone)' }] });
   assert.equal(pushed.foods[0].server_id, again.id, 'the same food, not a failed push');
+  assert.equal(pushed.foods[0].row.name, 'Coach Granola', 'and the server\'s copy goes back, so the phone holds the same');
   assert.equal((await ok('client', 'GET', '/api/foods')).filter((f) => f.name === 'Coach Granola').length, 1);
   // The same for a CookTrace pantry item deleted here and imported again.
   const ct = { name: 'Pantry Rice', portion: 100, unit: 'g', nutrition: { calories: 130 }, source_app: 'cooktrace', source_external_id: 'pantry-12' };

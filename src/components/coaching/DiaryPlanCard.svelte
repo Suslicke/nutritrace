@@ -4,13 +4,16 @@
   // Nothing for anyone without a coach (the Diary only mounts this for them).
   import { coachingState, coachRecommendations } from '../../stores/coaching.js';
   import { currentDate, currentEntry } from '../../stores/diary.js';
-  import { loggedMeals } from '../../lib/coach-plans.js';
+  import { loggedItems } from '../../lib/coach-plans.js';
   import { coachNameFor } from '../../lib/coaching-view.js';
   import PlanCard from './PlanCard.svelte';
 
   // The newest plan for this day (a replaced or withdrawn one is history).
   $: rec = ($coachRecommendations || []).find(r => r.kind === 'day_plan' && r.date === $currentDate && r.status !== 'replaced' && r.status !== 'withdrawn') || null;
-  $: logged = rec && $currentEntry?.date === rec.date ? loggedMeals($currentEntry.items, rec.id) : new Set();
+  // Logging waits for the day's own entry, so nothing shows as not logged
+  // while it loads.
+  $: ready = !!rec && $currentEntry?.date === rec.date;
+  $: logged = ready ? loggedItems($currentEntry.items, rec.id) : null;
 </script>
 
 {#if rec}

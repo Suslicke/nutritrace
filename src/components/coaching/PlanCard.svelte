@@ -13,7 +13,7 @@
   import { currentDate } from '../../stores/diary.js';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { Nutrition } from '../../lib/nutrition.js';
-  import { planTotals, mealTotals, itemTotals, shownStatus } from '../../lib/coach-plans.js';
+  import { planTotals, mealTotals, itemTotals, shownStatus, itemKey } from '../../lib/coach-plans.js';
   import { answerPlan } from '../../lib/coach-recommendations.js';
   import { formatDay, todayLocal } from '../../lib/coaching-view.js';
 
@@ -24,9 +24,9 @@
   export let coachView = false;
   /** The client's meal names (the coach passes theirs; the client has their own). */
   export let mealNames = null;
-  /** On the Diary day: the meals logged (a Set of meal slots), and logging. */
+  /** On the Diary day: the items logged ("<meal>.<n>" keys; null while the day loads), and logging. */
   export let diary = false;
-  export let logged = new Set();
+  export let logged = null;
 
   const dispatch = createEventDispatcher();
   let busy = false, declining = false, declineNote = '', logging = null;
@@ -36,7 +36,10 @@
   $: status = shownStatus(rec, todayLocal());
   $: meals = rec.payload?.meals || [];
   $: total = planTotals(rec.payload);
-  $: loggedSet = coachView ? new Set(rec.logged_meals || []) : logged;
+  // Meals with every item logged: on the Diary from the day's items; for
+  // the coach, as the server worked it out.
+  $: loggedSet = coachView ? new Set(rec.logged_meals || [])
+    : new Set(meals.filter(m => m.items.every((_, i) => logged?.has(itemKey(m.meal, i)))).map(m => m.meal));
   $: unlogged = meals.filter(m => !loggedSet.has(m.meal));
 
   const energy = (v) => { const e = Nutrition.displayEnergy(Math.round(v || 0), $energyUnit); return `${e.value.toLocaleString()} ${e.unit}`; };
@@ -52,7 +55,8 @@
     try {
       const r = await answerPlan(rec, kind, { note: kind === 'declined' ? declineNote : '' });
       declining = false; declineNote = '';
-      if (kind === 'accepted') showSuccess(r.offline ? $_('coaching.plans.accepted_offline', { values: { name: coachName } }) : $_('coaching.plans.accepted'));
+      if (r.refused) showError($_('coaching.plans.refused'));
+      else if (kind === 'accepted') showSuccess(r.offline ? $_('coaching.plans.accepted_offline', { values: { name: coachName } }) : $_('coaching.plans.accepted'));
       else showSuccess($_('coaching.plans.declined'));
       dispatch('answered');
     } catch { showError($_('coaching.something_failed')); }
@@ -64,7 +68,7 @@
     logging = slot;
     try {
       const { logPlanMeal } = await import('../../lib/coach-plan-log.js');
-      await logPlanMeal(rec, slot);
+      await logPlanMeal(rec, slot, logged);
       showSuccess($_('coaching.plans.logged_meal', { values: { meal: mealName(slot) } }));
     } catch { showError($_('coaching.plans.log_failed')); }
     logging = null;
@@ -74,21 +78,21 @@
     logging = 'all';
     try {
       const { logPlanAll } = await import('../../lib/coach-plan-log.js');
-      await logPlanAll(rec, loggedSet);
+      await logPlanAll(rec, logged);
       showSuccess($_('coaching.plans.logged_all'));
     } catch { showError($_('coaching.plans.log_failed')); }
     logging = null;
   }
-  async function openItem(slot, item) {
+  async function openItem(slot, i, item) {
     const { openPlanItem } = await import('../../lib/coach-plan-log.js');
-    openPlanItem(rec, slot, item).catch(() => showError($_('coaching.plans.log_failed')));
+    openPlanItem(rec, slot, i, item).catch(() => showError($_('coaching.plans.log_failed')));
   }
   function openDiary() {
     currentDate.set(rec.date);
     push('/');
   }
 
-  $: canLog = diary && !coachView && rec.status === 'accepted';
+  $: canLog = diary && !!logged && !coachView && rec.status === 'accepted';
 </script>
 
 <section class="pc card" class:compact aria-label={coachView ? $_('coaching.plans.card_title_coach') : $_('coaching.plans.card_title', { values: { name: coachName } })}>
@@ -119,8 +123,14 @@
       <ul class="pc-items">
         {#each m.items as it, i (i)}
           <li>
-            {#if canLog}
-              <button class="pc-item pc-item-btn" on:click={() => openItem(m.meal, it)}>
+            {#if canLog && logged?.has(itemKey(m.meal, i))}
+              <div class="pc-item pc-item-done">
+                <span class="pc-item-name"><span class="material-symbols-rounded pc-check" aria-label={$_('coaching.plans.logged')}>check</span>{it.name}{#if it.brand}<span class="pc-brand">{' · '}{it.brand}</span>{/if}</span>
+                <span class="pc-item-amt">{amount(it)}</span>
+                <span class="pc-item-kcal">{energy(itemTotals(it).calories)}</span>
+              </div>
+            {:else if canLog}
+              <button class="pc-item pc-item-btn" on:click={() => openItem(m.meal, i, it)}>
                 <span class="pc-item-name">{it.name}{#if it.brand}<span class="pc-brand">{' · '}{it.brand}</span>{/if}</span>
                 <span class="pc-item-amt">{amount(it)}</span>
                 <span class="pc-item-kcal">{energy(itemTotals(it).calories)}</span>
@@ -212,6 +222,8 @@
   .pc-item-btn:hover .pc-item-name { color: var(--accent); }
   .pc-item-name { min-width: 0; overflow-wrap: anywhere; }
   .pc-brand { color: var(--text-3); }
+  .pc-check { font-size: 16px; color: var(--accent); vertical-align: -3px; margin-right: 4px; }
+  .pc-item-done .pc-item-name { color: var(--text-2); }
   .pc-item-amt { color: var(--text-3); white-space: nowrap; }
   .pc-item-kcal { color: var(--text-2); white-space: nowrap; }
   .pc-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 12px; padding-top: 10px; border-top: 2px solid var(--border-strong); }

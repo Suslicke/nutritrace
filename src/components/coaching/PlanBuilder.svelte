@@ -96,8 +96,8 @@
 
   async function send(dates) {
     if (busy) return;
-    const { error } = cleanPlanPayload(payload);
-    if (error) { showError(error); return; }
+    // Items are checked as they're added; this is the last look.
+    if (cleanPlanPayload(payload).error) { showError($_('coaching.plans.cant_send')); return; }
     busy = true;
     try {
       const made = await NtApi.post(`/api/coaching/clients/${clientId}/recommendations`, { kind: 'day_plan', dates, payload, note: note.trim() || undefined });
@@ -191,6 +191,8 @@
     <p class="pb-hint">{$_('coaching.plans.past_day')}</p>
   {:else if current?.status === 'pending'}
     <p class="pb-hint">{$_('coaching.plans.replaces')}</p>
+  {:else if current?.status === 'accepted'}
+    <p class="pb-hint">{$_('coaching.plans.replaces_accepted', { values: { name } })}</p>
   {/if}
   <div class="pb-actions">
     <button class="btn btn-secondary" disabled={busy || !count} on:click={openCopy}>{$_('coaching.plans.copy')}</button>

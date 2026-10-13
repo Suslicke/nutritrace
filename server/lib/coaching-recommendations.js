@@ -67,20 +67,24 @@ export function recommendTargets(pairing, coachId, body) {
 
 /**
  * The coach sends a day plan for one date, or the same plan for several
- * (Copy to Other Days). One plan per date: a plan still waiting for an
- * answer on that date is replaced. Each appears in the conversation; the
- * client gets one notification.
+ * (Copy to Other Days). One plan per date: the plan standing on that date,
+ * waiting or accepted, is replaced (what the client logged from it stays in
+ * their Diary). Dates from yesterday (in any time zone, today somewhere) to
+ * a year ahead. Each appears in the conversation; the client gets one
+ * notification.
  */
 export function recommendDayPlan(pairing, coachId, body) {
   const { payload, error } = cleanPlanPayload(body?.payload);
   if (error) throw _bad(error);
   const { dates, error: dateError } = cleanPlanDates(body);
   if (dateError) throw _bad(dateError);
+  const { lo, hi } = db.prepare(`SELECT date('now', '-1 day') AS lo, date('now', '+366 day') AS hi`).get();
+  if (dates.some(d => d < lo || d > hi)) throw _bad('A plan is for today or a later day.');
   const note = _note(body?.note);
   const ids = db.transaction(() => dates.map(date => {
     db.prepare(`
       UPDATE coach_recommendations SET status = 'replaced', updated_at = datetime('now')
-       WHERE pairing_id = ? AND kind = 'day_plan' AND date = ? AND status = 'pending'
+       WHERE pairing_id = ? AND kind = 'day_plan' AND date = ? AND status IN ('pending', 'accepted')
     `).run(pairing.id, date);
     const rid = db.prepare(`
       INSERT INTO coach_recommendations (pairing_id, coach_id, client_id, kind, date, payload, note)
@@ -131,7 +135,7 @@ export function listForPairing(pairingId) {
   const dayItems = db.prepare('SELECT items FROM diary WHERE user_id = ? AND date = ? AND deleted_at IS NULL');
   for (const r of rows) {
     if (r.kind !== 'day_plan' || r.status !== 'accepted') continue;
-    r.logged_meals = [...loggedMeals(_json(dayItems.get(r.client_id, r.date)?.items, []), r.id)].sort((a, b) => a - b);
+    r.logged_meals = [...loggedMeals(_json(dayItems.get(r.client_id, r.date)?.items, []), r)].sort((a, b) => a - b);
   }
   return rows;
 }

@@ -20,6 +20,8 @@ const KEY = 'nt:coaching';
 export const coachingSupported = writable(false);
 /** { role, can_coach, as_client: active pairing | null, requests: [{ id, coach, note, requested_at }], as_coach: { pending, active, recent } } */
 export const coachingState = writable(null);
+/** What a coach recommended to this person, newest first (kept on the device). */
+export const coachRecommendations = writable([]);
 
 /** Android with no server: coaching has nowhere to happen. */
 export const coachingNeedsServer = () => isNative && !getServerUrl();
@@ -47,7 +49,15 @@ export function showsClientsTab(supported, s) {
 export const coachTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsCoachTab($ok, $s));
 export const clientsTab = derived([coachingSupported, coachingState], ([$ok, $s]) => showsClientsTab($ok, $s));
 export const inCoaching = derived([coachTab, clientsTab], ([$a, $b]) => $a || $b);
-export const coachingBadge = derived([coachingSupported, coachingState], ([$ok, $s]) => showsBadge($ok, $s));
+// Day plans waiting for an answer count here, by the person's own date (a
+// plan past its day is Expired, nothing to answer); the server's `awaiting`
+// leaves them out, as it can't know that date.
+export const coachingBadge = derived([coachingSupported, coachingState, coachRecommendations], ([$ok, $s, $recs]) =>
+  showsBadge($ok, $s) || !!($ok && showsCoachTab(true, $s) && plansWaiting($recs)));
+/** Day plans waiting for an answer on or after today. */
+export function plansWaiting(recs, today = new Date().toLocaleDateString('sv-SE')) {
+  return (recs || []).filter(r => r.kind === 'day_plan' && r.status === 'pending' && r.date >= today).length;
+}
 /** Unread on the Coach tab (as a client) and the Clients tab (as a coach). */
 export const coachUnread = derived(coachingState, ($s) => (Number($s?.as_client?.unread) || 0) + ($s?.past || []).reduce((n, p) => n + (Number(p.unread) || 0), 0));
 export const clientsUnread = derived(coachingState, ($s) => Number($s?.as_coach?.unread) || 0);
@@ -93,6 +103,8 @@ export function setCoachingFromServer({ supported, state, userId }) {
     import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
     import('../lib/coach-recommendations.js').then(m => m.flushAnswers()).catch(() => {});
   }
+  // What this device holds (no request): day plans waiting light the dot.
+  if (state && showsCoachTab(true, state)) loadCoachRecommendations().catch(() => {});
 }
 
 /** The state this account last saved on this device (survives a reload). */
@@ -190,8 +202,6 @@ if (typeof window !== 'undefined' && !isNative) {
 }
 
 // ── Recommendations, the client's side ──────────────────────────────────────
-/** What a coach recommended to this person, newest first (kept on the device). */
-export const coachRecommendations = writable([]);
 
 /**
  * Read what this device holds, then (with `refresh`) ask the server. Only

@@ -162,8 +162,17 @@ test('day plans: Expired from the date, Logged from the day\'s items, the client
   assert.equal(p.shownStatus(rec, '2026-10-12'), 'pending');
   assert.equal(p.shownStatus({ ...rec, status: 'accepted' }, '2026-10-13'), 'accepted', 'answered is never Expired');
   assert.equal(p.shownStatus({ ...rec, kind: 'targets' }, '2026-10-13'), 'pending');
-  const items = [{ meal: 0, source: 'coach:plan:7' }, { meal: 2, source: 'coach:plan:7' }, { meal: 1, source: 'coach:plan:8' }, { meal: 3 }];
-  assert.deepEqual([...p.loggedMeals(items, 7)].sort(), [0, 2]);
+  // Each item marks its plan and place: a meal is logged once all its items are.
+  const plan = { id: 7, payload: { meals: [{ meal: 0, items: [{}, {}] }, { meal: 2, items: [{}] }] } };
+  const items = [{ meal: 0, source: 'coach:plan:7:0.0' }, { meal: 3, source: 'coach:plan:7:2.0' }, { meal: 1, source: 'coach:plan:70:0.1' }, { meal: 0 }];
+  assert.deepEqual([...p.loggedItems(items, 7)].sort(), ['0.0', '2.0']);
+  assert.deepEqual([...p.loggedMeals(items, plan)], [2], 'moved to another meal, still the plan\'s; Breakfast has one item to go');
+  assert.deepEqual([...p.loggedMeals([...items, { source: 'coach:plan:7:0.1' }], plan)].sort(), [0, 2]);
+  // Android meals keep the phone's id in `id`: the server's is what counts.
+  assert.equal(p.ingredientFoodId({ id: 3, server_id: 41 }), 41);
+  assert.equal(p.ingredientFoodId({ id: 3, server_id: null }), null);
+  assert.equal(p.ingredientFoodId({ id: 5, food_server_id: 52 }), 52);
+  assert.equal(p.ingredientFoodId({ id: 9 }), 9);
   // On Android a food's own id is the phone's; the server's is server_id.
   const foods = [{ id: 3, server_id: 41, name: 'Oats' }, { id: 4, server_id: null, name: 'Granola', source_app: 'coach', source_external_id: 'food:9' }, { id: 5, server_id: 50, name: 'Shake', barcode: '4006381333931' }];
   assert.equal(p.findOwn({ source: { kind: 'client_food', id: 41 } }, { foods }).name, 'Oats');

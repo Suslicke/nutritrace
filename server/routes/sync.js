@@ -357,7 +357,8 @@ router.post('/push', wrap(async (req, res) => {
         // deleted one lets go of its place in the unique source index.
         if (f.source_app && f.source_external_id) {
           const same = db.prepare(`SELECT id, deleted_at FROM foods WHERE user_id IS ? AND source_app = ? AND source_external_id = ?`).get(u ?? null, f.source_app, f.source_external_id);
-          if (same && !same.deleted_at) { result.foods.push({ client_id: f.client_id, server_id: same.id }); continue; }
+          // The server's copy goes back with it, so the phone holds the same.
+          if (same && !same.deleted_at) { result.foods.push({ client_id: f.client_id, server_id: same.id, row: parse(winner('foods', same.id)) }); continue; }
           if (same) db.prepare(`UPDATE foods SET source_app = NULL, source_external_id = NULL WHERE id = ?`).run(same.id);
         }
         const vis = resolveNewItemVisibility(u);

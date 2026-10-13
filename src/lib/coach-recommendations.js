@@ -97,6 +97,7 @@ export function flushAnswers() {
   _flushing = (async () => {
     const store = await _store();
     let sent = 0, offline = false;
+    const refused = [];
     for (const a of await store.pending()) {
       try {
         const row = await NtApi.post(`/api/coaching/recommendations/${a.id}/answer`, { status: a.status, response_note: a.response_note || undefined });
@@ -107,17 +108,22 @@ export function flushAnswers() {
         if (e?.offline || !status || status >= 500) { offline = true; break; }
         // Refused for good: what it is now (or gone), and undo a refused Accept.
         let now = null;
-        try { now = (await NtApi.get('/api/coaching/recommendations') || []).find(r => r.id === a.id) || null; }
-        catch { offline = true; break; }
+        try {
+          const all = await NtApi.get('/api/coaching/recommendations') || [];
+          now = all.find(r => r.id === a.id) || null;
+          // What replaced it comes too.
+          await store.upsert(all.filter(r => r.id !== a.id));
+        } catch { offline = true; break; }
         const settled = now || { ...(await store.list()).find(r => r.id === a.id), status: 'withdrawn' };
         await store.settle(settled);
+        refused.push(a.id);
         if (a.status === 'accepted') revertRefusedAccept(settled);
         sent++;
       }
     }
     if (sent && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
     if (sent) _refreshCounts();
-    return { sent, offline };
+    return { sent, offline, refused };
   })().finally(() => { _flushing = null; });
   return _flushing;
 }
@@ -198,15 +204,23 @@ export async function acceptTargets(rec, { note = '', t, date = new Date().toLoc
  */
 async function _answer(rec, status, note) {
   const store = await _store();
+  const changed = () => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations')); };
   if (!(await store.available())) {
-    await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status, response_note: note || undefined });
+    try {
+      await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status, response_note: note || undefined });
+    } catch (e) {
+      const code = Number(e?.status) || 0;
+      if (code === 409 || code === 404) { changed(); return { offline: false, refused: true }; }
+      throw e;
+    }
     _refreshCounts();
-    return { offline: false };
+    changed();
+    return { offline: false, refused: false };
   }
   await store.answer(rec.id, status, note);
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
+  changed();
   const r = await flushAnswers().catch(() => ({ offline: true }));
-  return { offline: !!r?.offline };
+  return { offline: !!r?.offline, refused: !!r?.refused?.includes(rec.id) };
 }
 
 /** Decline (with an optional note). Nothing else changes. */

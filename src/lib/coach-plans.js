@@ -18,10 +18,10 @@
  *   off (Open Food Facts, by its barcode).
  *
  * Logged, an item is an ordinary diary item, made the way the Foods page
- * makes one (planDiaryItem), with `source` = 'coach:plan:<id>' (the
- * provenance field MCP's log tools use too). That is how a plan's meal is
- * known to be logged, and deleting the items from the Diary brings Log This
- * back.
+ * makes one (planDiaryItem), with `source` = 'coach:plan:<id>:<meal>.<n>'
+ * (the provenance field MCP's log tools use too): the plan, and which of its
+ * items. That is how each item, and so each meal, is known to be logged;
+ * deleting it from the Diary brings Log This back for the rest.
  */
 
 export const PLAN_SOURCES = ['client_food', 'client_recipe', 'coach_food', 'coach_recipe', 'off'];
@@ -121,14 +121,27 @@ const _sum = (list) => list.reduce((t, x) => { for (const k of MACROS) t[k] += x
 export const mealTotals = (meal) => _sum((meal?.items || []).map(itemTotals));
 export const planTotals = (payload) => _sum((payload?.meals || []).map(mealTotals));
 
-/** The diary items' provenance for this plan. */
-export const planMark = (id) => `coach:plan:${id}`;
+/** A logged item's provenance: this plan, and which of its items. */
+export const planMark = (id, slot, index) => `coach:plan:${id}:${slot}.${index}`;
+export const itemKey = (slot, index) => `${slot}.${index}`;
 
-/** The meals of this plan logged on its day (from that day's diary items). */
-export function loggedMeals(diaryItems, planId) {
-  const mark = planMark(planId);
+/** The plan's items logged on its day ("<meal>.<n>"), from that day's diary items. */
+export function loggedItems(diaryItems, planId) {
+  const prefix = `coach:plan:${planId}:`;
   const out = new Set();
-  for (const it of diaryItems || []) if (it && it.source === mark) out.add(Number(it.meal) || 0);
+  for (const it of diaryItems || []) {
+    if (it && typeof it.source === 'string' && it.source.startsWith(prefix)) out.add(it.source.slice(prefix.length));
+  }
+  return out;
+}
+
+/** The plan's meals with every item logged. */
+export function loggedMeals(diaryItems, rec) {
+  const items = loggedItems(diaryItems, rec?.id);
+  const out = new Set();
+  for (const m of rec?.payload?.meals || []) {
+    if (m.items?.length && m.items.every((_, i) => items.has(itemKey(m.meal, i)))) out.add(m.meal);
+  }
   return out;
 }
 
@@ -144,6 +157,12 @@ export function shownStatus(rec, today) {
 
 /** A food's server id, on the web (its id) and on Android (server_id). */
 export const serverIdOf = (f) => (f && 'server_id' in f ? f.server_id : (typeof f?.id === 'number' ? f.id : null));
+/**
+ * A saved meal's ingredient's food, by its server id: food_server_id, else
+ * the food row's own (a meal saved on Android keeps the phone's id in `id`
+ * and the server's in `server_id`).
+ */
+export const ingredientFoodId = (ing) => ing?.food_server_id ?? serverIdOf(ing);
 
 /** How a copy of a coach's food or recipe remembers where it came from. */
 export function coachSource(item) {
@@ -188,14 +207,14 @@ export function foodFromPlanItem(item) {
  * adding a food (the food, at the plan's amount and nutrition), marked with
  * the plan it came from. addDiaryItem gives it its uuid, meal and time.
  */
-export function planDiaryItem(item, food, planId) {
+export function planDiaryItem(item, food, planId, slot, index) {
   return {
     ...food,
     portion: item.portion,
     unit: item.unit || 'g',
     quantity: item.quantity || 1,
     nutrition: { ...(item.nutrition || {}) },
-    source: planMark(planId),
+    source: planMark(planId, slot, index),
   };
 }
 
@@ -220,7 +239,7 @@ export function planItemFrom(food, kind) {
  */
 export function planItemsFromMeal(meal, whose) {
   return (meal?.items || []).map(ing => {
-    const id = Number(ing.food_server_id ?? ing.id);
+    const id = Number(ingredientFoodId(ing));
     const known = Number.isInteger(id) && id > 0;
     // An ingredient with no food behind it any more: by its barcode, if any.
     const kind = known ? (whose === 'coach' ? 'coach_food' : 'client_food') : 'off';

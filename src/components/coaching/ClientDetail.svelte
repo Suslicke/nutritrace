@@ -117,7 +117,7 @@
   </div>
 
   {#if tab === 'chat'}
-    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} mealNames={overview?.meal_names} />
+    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} mealNames={overview?.meal_names || DEFAULT_MEALS} />
   {:else if tab === 'plans'}
     <PlanBuilder {row} recommendations={recs} on:sent={loadRecs} />
   {:else if tab === 'targets'}
