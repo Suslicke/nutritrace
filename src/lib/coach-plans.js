@@ -37,33 +37,33 @@ const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 export const isPlanDate = (d) => typeof d === 'string' && DATE_RE.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
 
 function _cleanItem(it) {
-  if (!it || typeof it !== 'object') return { error: 'A plan item is missing.' };
+  if (!it || typeof it !== 'object') return { error: 'A plan item is missing.', code: 'plan_item_missing' };
   const name = text(it.name, NAME_MAX);
-  if (!name) return { error: 'Every item needs a name.' };
+  if (!name) return { error: 'Every item needs a name.', code: 'plan_item_name' };
   const portion = num(it.portion), quantity = num(it.quantity ?? 1);
-  if (!(Number.isFinite(portion) && portion > 0 && portion <= 100000)) return { error: `"${name}" needs an amount.` };
-  if (!(Number.isFinite(quantity) && quantity > 0 && quantity <= 100)) return { error: `"${name}" needs a number of servings.` };
+  if (!(Number.isFinite(portion) && portion > 0 && portion <= 100000)) return { error: `"${name}" needs an amount.`, code: 'plan_item_amount', params: { name } };
+  if (!(Number.isFinite(quantity) && quantity > 0 && quantity <= 100)) return { error: `"${name}" needs a number of servings.`, code: 'plan_item_servings', params: { name } };
   const unit = text(it.unit, UNIT_MAX) || 'g';
   const n = it.nutrition && typeof it.nutrition === 'object' && !Array.isArray(it.nutrition) ? it.nutrition : null;
-  if (!n) return { error: `"${name}" needs its nutrition.` };
+  if (!n) return { error: `"${name}" needs its nutrition.`, code: 'plan_item_nutrition', params: { name } };
   const nutrition = {};
   for (const [k, v] of Object.entries(n)) {
     if (k === '_derived' || v === null || v === undefined || v === '') continue;
     const x = num(v);
-    if (!NUTRIENT_KEY.test(k) || !Number.isFinite(x) || x < 0 || x > 100000) return { error: `"${name}" has a nutrition value out of range.` };
+    if (!NUTRIENT_KEY.test(k) || !Number.isFinite(x) || x < 0 || x > 100000) return { error: `"${name}" has a nutrition value out of range.`, code: 'plan_item_nutrition_range', params: { name } };
     nutrition[k] = x;
-    if (Object.keys(nutrition).length > 80) return { error: `"${name}" has too many nutrition values.` };
+    if (Object.keys(nutrition).length > 80) return { error: `"${name}" has too many nutrition values.`, code: 'plan_item_nutrition_many', params: { name } };
   }
   const src = it.source && typeof it.source === 'object' ? it.source : {};
-  if (!PLAN_SOURCES.includes(src.kind)) return { error: `"${name}" needs to say where it came from.` };
+  if (!PLAN_SOURCES.includes(src.kind)) return { error: `"${name}" needs to say where it came from.`, code: 'plan_item_source', params: { name } };
   const barcode = it.barcode == null || it.barcode === '' ? null : String(it.barcode).trim();
-  if (barcode !== null && !BARCODE_RE.test(barcode)) return { error: `"${name}" has a barcode that isn't one.` };
+  if (barcode !== null && !BARCODE_RE.test(barcode)) return { error: `"${name}" has a barcode that isn't one.`, code: 'plan_item_barcode', params: { name } };
   const source = { kind: src.kind };
   if (src.kind === 'off') {
-    if (!barcode) return { error: `"${name}" needs its barcode.` };
+    if (!barcode) return { error: `"${name}" needs its barcode.`, code: 'plan_item_needs_barcode', params: { name } };
   } else {
     const id = num(src.id);
-    if (!(Number.isInteger(id) && id > 0)) return { error: `"${name}" needs to say where it came from.` };
+    if (!(Number.isInteger(id) && id > 0)) return { error: `"${name}" needs to say where it came from.`, code: 'plan_item_source', params: { name } };
     source.id = id;
   }
   const brand = text(it.brand, NAME_MAX);
@@ -76,27 +76,27 @@ function _cleanItem(it) {
  */
 export function cleanPlanPayload(input) {
   const src = input && typeof input === 'object' ? input : {};
-  if (!Array.isArray(src.meals)) return { error: 'A plan needs its meals.' };
+  if (!Array.isArray(src.meals)) return { error: 'A plan needs its meals.', code: 'plan_meals_missing' };
   const bySlot = new Map();
   let total = 0;
   for (const m of src.meals) {
-    if (!m || typeof m !== 'object') return { error: 'A plan meal is missing.' };
+    if (!m || typeof m !== 'object') return { error: 'A plan meal is missing.', code: 'plan_meal_missing' };
     const slot = num(m.meal);
-    if (!(Number.isInteger(slot) && slot >= 0 && slot < PLAN_LIMITS.meals)) return { error: 'A plan meal is not one of the meals.' };
-    if (bySlot.has(slot)) return { error: 'A meal is in the plan twice.' };
+    if (!(Number.isInteger(slot) && slot >= 0 && slot < PLAN_LIMITS.meals)) return { error: 'A plan meal is not one of the meals.', code: 'plan_meal_unknown' };
+    if (bySlot.has(slot)) return { error: 'A meal is in the plan twice.', code: 'plan_meal_twice' };
     const items = Array.isArray(m.items) ? m.items : [];
-    if (items.length > PLAN_LIMITS.itemsPerMeal) return { error: `A meal can hold up to ${PLAN_LIMITS.itemsPerMeal} items.` };
+    if (items.length > PLAN_LIMITS.itemsPerMeal) return { error: `A meal can hold up to ${PLAN_LIMITS.itemsPerMeal} items.`, code: 'plan_meal_too_many', params: { max: PLAN_LIMITS.itemsPerMeal } };
     const clean = [];
     for (const it of items) {
       const r = _cleanItem(it);
-      if (r.error) return { error: r.error };
+      if (r.error) return r;
       clean.push(r.item);
     }
     total += clean.length;
     if (clean.length) bySlot.set(slot, clean);
   }
-  if (!total) return { error: 'Add something to the plan first.' };
-  if (total > PLAN_LIMITS.items) return { error: `A plan can hold up to ${PLAN_LIMITS.items} items.` };
+  if (!total) return { error: 'Add something to the plan first.', code: 'plan_empty' };
+  if (total > PLAN_LIMITS.items) return { error: `A plan can hold up to ${PLAN_LIMITS.items} items.`, code: 'plan_too_many', params: { max: PLAN_LIMITS.items } };
   return { payload: { meals: [...bySlot.entries()].sort((a, b) => a[0] - b[0]).map(([meal, items]) => ({ meal, items })) } };
 }
 
@@ -104,8 +104,8 @@ export function cleanPlanPayload(input) {
 export function cleanPlanDates(body) {
   const list = Array.isArray(body?.dates) ? body.dates : [body?.date];
   const dates = [...new Set(list.map(d => String(d ?? '')))];
-  if (!dates.length || !dates.every(isPlanDate)) return { error: 'A plan needs a date.' };
-  if (dates.length > PLAN_LIMITS.dates) return { error: `A plan can go to up to ${PLAN_LIMITS.dates} days at once.` };
+  if (!dates.length || !dates.every(isPlanDate)) return { error: 'A plan needs a date.', code: 'plan_date_missing' };
+  if (dates.length > PLAN_LIMITS.dates) return { error: `A plan can go to up to ${PLAN_LIMITS.dates} days at once.`, code: 'plan_too_many_dates', params: { max: PLAN_LIMITS.dates } };
   return { dates: dates.sort() };
 }
 

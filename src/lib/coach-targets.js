@@ -39,9 +39,9 @@ export function cleanTargetsPayload(input) {
   const goalsIn = src.goals && typeof src.goals === 'object' ? src.goals : {};
   const out = { goals: {} };
   for (const key of Object.keys(goalsIn)) {
-    if (!TARGET_KEYS.includes(key)) return { error: `Only calories, protein, carbs and fat can be recommended.` };
+    if (!TARGET_KEYS.includes(key)) return { error: `Only calories, protein, carbs and fat can be recommended.`, code: 'targets_only_four' };
     const e = goalsIn[key];
-    if (!e || typeof e !== 'object') return { error: 'A target is missing its value.' };
+    if (!e || typeof e !== 'object') return { error: 'A target is missing its value.', code: 'target_missing' };
     const isPercent = key !== 'calories' && !!e.isPercent;
     const max = isPercent ? LIMIT.percent : key === 'calories' ? LIMIT.calories : LIMIT.grams;
     const shared = e.sharedGoal !== false;
@@ -49,12 +49,12 @@ export function cleanTargetsPayload(input) {
     let days;
     if (shared) {
       const v = num(e.isMin ? e.min : e.max) ?? num(e.max ?? e.min);
-      if (v === null || !okNum(v, max)) return { error: 'A target needs a number in range.' };
+      if (v === null || !okNum(v, max)) return { error: 'A target needs a number in range.', code: 'target_range' };
       days = Array(7).fill(v);
     } else {
-      if (!Array.isArray(e.days) || e.days.length !== 7) return { error: 'A target by weekday needs seven days.' };
+      if (!Array.isArray(e.days) || e.days.length !== 7) return { error: 'A target by weekday needs seven days.', code: 'target_weekdays' };
       days = e.days.map(num);
-      if (!days.every(v => okNum(v, max)) || !days.some(v => v !== null)) return { error: 'A target needs a number in range.' };
+      if (!days.every(v => okNum(v, max)) || !days.some(v => v !== null)) return { error: 'A target needs a number in range.', code: 'target_range' };
     }
     const valid = days.filter(v => v !== null);
     const value = shared ? days[0] : Math.max(...valid);
@@ -65,13 +65,13 @@ export function cleanTargetsPayload(input) {
   // Percent macros can't add up to more than all the calories.
   for (let d = 0; d < 7; d++) {
     const pct = ['proteins', 'carbohydrates', 'fat'].reduce((n, k) => n + (out.goals[k]?.isPercent ? (out.goals[k].days[d] || 0) : 0), 0);
-    if (pct > 100) return { error: 'Protein, carbs and fat in percent add up to more than 100%.' };
+    if (pct > 100) return { error: 'Protein, carbs and fat in percent add up to more than 100%.', code: 'percent_over' };
   }
   if (src.mode != null && src.mode !== '') {
-    if (!CALORIE_MODES.includes(src.mode)) return { error: 'Unknown calorie goal mode.' };
+    if (!CALORIE_MODES.includes(src.mode)) return { error: 'Unknown calorie goal mode.', code: 'mode_unknown' };
     out.mode = src.mode;
   }
-  if (!Object.keys(out.goals).length && !out.mode) return { error: 'Recommend at least one target or a calorie goal mode.' };
+  if (!Object.keys(out.goals).length && !out.mode) return { error: 'Recommend at least one target or a calorie goal mode.', code: 'targets_nothing' };
   return { payload: out };
 }
 

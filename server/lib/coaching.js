@@ -44,7 +44,7 @@ export function activePairing(coachId, clientId) {
 /** Signed in, with accounts on: coaching needs more than one person. */
 function _signedIn(req, res) {
   if (!userMgmtActive() || !req.user?.id) {
-    res.status(401).json({ error: 'Not authenticated' });
+    res.status(401).json({ error: 'Not authenticated', code: 'not_signed_in' });
     return false;
   }
   return true;
@@ -53,7 +53,7 @@ function _signedIn(req, res) {
 /** Middleware: the signed-in account may coach (Coach role or admin). */
 export function requireCoachRole(req, res, next) {
   if (!_signedIn(req, res)) return;
-  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.' });
+  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.', code: 'coaches_only' });
   next();
 }
 
@@ -70,10 +70,10 @@ export function requireAccount(req, res, next) {
  */
 export function requireCoachOf(req, res, next) {
   if (!_signedIn(req, res)) return;
-  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.' });
+  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.', code: 'coaches_only' });
   const clientId = Number(req.params.clientId);
   const pairing = Number.isInteger(clientId) ? activePairing(req.user.id, clientId) : null;
-  if (!pairing) return res.status(404).json({ error: 'Client not found' });
+  if (!pairing) return res.status(404).json({ error: 'Client not found', code: 'client_not_found' });
   req.pairing = pairing;
   next();
 }

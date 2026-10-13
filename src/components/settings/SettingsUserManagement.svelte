@@ -14,7 +14,7 @@
   import Dialog from '../ui/Dialog.svelte';
   import RequestSheet from '../coaching/RequestSheet.svelte';
   import { coachingSupported, refreshCoaching } from '../../stores/coaching.js';
-  import { localDay } from '../../lib/coaching-view.js';
+  import { localDay, coachingErrorText } from '../../lib/coaching-view.js';
 
   // ── User Management state ────────────────────────────────────────────────────
   let umUsers        = [];
@@ -121,7 +121,7 @@
     try {
       await NtApi.post(`/api/coaching/pairings/${p.id}/end`, {});
       showSuccess($_('settings.users.coaching_ended'));
-    } catch (e) { showError(e?.offline ? $_('coaching.needs_connection') : (e.message || $_('coaching.something_failed'))); }
+    } catch (e) { showError(coachingErrorText(e, $_)); }
     await loadPairings();
     refreshCoaching();
   }

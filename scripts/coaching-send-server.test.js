@@ -9,7 +9,8 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { deflateSync } from 'node:zlib';
 import { createServer as netServer } from 'node:net';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
@@ -49,7 +50,13 @@ const recPath = () => `/api/coaching/clients/${ids.client}/recommendations`;
 test.before(async () => {
   if (!ready) return;
   sink = await new Promise((res) => {
-    const s = http.createServer((req, resp) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { received.push({ path: req.url, body: b }); resp.end('{}'); }); });
+    const s = http.createServer((req, resp) => {
+      // Stand-ins for images a meal links to elsewhere.
+      if (req.url === '/pic.png') { resp.writeHead(200, { 'Content-Type': 'image/png' }); return resp.end(PNG); }
+      if (req.url === '/page.png') { resp.writeHead(200, { 'Content-Type': 'image/png' }); return resp.end('<html>' + 'x'.repeat(400) + '</html>'); }
+      if (req.url === '/gone.png') { resp.writeHead(404); return resp.end(); }
+      let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { received.push({ path: req.url, body: b }); resp.end('{}'); });
+    });
     s.listen(0, '127.0.0.1', () => res(s));
   });
   dir = mkdtempSync(join(tmpdir(), 'nt-coach-send-'));
@@ -57,7 +64,7 @@ test.before(async () => {
   base = `http://127.0.0.1:${port}`;
   proc = spawn(process.execPath, ['index.js'], {
     cwd: fileURLToPath(new URL('../server/', import.meta.url)),
-    env: { ...cleanEnv(), PORT: String(port), DB_PATH: join(dir, 'nt.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test', LOG_LEVEL: 'error', UPDATE_CHECK: 'off', MCP_ENABLED: '1', PUBLIC_API_ENABLED: '1', WEBHOOKS_ENABLED: '1', ALLOW_PRIVATE_WEBHOOK_URLS: '1' },
+    env: { ...cleanEnv(), PORT: String(port), DB_PATH: join(dir, 'nt.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test', LOG_LEVEL: 'error', UPDATE_CHECK: 'off', MCP_ENABLED: '1', PUBLIC_API_ENABLED: '1', WEBHOOKS_ENABLED: '1', ALLOW_PRIVATE_WEBHOOK_URLS: '1', ALLOW_PRIVATE_IMAGE_URLS: '1' },
     stdio: 'ignore',
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(base + '/api/auth/status')).ok) break; } catch { /* not up */ } await sleep(100); }
@@ -80,8 +87,19 @@ test.before(async () => {
     await ok(who, 'PUT', '/api/settings', { key: 'ntfyTopic', value: `push-${who}` });
   }
 });
-test.after(() => { proc?.kill(); sink?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); });
+test.after(() => { try { _db?.close(); } catch {} proc?.kill(); sink?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); });
 
+// A real 32 x 32 PNG (the download keeps only images, over 100 bytes).
+const PNG = (() => {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(32, 0); ihdr.writeUInt32BE(32, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc(32 * (1 + 32 * 3)); for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) raw.set([x * 8, y * 8, 120], y * 97 + 1 + x * 3);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+})();
+let _db = null;
+const serverDb = () => (_db ||= new (serverRequire('better-sqlite3'))(join(dir, 'nt.db')));
 const recipeOf = (who) => ok(who, 'GET', '/api/meals?recipes=1');
 
 test('a coach sends their own recipe or meal, with sharing off; only their own, of the kind it is', { skip: !ready }, async () => {
@@ -99,7 +117,11 @@ test('a coach sends their own recipe or meal, with sharing off; only their own, 
   const theirs = await ok('coach2', 'POST', '/api/meals', { name: 'Not Mine', is_recipe: true, items: [], nutrition: {} });
   Object.assign(ids, { oats: oats.id, skyr: skyr.id, bowl: bowl.id, breakfast: breakfast.id });
 
-  assert.equal((await call('coach', 'POST', recPath(), { kind: 'recipe', meal_id: theirs.id })).status, 404, 'another coach\'s');
+  const notMine = await call('coach', 'POST', recPath(), { kind: 'recipe', meal_id: theirs.id });
+  assert.equal(notMine.status, 404, 'another coach\'s');
+  assert.equal(notMine.data.code, 'own_meal_only', 'named by a code, for the app to say in the person\'s language');
+  const again = await call('coach', 'POST', '/api/coaching/requests', { client_id: ids.client });
+  assert.deepEqual([again.status, again.data.code, again.data.params], [409, 'already_client', { name: 'Cleo Client' }]);
   // Its kind is the saved one's, whatever the editor said.
   const asMeal = await ok('coach', 'POST', recPath(), { kind: 'meal', meal_id: bowl.id });
   assert.equal(asMeal.kind, 'recipe');
@@ -121,6 +143,22 @@ test('a coach sends their own recipe or meal, with sharing off; only their own, 
   // Later edits of the coach's never reach what was sent.
   await ok('coach', 'PUT', `/api/meals/${bowl.id}`, { name: 'Protein Bowl v2', items: [], nutrition: {}, is_recipe: true });
   assert.equal((await ok('client', 'GET', '/api/coaching/recommendations')).find((r) => r.id === sent.id).payload.meal.name, 'Protein Bowl');
+});
+
+test('a meal\'s picture from elsewhere goes with it, downloaded the safe way: an image, or nothing', { skip: !ready }, async () => {
+  const at = `http://127.0.0.1:${sink.address().port}`;
+  const send = async (name, img_url) => {
+    const meal = await ok('coach', 'POST', '/api/meals', { name, is_recipe: true, portion: 200, unit: 'g', nutrition: { calories: 300 }, items: [] });
+    // As a CookTrace import keeps it: a link, not an upload.
+    serverDb().prepare('UPDATE meals SET img_url = ? WHERE id = ?').run(img_url, meal.id);
+    return (await ok('coach', 'POST', recPath(), { kind: 'recipe', meal_id: meal.id })).payload.meal.img_url;
+  };
+  const pic = await send('Pictured Bowl', `${at}/pic.png`);
+  assert.match(pic, /^\/uploads\/[\w.-]+\.png$/, 'downloaded into this server\'s uploads');
+  assert.deepEqual(readFileSync(join(dir, 'uploads', pic.slice('/uploads/'.length))), PNG);
+  assert.equal(await send('Not a Picture', `${at}/page.png`), null, 'not an image: nothing');
+  assert.equal(await send('Gone Picture', `${at}/gone.png`), null, 'not there: nothing');
+  assert.equal(await send('Odd Link', 'javascript:alert(1)'), null);
 });
 
 test('Accept: the client\'s own copy, with its source and its ingredients\' foods, once; Decline makes nothing', { skip: !ready }, async () => {

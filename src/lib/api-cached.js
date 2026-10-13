@@ -444,6 +444,7 @@ async function _coachingFetch(method, path, body) {
     const data = await res.json().catch(() => ({}));
     const err = new Error(data.error || `API error ${res.status}`);
     err.status = res.status;
+    if (typeof data.code === 'string') { err.code = data.code; if (data.params && typeof data.params === 'object') err.params = data.params; }
     throw err;
   }
   return res.json();

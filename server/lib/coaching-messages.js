@@ -67,22 +67,25 @@ export function messageOut(r) {
   };
 }
 
-function _bad(message, status = 400) {
+// `code` names the error for the app, which says it in the person's language.
+function _bad(message, status = 400, code = null, params = null) {
   const e = new Error(message);
   e.status = status;
+  if (code) e.code = code;
+  if (params) e.params = params;
   return e;
 }
 
 /** A photo sent as a data URL becomes a private file. Returns its name. */
 export function savePhoto(dataUrl) {
   const m = /^data:image\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i.exec(String(dataUrl || ''));
-  if (!m) throw _bad('That photo could not be read.');
+  if (!m) throw _bad('That photo could not be read.', 400, 'photo_unreadable');
   const buf = Buffer.from(m[1].replace(/\s+/g, ''), 'base64');
-  if (!buf.length) throw _bad('That photo could not be read.');
-  if (buf.length > PHOTO_MAX_BYTES) throw _bad('That photo is too large.');
+  if (!buf.length) throw _bad('That photo could not be read.', 400, 'photo_unreadable');
+  if (buf.length > PHOTO_MAX_BYTES) throw _bad('That photo is too large.', 400, 'photo_too_large');
   const kind = detectImageTypeFromBuffer(buf);
   const ext = EXT[kind];
-  if (!ext) throw _bad('Only JPEG, PNG, GIF, WebP and AVIF photos can be sent.');
+  if (!ext) throw _bad('Only JPEG, PNG, GIF, WebP and AVIF photos can be sent.', 400, 'photo_type');
   fs.mkdirSync(photoDir(), { recursive: true });
   const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
   fs.writeFileSync(path.join(photoDir(), name), buf, { mode: 0o600 });
@@ -101,16 +104,16 @@ export function removePhoto(name) {
  * once. Returns { row, created }.
  */
 export function createMessage(p, userId, { uuid, body, image } = {}) {
-  if (!canWrite(p, userId)) throw _bad('This conversation is closed.', 403);
-  if (typeof uuid !== 'string' || !UUID_RE.test(uuid)) throw _bad('Missing message id.');
+  if (!canWrite(p, userId)) throw _bad('This conversation is closed.', 403, 'conversation_closed');
+  if (typeof uuid !== 'string' || !UUID_RE.test(uuid)) throw _bad('Missing message id.', 400, 'message_id_missing');
   const existing = db.prepare('SELECT * FROM coach_messages WHERE uuid = ?').get(uuid);
   if (existing) {
     if (existing.sender_id === userId && existing.pairing_id === p.id) return { row: existing, created: false };
-    throw _bad('That message id is already used.', 409);
+    throw _bad('That message id is already used.', 409, 'message_id_used');
   }
   const text = typeof body === 'string' ? body.replace(/\s+$/, '') : '';
-  if (text.length > MESSAGE_MAX) throw _bad(`A message can be up to ${MESSAGE_MAX.toLocaleString('en-US')} characters.`);
-  if (!text.trim() && !image) throw _bad('Write a message or add a photo.');
+  if (text.length > MESSAGE_MAX) throw _bad(`A message can be up to ${MESSAGE_MAX.toLocaleString('en-US')} characters.`, 400, 'message_too_long', { max: MESSAGE_MAX });
+  if (!text.trim() && !image) throw _bad('Write a message or add a photo.', 400, 'message_empty');
   const photo = image ? savePhoto(image) : null;
   try {
     const id = db.prepare(`
@@ -130,7 +133,7 @@ export function createMessage(p, userId, { uuid, body, image } = {}) {
 /** Delete your own message: the row stays as "Message deleted", text and photo go. */
 export function deleteMessage(uuid, userId) {
   const r = db.prepare('SELECT * FROM coach_messages WHERE uuid = ?').get(uuid);
-  if (!r || r.sender_id !== userId || !canRead(_pairing(r.pairing_id), userId)) throw _bad('Message not found', 404);
+  if (!r || r.sender_id !== userId || !canRead(_pairing(r.pairing_id), userId)) throw _bad('Message not found', 404, 'message_not_found');
   if (r.deleted_at) return r;
   db.prepare(`UPDATE coach_messages SET body = NULL, image_url = NULL, deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(r.id);
   if (r.image_url) removePhoto(r.image_url);

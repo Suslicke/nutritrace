@@ -67,7 +67,13 @@ export function weightIn(kg, unit) {
 /** The message for a failed coaching call: offline says so plainly. */
 export function coachingErrorText(e, t) {
   if (e?.offline) return t('coaching.needs_connection');
-  return e?.message || t('coaching.something_failed');
+  // The server names each coaching error with a code: said in the person's language.
+  if (typeof e?.code === 'string' && /^[a-z_]+$/.test(e.code)) {
+    const key = `coaching.errors.${e.code}`;
+    const text = t(key, { values: e.params || {} });
+    if (text && text !== key) return text;
+  }
+  return t('coaching.something_failed');
 }
 
 /** The coach's name for a pairing, from where this person stands in coaching. */

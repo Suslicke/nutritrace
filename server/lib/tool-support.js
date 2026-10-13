@@ -201,15 +201,20 @@ export function withoutToolHistory(messages) {
 // The system prompt asks for tools; without them a model could claim it
 // logged or looked up something that never happened.
 export const NO_TOOLS_NOTE = "No tools are available for this request: don't say you logged, saved, changed or looked anything up; answer from what's above.";
+// A coach's Trace drafts recommendations with tools: without them, say so too.
+export const NO_TOOLS_DRAFT_NOTE = "Nothing was drafted or sent either; the coach drafts and sends recommendations in the app.";
+const _DRAFT_TOOL = /^draft_(targets|day_plan)$/;
 
-function _withNoToolsNote(messages) {
+function _withNoToolsNote(messages, tools) {
+  const drafts = (Array.isArray(tools) ? tools : []).some(t => _DRAFT_TOOL.test(t?.function?.name || t?.name || ''));
+  const note = drafts ? `${NO_TOOLS_NOTE} ${NO_TOOLS_DRAFT_NOTE}` : NO_TOOLS_NOTE;
   const list = Array.isArray(messages) ? messages : [];
   const i = list.findIndex(m => m?.role === 'system');
-  if (i < 0) return [{ role: 'system', content: NO_TOOLS_NOTE }, ...list];
+  if (i < 0) return [{ role: 'system', content: note }, ...list];
   const m = list[i];
-  const content = typeof m.content === 'string' && m.content ? `${m.content}\n\n${NO_TOOLS_NOTE}`
-    : Array.isArray(m.content) ? [...m.content, { type: 'text', text: NO_TOOLS_NOTE }]
-    : NO_TOOLS_NOTE;
+  const content = typeof m.content === 'string' && m.content ? `${m.content}\n\n${note}`
+    : Array.isArray(m.content) ? [...m.content, { type: 'text', text: note }]
+    : note;
   return list.map((x, j) => (j === i ? { ...m, content } : x));
 }
 
@@ -219,7 +224,7 @@ function _withNoToolsNote(messages) {
  */
 export function withoutTools(body) {
   const { tools: _t, tool_choice: _c, parallel_tool_calls: _p, ...rest } = body;
-  return { ...rest, messages: _withNoToolsNote(withoutToolHistory(rest.messages)) };
+  return { ...rest, messages: _withNoToolsNote(withoutToolHistory(rest.messages), _t) };
 }
 
 /**

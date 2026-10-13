@@ -18,13 +18,14 @@ import { pushNotifyDefaultOn } from './push-notify.js';
 import { cleanTargetsPayload } from '../../src/lib/coach-targets.js';
 import { cleanPlanPayload, cleanPlanDates, loggedMeals, ingredientFoodId } from '../../src/lib/coach-plans.js';
 import { Nutrition } from '../../src/lib/nutrition.js';
+import { localizeImage } from './image-localizer.js';
 
 export const NOTE_MAX = 500;
 const _json = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
 const _note = (v) => { const s = typeof v === 'string' ? v.trim() : ''; return s ? s.slice(0, NOTE_MAX) : null; };
 const _name = (id) => personName(db.prepare('SELECT full_name, username FROM users WHERE id = ?').get(id)) || 'Someone';
 
-function _bad(message, status = 400) { const e = new Error(message); e.status = status; return e; }
+function _bad(message, status = 400, code = null, params = null) { const e = new Error(message); e.status = status; if (code) e.code = code; if (params) e.params = params; return e; }
 
 /** A recommendation as the app sees it (ids only, the payload parsed). */
 export function recommendationOut(r) {
@@ -45,8 +46,8 @@ const _row = (id) => db.prepare('SELECT * FROM coach_recommendations WHERE id = 
  * recommendation also appears in the conversation.
  */
 export function recommendTargets(pairing, coachId, body) {
-  const { payload, error } = cleanTargetsPayload(body?.payload);
-  if (error) throw _bad(error);
+  const { payload, error, code, params } = cleanTargetsPayload(body?.payload);
+  if (error) throw _bad(error, 400, code, params);
   const note = _note(body?.note);
   const id = db.transaction(() => {
     db.prepare(`
@@ -76,12 +77,12 @@ export function recommendTargets(pairing, coachId, body) {
  * notification.
  */
 export function recommendDayPlan(pairing, coachId, body) {
-  const { payload, error } = cleanPlanPayload(body?.payload);
-  if (error) throw _bad(error);
-  const { dates, error: dateError } = cleanPlanDates(body);
-  if (dateError) throw _bad(dateError);
+  const { payload, error, code, params } = cleanPlanPayload(body?.payload);
+  if (error) throw _bad(error, 400, code, params);
+  const { dates, error: dateError, code: dateCode, params: dateParams } = cleanPlanDates(body);
+  if (dateError) throw _bad(dateError, 400, dateCode, dateParams);
   const { lo, hi } = db.prepare(`SELECT date('now', '-1 day') AS lo, date('now', '+366 day') AS hi`).get();
-  if (dates.some(d => d < lo || d > hi)) throw _bad('A plan is for today or a later day.');
+  if (dates.some(d => d < lo || d > hi)) throw _bad('A plan is for today or a later day.', 400, 'plan_date_range');
   const note = _note(body?.note);
   const ids = db.transaction(() => dates.map(date => {
     db.prepare(`
@@ -114,9 +115,31 @@ const _num = (v, d = null) => (Number.isFinite(Number(v)) && v !== null && v !==
  * of the coach's never change what was sent); the client gets their own copy
  * on Accept.
  */
-export function recommendMealItem(pairing, coachId, body) {
+const _LOCAL_IMG = /^\/uploads\/[\w.-]+$/;
+const _SOURCE_ORIGIN_KEY = { cooktrace: 'cooktraceBaseUrl', mealie: 'mealieBaseUrl' };
+
+/**
+ * The picture a sent meal carries: its own upload, or an image it links to
+ * elsewhere (an import from CookTrace or Mealie) downloaded first through
+ * the server's image download (the address checks, images only, the size
+ * limit), as saving a meal with that link does. None if that fails.
+ */
+async function _sentImage(meal, coachId, { allowPrivate = false } = {}) {
+  const url = typeof meal.img_url === 'string' ? meal.img_url.trim() : '';
+  if (!url) return null;
+  if (_LOCAL_IMG.test(url)) return url;
+  if (!/^https?:\/\//i.test(url)) return null;
+  const key = _SOURCE_ORIGIN_KEY[meal.source_app];
+  const saved = key ? db.prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = ? AND deleted_at IS NULL`).get(coachId, key) : null;
+  const origin = (saved?.value || '').replace(/^"|"$/g, '');
+  const local = await localizeImage(url, { trustedOrigins: origin ? [origin] : [], allowPrivate });
+  return typeof local === 'string' && _LOCAL_IMG.test(local) ? local : null;
+}
+
+export async function recommendMealItem(pairing, coachId, body, { allowPrivateImages = false } = {}) {
   const meal = db.prepare('SELECT * FROM meals WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(Number(body?.meal_id), coachId);
-  if (!meal) throw _bad('Choose one of your own meals or recipes.', 404);
+  if (!meal) throw _bad('Choose one of your own meals or recipes.', 404, 'own_meal_only');
+  const img = await _sentImage(meal, coachId, { allowPrivate: allowPrivateImages });
   // Its kind is the saved one's (an unsaved switch in the editor doesn't count).
   const kind = meal.is_recipe ? 'recipe' : 'meal';
   const items = (_json(meal.items, []) || []).filter(it => it && typeof it === 'object').slice(0, 200).map(it => {
@@ -133,7 +156,7 @@ export function recommendMealItem(pairing, coachId, body) {
       id: meal.id, name: meal.name, is_recipe: !!meal.is_recipe,
       portion: _num(meal.portion, 100), unit: meal.unit || 'g', servings: _num(meal.servings),
       nutrition: _json(meal.nutrition, {}) || {}, notes: meal.notes || null,
-      img_url: typeof meal.img_url === 'string' && /^\/uploads\/[\w.-]+$/.test(meal.img_url) ? meal.img_url : null,
+      img_url: img,
       items,
     },
   };
@@ -204,10 +227,11 @@ function _copyMealItem(r) {
  */
 export function answerRecommendation(id, clientId, { status, response_note } = {}) {
   const r = _row(Number(id));
-  if (!r || r.client_id !== clientId) throw _bad('Recommendation not found', 404);
-  if (!['accepted', 'declined'].includes(status)) throw _bad('The answer must be accepted or declined.');
+  if (!r || r.client_id !== clientId) throw _bad('Recommendation not found', 404, 'recommendation_not_found');
+  if (!['accepted', 'declined'].includes(status)) throw _bad('The answer must be accepted or declined.', 400, 'answer_invalid');
   if (r.status !== 'pending') {
-    const e = _bad(r.status === 'replaced' ? 'Replaced by a newer recommendation.' : r.status === 'withdrawn' ? 'This recommendation was withdrawn.' : 'This recommendation was already answered.', 409);
+    const e = _bad(r.status === 'replaced' ? 'Replaced by a newer recommendation.' : r.status === 'withdrawn' ? 'This recommendation was withdrawn.' : 'This recommendation was already answered.', 409,
+      r.status === 'replaced' ? 'rec_replaced' : r.status === 'withdrawn' ? 'rec_withdrawn' : 'rec_answered');
     e.row = recommendationOut(r);
     throw e;
   }

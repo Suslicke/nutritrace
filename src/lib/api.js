@@ -884,7 +884,14 @@ const _NtApiHttp = {
       cache: 'no-store',
       body: isUpload ? body : body != null ? JSON.stringify(body) : undefined,
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); const err = new Error(e.error || `API error ${res.status}`); err.status = res.status; throw err; }
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const err = new Error(e.error || `API error ${res.status}`);
+      err.status = res.status;
+      // A code (and its values) names the error, for the app to say in the person's language.
+      if (typeof e.code === 'string') { err.code = e.code; if (e.params && typeof e.params === 'object') err.params = e.params; }
+      throw err;
+    }
     return res.json();
   },
 

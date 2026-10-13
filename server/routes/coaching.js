@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { wrap } from '../logger.js';
+import { ownerOrOptIn } from '../lib/outbound-policy.js';
 import { requireAdmin } from '../middleware/auth.js';
 import {
   NOTE_MAX, canCoach, roleOf, person, coachingState, endPairing,
@@ -166,21 +167,21 @@ router.get('/candidates', requireCoachRole, wrap((req, res) => {
 
 router.post('/requests', requireCoachRole, wrap((req, res) => {
   const clientId = Number(req.body?.client_id);
-  if (!Number.isInteger(clientId) || clientId === req.user.id) return res.status(400).json({ error: 'Choose someone to coach.' });
+  if (!Number.isInteger(clientId) || clientId === req.user.id) return res.status(400).json({ error: 'Choose someone to coach.', code: 'choose_someone' });
   const client = db.prepare('SELECT id, full_name, username FROM users WHERE id = ?').get(clientId);
-  if (!client) return res.status(400).json({ error: 'Choose someone to coach.' });
+  if (!client) return res.status(400).json({ error: 'Choose someone to coach.', code: 'choose_someone' });
   const name = person(client.id, client.full_name, client.username).name;
   // Only this coach's own pairings decide the answer: whether the person has
   // another coach or other requests is never said.
   const own = db.prepare(`SELECT status FROM coach_clients WHERE coach_id = ? AND client_id = ? AND status IN ('pending', 'active')`).get(req.user.id, clientId);
-  if (own?.status === 'active') return res.status(409).json({ error: `${name} is already your client.` });
-  if (own?.status === 'pending') return res.status(409).json({ error: `You already asked ${name}.` });
+  if (own?.status === 'active') return res.status(409).json({ error: `${name} is already your client.`, code: 'already_client', params: { name } });
+  if (own?.status === 'pending') return res.status(409).json({ error: `You already asked ${name}.`, code: 'already_asked', params: { name } });
   let id;
   try {
     id = db.prepare(`INSERT INTO coach_clients (coach_id, client_id, status, note) VALUES (?, ?, 'pending', ?)`)
       .run(req.user.id, clientId, _note(req.body?.note)).lastInsertRowid;
   } catch (e) {
-    if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: `You already asked ${name}.` });
+    if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: `You already asked ${name}.`, code: 'already_asked', params: { name } });
     throw e;
   }
   const row = _pairingRow(id);
@@ -192,11 +193,11 @@ router.post('/requests', requireCoachRole, wrap((req, res) => {
 function _answer(status) {
   return wrap((req, res) => {
     const row = _pairingRow(Number(req.params.id));
-    if (!row || row.client_id !== req.user.id) return res.status(404).json({ error: 'Request not found' });
-    if (row.status !== 'pending') return res.status(409).json({ error: 'This request was already answered.' });
+    if (!row || row.client_id !== req.user.id) return res.status(404).json({ error: 'Request not found', code: 'request_not_found' });
+    if (row.status !== 'pending') return res.status(409).json({ error: 'This request was already answered.', code: 'request_answered' });
     if (status === 'active' && !canCoach(roleOf(row.coach_id))) {
       endPairing(row.id, null);
-      return res.status(409).json({ error: 'This person no longer coaches.' });
+      return res.status(409).json({ error: 'This person no longer coaches.', code: 'no_longer_coaches' });
     }
     // One coach at a time: leave the one you have before accepting another.
     const LEAVE_FIRST = 'Leave your coach before you accept another.';
@@ -224,8 +225,8 @@ router.post('/pairings/:id/end', requireAccount, wrap((req, res) => {
   const row = _pairingRow(Number(req.params.id));
   const me = req.user.id;
   const mine = row && (row.coach_id === me || row.client_id === me);
-  if (!row || (!mine && roleOf(me) !== 'admin')) return res.status(404).json({ error: 'Pairing not found' });
-  if (!endPairing(row.id, me)) return res.status(409).json({ error: 'This coaching has already ended.' });
+  if (!row || (!mine && roleOf(me) !== 'admin')) return res.status(404).json({ error: 'Pairing not found', code: 'pairing_not_found' });
+  if (!endPairing(row.id, me)) return res.status(409).json({ error: 'This coaching has already ended.', code: 'already_ended' });
   if (row.status === 'active' && me === row.client_id) notifyClientAnswer(row, 'left');
   res.json(coachingState(me));
 }));
@@ -242,7 +243,7 @@ function _listMessages(p, req, res) {
 function _sendMessage(p, req, res) {
   let out;
   try { out = createMessage(p, req.user.id, req.body || {}); }
-  catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+  catch (e) { return res.status(e.status || 500).json({ error: e.message, code: e.code, params: e.params }); }
   if (out.created) notifyMessage(p, out.row, linkBase(req));
   res.json(messageOut(out.row));
 }
@@ -253,7 +254,7 @@ function _readMessages(p, req, res) {
 function _clientPairing(req, res, { write = false } = {}) {
   const p = pairingById(Number(req.params.id));
   if (!p || p.client_id !== req.user.id || !(write ? canWrite(p, req.user.id) : canRead(p, req.user.id))) {
-    res.status(404).json({ error: 'Conversation not found' });
+    res.status(404).json({ error: 'Conversation not found', code: 'conversation_not_found' });
     return null;
   }
   return p;
@@ -277,13 +278,13 @@ router.get('/recommendations', requireAccount, wrap((req, res) => {
 }));
 router.post('/recommendations/:id/answer', requireAccount, wrap((req, res) => {
   try { res.json(answerRecommendation(req.params.id, req.user.id, req.body || {})); }
-  catch (e) { res.status(e.status || 500).json({ error: e.message, ...(e.row ? { recommendation: e.row } : {}) }); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message, code: e.code, params: e.params, ...(e.row ? { recommendation: e.row } : {}) }); }
 }));
 
 // Delete your own message, from either side ("Message deleted").
 router.delete('/messages/:uuid', requireAccount, wrap((req, res) => {
   try { res.json(messageOut(deleteMessage(String(req.params.uuid), req.user.id))); }
-  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message, code: e.code, params: e.params }); }
 }));
 
 // A photo from a conversation: only to the two people in it (the coach only
@@ -291,19 +292,19 @@ router.delete('/messages/:uuid', requireAccount, wrap((req, res) => {
 router.get('/photos/:name', requireAccount, wrap((req, res) => {
   const file = photoPath(req.params.name);
   const m = file && db.prepare('SELECT pairing_id FROM coach_messages WHERE image_url = ? AND deleted_at IS NULL').get(req.params.name);
-  if (!m || !canRead(pairingById(m.pairing_id), req.user.id) || !fs.existsSync(file)) return res.status(404).json({ error: 'Not found' });
+  if (!m || !canRead(pairingById(m.pairing_id), req.user.id) || !fs.existsSync(file)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
   // sendFile, not a bare stream: a file deleted between the check and the
   // read (its message deleted at that moment) answers 404 instead of an
   // unhandled stream error taking the server down.
   res.sendFile(path.resolve(file), {
     headers: { ...UPLOAD_RESPONSE_HEADERS, 'Cache-Control': 'private, no-store', 'Content-Type': PHOTO_TYPES[req.params.name.split('.').pop()] || 'application/octet-stream' },
-  }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Not found' }); });
+  }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Not found', code: 'not_found' }); });
 }));
 
 // ── Admin: see and end pairings ─────────────────────────────────────────────
 router.get('/admin/pairings', requireAccount, requireAdmin, wrap((req, res) => {
   // The token's role can be older than an admin's change; ask the database.
-  if (roleOf(req.user.id) !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (roleOf(req.user.id) !== 'admin') return res.status(403).json({ error: 'Admin only', code: 'admin_only' });
   const rows = db.prepare(`
     SELECT cc.id, cc.status, cc.requested_at, cc.responded_at,
            c.id AS coach_id, c.full_name AS coach_full, c.username AS coach_user,
@@ -349,15 +350,15 @@ router.get('/clients/:clientId/targets', wrap((req, res) => {
 router.get('/clients/:clientId/recommendations', wrap((req, res) => {
   res.json(listForPairing(req.pairing.id));
 }));
-router.post('/clients/:clientId/recommendations', wrap((req, res) => {
+router.post('/clients/:clientId/recommendations', wrap(async (req, res) => {
   const kind = req.body?.kind || 'targets';
-  if (!['targets', 'day_plan', 'meal', 'recipe'].includes(kind)) return res.status(400).json({ error: 'Targets, day plans, meals and recipes can be recommended.' });
+  if (!['targets', 'day_plan', 'meal', 'recipe'].includes(kind)) return res.status(400).json({ error: 'Targets, day plans, meals and recipes can be recommended.', code: 'kind_unknown' });
   try {
     // A day plan answers with every plan made (one per date).
     res.json(kind === 'day_plan' ? recommendDayPlan(req.pairing, req.user.id, req.body || {})
-      : kind === 'meal' || kind === 'recipe' ? recommendMealItem(req.pairing, req.user.id, req.body || {})
+      : kind === 'meal' || kind === 'recipe' ? await recommendMealItem(req.pairing, req.user.id, req.body || {}, { allowPrivateImages: ownerOrOptIn(req, 'ALLOW_PRIVATE_IMAGE_URLS') })
       : recommendTargets(req.pairing, req.user.id, req.body || {}));
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 500).json({ error: e.message, code: e.code, params: e.params }); }
 }));
 
 // The client's foods, meals and recipes, for the day plan builder: what each
@@ -403,7 +404,7 @@ router.get('/clients/:clientId/overview', wrap((req, res) => {
 router.get('/clients/:clientId/diary/:date', wrap((req, res) => {
   const clientId = req.pairing.client_id;
   const date = String(req.params.date);
-  if (!DATE_RE.test(date)) return res.status(400).json({ error: 'Invalid date' });
+  if (!DATE_RE.test(date)) return res.status(400).json({ error: 'Invalid date', code: 'invalid_date' });
   const row = db.prepare(`SELECT items, water, notes, body_stats FROM diary WHERE user_id = ? AND date = ? AND deleted_at IS NULL`).get(clientId, date);
   const items = _json(row?.items, []) || [];
   const goals = _setting(clientId, 'goals', {}) || {};

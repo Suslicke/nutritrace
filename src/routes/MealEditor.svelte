@@ -956,7 +956,7 @@
         {saving ? 'Copying…' : 'Save to My Catalog'}
       </button>
     {:else}
-      <button class="btn btn-primary" style="height:36px;padding:0 16px;font-size:13px"
+      <button class="btn btn-primary hdr-save" style="height:36px;font-size:13px"
         on:click={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -1488,7 +1488,14 @@
     border-bottom: 1px solid var(--border); background: var(--surface-1);
     position: sticky; top: 0; z-index: 10;
   }
-  .editor-title { font-size: 17px; font-weight: 600; flex: 1; }
+  /* One line: with Share and Send to Client in the header, a narrow phone
+     would wrap the title; a long one ends in an ellipsis instead. */
+  .editor-title { font-size: 17px; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hdr-save { padding: 0 16px; flex-shrink: 0; }
+  @media (max-width: 400px) {
+    .editor-header { gap: 6px; padding-left: 12px; padding-right: 12px; }
+    .hdr-save { padding: 0 12px; }
+  }
   .fav-btn { color: var(--text-3); }
   .fav-btn.on { color: var(--macro-protein, #ec4899); }
   .editor-content { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; padding-bottom: 32px; }

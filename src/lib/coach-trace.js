@@ -100,9 +100,17 @@ export function coachingPrompt({ coach = false, client = false } = {}) {
 const _round = (v) => Math.round((Number(v) || 0) * 10) / 10;
 const _macros = (n) => ({ calories: Math.round(Number(n?.calories) || 0), protein_g: _round(n?.proteins), carbs_g: _round(n?.carbohydrates), fat_g: _round(n?.fat) });
 
-async function _activeClients() {
-  const rows = await NtApi.get(`/api/coaching/clients?today=${todayLocal()}`);
-  return (rows || []).filter(r => r.status === 'active');
+// The coach's clients, read once for a conversation's turn of tool calls:
+// get_coaching_clients reads them afresh, the other tools reuse that for a
+// minute (per account).
+const CLIENTS_TTL_MS = 60 * 1000;
+let _clients = null;   // { user, at, rows }
+const _me = () => { try { return localStorage.getItem('wl:userId') || ''; } catch { return ''; } };
+async function _activeClients({ fresh = false } = {}) {
+  if (!fresh && _clients && _clients.user === _me() && Date.now() - _clients.at < CLIENTS_TTL_MS) return _clients.rows;
+  const rows = ((await NtApi.get(`/api/coaching/clients?today=${todayLocal()}`)) || []).filter(r => r.status === 'active');
+  _clients = { user: _me(), at: Date.now(), rows };
+  return rows;
 }
 async function _client(id) {
   const c = (await _activeClients()).find(r => r.client.id === Number(id));
@@ -147,7 +155,7 @@ export async function runCoachingTool(name, args = {}, { coach = false, client =
   try {
     switch (name) {
       case 'get_coaching_clients': {
-        const rows = await _activeClients();
+        const rows = await _activeClients({ fresh: true });
         return { result: rows.map(r => ({ id: r.client.id, name: r.client.name, last_logged: r.last_logged || null, on_target: r.week || null })) };
       }
       case 'get_client_summary': {

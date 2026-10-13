@@ -1666,6 +1666,10 @@ test("Trace's coaching tools on the phone: a coach's drafts send nothing; a clie
     await p.sync();
     const tr = await import(p.src + 'lib/coach-trace.js');
     const as = { coach: true, client: false };
+    // How often the client list is read through the tools below.
+    let listReads = 0;
+    const _fetch = globalThis.fetch;
+    globalThis.fetch = (u, o) => { const s = String(u); if (s.includes('/api/coaching/clients?') || s.endsWith('/api/coaching/clients')) listReads++; return _fetch(u, o); };
     const clients = (await tr.runCoachingTool('get_coaching_clients', {}, as)).result;
     const summary = (await tr.runCoachingTool('get_client_summary', { client_id: ${CL.id} }, as)).result;
     const foods = (await tr.runCoachingTool('get_client_foods', { client_id: ${CL.id}, query: 'oats' }, as)).result;
@@ -1673,8 +1677,10 @@ test("Trace's coaching tools on the phone: a coach's drafts send nothing; a clie
     const plan = await tr.runCoachingTool('draft_day_plan', { client_id: ${CL.id}, date: '${tomorrow}', meals: [{ meal: 0, items: [{ id: foods[0].id, kind: 'food', whose: 'client', servings: 2 }] }] }, as);
     const notCoach = (await tr.runCoachingTool('draft_targets', { client_id: ${CL.id}, calories: 1 }, { coach: false, client: false })).result;
     const names = tr.coachingTools({}).map(x => x.name);
-    p.done({ clients, summaryTargets: summary.targets, foods, targets: targets.draft, targetsResult: targets.result, plan: plan.draft, planResult: plan.result, notCoach, names, allNames: tr.coachingTools({ coach: true, client: true }).map(x => x.name) });`);
+    globalThis.fetch = _fetch;
+    p.done({ listReads, clients, summaryTargets: summary.targets, foods, targets: targets.draft, targetsResult: targets.result, plan: plan.draft, planResult: plan.result, notCoach, names, allNames: tr.coachingTools({ coach: true, client: true }).map(x => x.name) });`);
   assert.deepEqual(r.clients.map(c => c.name), ['tr-client']);
+  assert.equal(r.listReads, 1, 'the client list is read once for the turn, not by every tool');
   assert.equal(r.summaryTargets.calories.max, 2200);
   assert.deepEqual(r.foods.map(f => [f.id, f.name, f.calories]), [[oats.id, 'Trace Oats', 190]]);
   assert.deepEqual(r.targets.payload.goals.calories.max, 2000);

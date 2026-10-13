@@ -5,7 +5,7 @@ import test from 'node:test';
 import { existsSync, readFileSync } from 'node:fs';
 import {
   isToolsUnsupported, toolsRefusal, isOtherModel, createToolSupportMemory, withoutToolHistory, withoutTools,
-  sendWithToolFallback, TOOLLESS_TTL_MS, NO_TOOLS_NOTE, createToolsNotice, forModel, TOOLS_NOTE,
+  sendWithToolFallback, TOOLLESS_TTL_MS, NO_TOOLS_NOTE, NO_TOOLS_DRAFT_NOTE, createToolsNotice, forModel, TOOLS_NOTE,
 } from '../src/lib/tool-support.js';
 
 test('the copies of tool-support.js are identical', () => {
@@ -152,6 +152,12 @@ test('a body without tools drops tools and tool history, keeps the rest, and tel
   assert.equal(out.messages.length, 4);
   assert.equal(out.messages[0].content, `You are Trace. ALWAYS use tools.\n\n${NO_TOOLS_NOTE}`, 'the system prompt says no tools are available');
   assert.match(NO_TOOLS_NOTE, /don't say you logged, saved, changed or looked anything up/);
+  // A coach's Trace (its draft tools in the request) is also told nothing was drafted or sent.
+  const coach = withoutTools({ messages: [{ role: 'system', content: 'S' }], tools: [{ type: 'function', function: { name: 'draft_day_plan' } }] });
+  assert.equal(coach.messages[0].content, `S\n\n${NO_TOOLS_NOTE} ${NO_TOOLS_DRAFT_NOTE}`);
+  assert.match(NO_TOOLS_DRAFT_NOTE, /Nothing was drafted or sent/);
+  const plain = withoutTools({ messages: [{ role: 'system', content: 'S' }], tools: [{ type: 'function', function: { name: 'get_diary' } }] });
+  assert.equal(plain.messages[0].content, `S\n\n${NO_TOOLS_NOTE}`, 'nobody else\'s note changes');
   assert.ok(body.tools && body.messages.length === 5 && body.messages[0].content === 'You are Trace. ALWAYS use tools.', 'the original body is left as it was');
   // No system message: one is added. A multipart one gets a text part.
   assert.deepEqual(withoutTools({ messages: [{ role: 'user', content: 'hi' }], tools: [{}] }).messages[0], { role: 'system', content: NO_TOOLS_NOTE });

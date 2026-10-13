@@ -201,6 +201,37 @@ test('a client\'s own food deleted since a plan: copied once, then found again; 
   assert.deepEqual(seen, ['2026-10-13', '2026-10-14']);
 });
 
+test('coaching errors are said from en.json: every code the server and the shared rules give has its words', async () => {
+  const en = JSON.parse(read('../src/i18n/en.json'));
+  const errs = en.coaching.errors;
+  const files = ['../server/routes/coaching.js', '../server/lib/coaching.js', '../server/lib/coaching-messages.js',
+    '../server/lib/coaching-recommendations.js', '../src/lib/coach-targets.js', '../src/lib/coach-plans.js'];
+  const codes = new Set();
+  for (const f of files) {
+    const src = read(f);
+    for (const [, c] of src.matchAll(/code: '([a-z_]+)'/g)) codes.add(c);
+    for (const [, c] of src.matchAll(/_bad\([^;]*?,\s*\d{3},\s*'([a-z_]+)'/g)) codes.add(c);
+    for (const [, c] of src.matchAll(/'(rec_[a-z]+)'/g)) codes.add(c);
+  }
+  assert.ok(codes.size >= 50, `found ${codes.size}`);
+  for (const c of codes) assert.equal(typeof errs[c], 'string', c);
+  // No coaching error answer leaves without its code.
+  for (const f of ['../server/routes/coaching.js', '../server/lib/coaching.js']) {
+    for (const line of read(f).split('\n').filter(l => /json\(\{ error/.test(l))) assert.match(line, /code/, line.trim());
+  }
+  const { coachingErrorText } = await import('../src/lib/coaching-view.js');
+  const t = (k, o) => { const v = k.split('.').reduce((x, p) => x?.[p], en); return typeof v === 'string' ? v.replace(/\{(\w+)\}/g, (_, n) => o?.values?.[n] ?? '') : k; };
+  assert.equal(coachingErrorText({ code: 'already_asked', params: { name: 'Jo' }, message: 'You already asked Jo.' }, t), 'You already asked Jo.');
+  assert.equal(coachingErrorText({ code: 'plan_meal_too_many', params: { max: 30 } }, t), 'A meal can hold up to 30 items.');
+  assert.equal(coachingErrorText({ code: 'something_new', message: 'Raw English' }, t), en.coaching.something_failed, 'an unknown code: the general words, never raw text');
+  assert.equal(coachingErrorText({ message: 'Raw English' }, t), en.coaching.something_failed);
+  assert.equal(coachingErrorText({ offline: true }, t), en.coaching.needs_connection);
+  // The shared rules give their code too.
+  const p = await import('../src/lib/coach-plans.js');
+  assert.deepEqual([p.cleanPlanPayload({ meals: [] }).code], ['plan_empty']);
+  assert.deepEqual(p.cleanPlanPayload({ meals: [{ meal: 0, items: [{ name: 'Oats', portion: -1, nutrition: {}, source: { kind: 'off' } }] }] }).params, { name: 'Oats' });
+});
+
 test('day plans add nothing for people not in coaching: the Diary card is only theirs, the Foods page changes only for a plan item', () => {
   const foods = read('../src/routes/Foods.svelte');
   assert.match(foods, /if \(editorState\.planLog\) \{/);
