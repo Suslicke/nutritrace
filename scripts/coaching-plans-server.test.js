@@ -141,7 +141,8 @@ test('what a coach may send is checked; the builder reads only the client\'s cat
   const bad = await call('coach', 'POST', recPath(), { kind: 'day_plan', date: TODAY, payload: { meals: [] } });
   assert.equal(bad.status, 400);
   assert.equal((await call('coach', 'POST', recPath(), { kind: 'day_plan', date: 'soon', payload: good })).status, 400, 'a date');
-  assert.equal((await call('coach', 'POST', recPath(), { kind: 'meal', date: TODAY, payload: good })).status, 400, 'meals and recipes come later');
+  assert.equal((await call('coach', 'POST', recPath(), { kind: 'breakfast', date: TODAY, payload: good })).status, 400, 'a kind there is');
+  assert.equal((await call('coach', 'POST', recPath(), { kind: 'meal', date: TODAY, payload: good })).status, 404, 'a meal is sent by its id, one of the coach\'s');
 
   // The client's catalog: their foods, meals (with ingredients) and recipes.
   const oats = await ok('client', 'POST', '/api/foods', OATS);
