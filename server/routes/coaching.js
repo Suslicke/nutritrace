@@ -26,7 +26,7 @@ import {
   notifyMessage, notifyClientAnswer, notifyRequest, pairingById, photoPath, PHOTO_TYPES,
 } from '../lib/coaching-messages.js';
 import { UPLOAD_RESPONSE_HEADERS } from '../lib/upload-paths.js';
-import { recommendTargets, recommendDayPlan, answerRecommendation, listForPairing, listForClient } from '../lib/coaching-recommendations.js';
+import { recommendTargets, recommendDayPlan, recommendMealItem, answerRecommendation, listForPairing, listForClient } from '../lib/coaching-recommendations.js';
 import { computeAdaptiveTdee } from '../lib/adaptive-tdee.js';
 import { TARGET_KEYS } from '../../src/lib/coach-targets.js';
 import { ingredientFoodId } from '../../src/lib/coach-plans.js';
@@ -351,10 +351,12 @@ router.get('/clients/:clientId/recommendations', wrap((req, res) => {
 }));
 router.post('/clients/:clientId/recommendations', wrap((req, res) => {
   const kind = req.body?.kind || 'targets';
-  if (!['targets', 'day_plan'].includes(kind)) return res.status(400).json({ error: 'Only targets and day plans can be recommended for now.' });
+  if (!['targets', 'day_plan', 'meal', 'recipe'].includes(kind)) return res.status(400).json({ error: 'Targets, day plans, meals and recipes can be recommended.' });
   try {
     // A day plan answers with every plan made (one per date).
-    res.json(kind === 'day_plan' ? recommendDayPlan(req.pairing, req.user.id, req.body || {}) : recommendTargets(req.pairing, req.user.id, req.body || {}));
+    res.json(kind === 'day_plan' ? recommendDayPlan(req.pairing, req.user.id, req.body || {})
+      : kind === 'meal' || kind === 'recipe' ? recommendMealItem(req.pairing, req.user.id, req.body || {})
+      : recommendTargets(req.pairing, req.user.id, req.body || {}));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }));
 

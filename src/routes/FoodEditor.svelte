@@ -16,7 +16,10 @@
   import UnitPicker from '../components/ui/UnitPicker.svelte';
   import ImageCropper from '../components/ui/ImageCropper.svelte';
   import { takePhoto } from '../lib/camera.js';
-  import { isNative } from '../lib/platform.js';
+  import { isNative, getServerUrl } from '../lib/platform.js';
+  import ShareSheet from '../components/ui/ShareSheet.svelte';
+  import { sharingOn } from '../stores/sharing.js';
+  import { userMgmtActive } from '../stores/auth.js';
   import BarcodeScanner from '../components/foods/BarcodeScanner.svelte';
   import { foodsShowCategories, foodsShowLabels, foodsShowNotes, foodCategories, visibleNutriments, nutrimentsOrder, customNutriments, cropPhotos, offUsername, offPassword, offUploadCountry, aiEffectivelyEnabled, envLocks, aiProvider, aiApiKey, aiModel, aiBaseUrl, energyUnit, showUnitMetadata, warnUnitMismatch, catName as _catName, catDisplay as _catDisplay, disableAnimations } from '../stores/settings.js';
   import { callAI, callAIProxy } from '../lib/aiChat.js';
@@ -673,6 +676,9 @@
   // PUT regardless, but locking the UI prevents the user from typing into a
   // form that won't save and gives them a single clear action: Save a Copy.
   $: _readOnly = !!food._shared_by;
+  // Share (one item, as Bulk Share does a category): when an admin has sharing on.
+  let _shareOpen = false;
+  $: _canShare = $sharingOn && $userMgmtActive && !(isNative && !getServerUrl());
 
   // Issues #69 + #70: gate the basis / serving units / density editor on
   // an opt-in toggle so the fields stay hidden for users who never need
@@ -850,6 +856,11 @@
         aria-label={food.favorite ? 'Unfavorite' : 'Favorite'}
         title={food.favorite ? 'Unfavorite' : 'Add to favorites'}>
         <span class="material-symbols-rounded">{food.favorite ? 'favorite' : 'favorite_border'}</span>
+      </button>
+    {/if}
+    {#if food.id && !_readOnly && _canShare}
+      <button class="btn-icon" on:click={() => _shareOpen = true} aria-label={$_('share_item.button')} title={$_('share_item.button')}>
+        <span class="material-symbols-rounded">share</span>
       </button>
     {/if}
     {#if _readOnly}
@@ -1253,6 +1264,9 @@
 
 <!-- Inline barcode scanner — fired by the scan button next to the Barcode field -->
 <BarcodeScanner bind:open={editorScannerOpen} on:scan={onEditorScan} on:close={() => editorScannerOpen = false} />
+
+<!-- Share this food: the same choice as Bulk Share (only when an admin has sharing on). -->
+<ShareSheet bind:open={_shareOpen} kind="foods" item={food} on:shared={(e) => { food.visibility = e.detail.visibility; food = food; }} />
 
 <style>
   /* Indented sub-nutrient rows — Saturated Fat under Total Fat, Sugars

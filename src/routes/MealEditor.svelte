@@ -9,7 +9,12 @@
   import BarcodeScanner from '../components/foods/BarcodeScanner.svelte';
   import { DB } from '../lib/db.js';
   import { takePhoto } from '../lib/camera.js';
-  import { isNative, resolveAssetUrl } from '../lib/platform.js';
+  import { isNative, resolveAssetUrl, getServerUrl } from '../lib/platform.js';
+  import ShareSheet from '../components/ui/ShareSheet.svelte';
+  import SendToClientSheet from '../components/coaching/SendToClientSheet.svelte';
+  import { sharingOn, noteSharingStatus } from '../stores/sharing.js';
+  import { userMgmtActive } from '../stores/auth.js';
+  import { clientsTab, coachingState } from '../stores/coaching.js';
   import { portal } from '../lib/portal.js';
   import Sheet from '../components/ui/Sheet.svelte';
   import Spinner from '../components/ui/Spinner.svelte';
@@ -120,6 +125,7 @@
   async function _refreshPickerSharing() {
     try {
       const s = await NtApi.getSharingStatus();
+      noteSharingStatus(s);
       _pickerSharingEnabled = s.sharing_enabled === true;
       _pickerSharedCounts   = { foods: s.foods || 0 };
     } catch { _pickerSharingEnabled = false; _pickerSharedCounts = { foods: 0 }; }
@@ -810,6 +816,11 @@
   // Server returns 403 on PUT regardless; locking the UI gives the user one
   // clear action — Save a Copy — instead of letting them edit and fail.
   $: _readOnly = !!meal._shared_by;
+  // Share (one item, as Bulk Share does a category): when an admin has
+  // sharing on. Send to Client: a coach with clients.
+  let _shareOpen = false, _sendOpen = false;
+  $: _canShare = $sharingOn && $userMgmtActive && !(isNative && !getServerUrl());
+  $: _canSend = $clientsTab && (Number($coachingState?.as_coach?.active) || 0) > 0 && !(isNative && !getServerUrl());
 
   async function saveAsCopy() {
     saving = true;
@@ -925,6 +936,16 @@
         aria-label={meal.favorite ? 'Unfavorite' : 'Favorite'}
         title={meal.favorite ? 'Unfavorite' : 'Add to favorites'}>
         <span class="material-symbols-rounded">{meal.favorite ? 'favorite' : 'favorite_border'}</span>
+      </button>
+    {/if}
+    {#if meal.id && !_readOnly && _canShare}
+      <button class="btn-icon" on:click={() => _shareOpen = true} aria-label={$_('share_item.button')} title={$_('share_item.button')}>
+        <span class="material-symbols-rounded">share</span>
+      </button>
+    {/if}
+    {#if meal.id && !_readOnly && _canSend}
+      <button class="btn-icon" on:click={() => _sendOpen = true} aria-label={$_('coaching.send.button')} title={$_('coaching.send.button')}>
+        <span class="material-symbols-rounded">send</span>
       </button>
     {/if}
     {#if _readOnly}
@@ -1444,6 +1465,11 @@
     on:cancel={() => { cropOpen = false; cropSrc = ''; }}
   />
 {/if}
+
+<!-- Share this meal or recipe (only when an admin has sharing on), and Send
+     to Client (only for a coach with clients). -->
+<ShareSheet bind:open={_shareOpen} kind="meals" item={meal} on:shared={(e) => { meal.visibility = e.detail.visibility; meal = meal; }} />
+<SendToClientSheet bind:open={_sendOpen} {meal} {isRecipe} />
 
 <style>
   .editor-page {

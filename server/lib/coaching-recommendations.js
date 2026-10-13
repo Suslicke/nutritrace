@@ -6,8 +6,9 @@
  * and syncs it like any other change, so it also works offline). The server
  * keeps the recommendation and its answer: the history both sides see.
  *
- * Kinds: 'targets' and 'day_plan' (one per date); meals and recipes reuse
- * this table later.
+ * Kinds: 'targets', 'day_plan' (one per date), and 'meal' / 'recipe' (Send
+ * to Client: a copy of one of the coach's, which becomes the client's own
+ * on Accept, made here so it reaches every device of theirs by sync).
  */
 import crypto from 'crypto';
 import db from '../db.js';
@@ -15,7 +16,7 @@ import { logger } from '../logger.js';
 import { personName } from './coaching.js';
 import { pushNotifyDefaultOn } from './push-notify.js';
 import { cleanTargetsPayload } from '../../src/lib/coach-targets.js';
-import { cleanPlanPayload, cleanPlanDates, loggedMeals } from '../../src/lib/coach-plans.js';
+import { cleanPlanPayload, cleanPlanDates, loggedMeals, ingredientFoodId } from '../../src/lib/coach-plans.js';
 
 export const NOTE_MAX = 500;
 const _json = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
@@ -100,6 +101,94 @@ export function recommendDayPlan(pairing, coachId, body) {
   return ids.map(id => recommendationOut(_row(id)));
 }
 
+// What a sent meal or recipe keeps of each ingredient: what it is and how
+// much, never whose catalog or sharing it came from.
+const _INGREDIENT_KEEP = ['name', 'brand', 'portion', 'unit', 'quantity', 'nutrition', 'barcode', 'notes', 'nutrition_basis', 'alt_units', 'density_g_ml'];
+const _num = (v, d = null) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : d);
+
+/**
+ * Send to Client: the coach sends one of their own meals or recipes. The
+ * recommendation holds a full copy (works with sharing off, and later edits
+ * of the coach's never change what was sent); the client gets their own copy
+ * on Accept.
+ */
+export function recommendMealItem(pairing, coachId, body) {
+  const kind = body?.kind;
+  const meal = db.prepare('SELECT * FROM meals WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(Number(body?.meal_id), coachId);
+  if (!meal) throw _bad('Choose one of your own meals or recipes.', 404);
+  if ((kind === 'recipe') !== !!meal.is_recipe) throw _bad(kind === 'recipe' ? 'That is a meal, not a recipe.' : 'That is a recipe, not a meal.');
+  const items = (_json(meal.items, []) || []).filter(it => it && typeof it === 'object').slice(0, 200).map(it => {
+    const out = Object.fromEntries(_INGREDIENT_KEEP.filter(k => it[k] !== undefined).map(k => [k, it[k]]));
+    out.name = String(it.name || '').slice(0, 200);
+    const fid = it.is_recipe ? null : Number(ingredientFoodId(it));
+    if (Number.isInteger(fid) && fid > 0) out.source = { kind: 'coach_food', id: fid };
+    return out;
+  });
+  const payload = {
+    meal: {
+      id: meal.id, name: meal.name, is_recipe: !!meal.is_recipe,
+      portion: _num(meal.portion, 100), unit: meal.unit || 'g', servings: _num(meal.servings, 1),
+      nutrition: _json(meal.nutrition, {}) || {}, notes: meal.notes || null,
+      img_url: typeof meal.img_url === 'string' && /^\/uploads\/[\w.-]+$/.test(meal.img_url) ? meal.img_url : null,
+      items,
+    },
+  };
+  const note = _note(body?.note);
+  const id = db.transaction(() => {
+    const rid = db.prepare(`
+      INSERT INTO coach_recommendations (pairing_id, coach_id, client_id, kind, payload, note)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pairing.id, coachId, pairing.client_id, kind, JSON.stringify(payload), note).lastInsertRowid;
+    db.prepare(`
+      INSERT INTO coach_messages (uuid, pairing_id, sender_id, body, recommendation_id)
+      VALUES (?, ?, ?, NULL, ?)
+    `).run(crypto.randomUUID(), pairing.id, coachId, rid);
+    return rid;
+  })();
+  _notifyClient(pairing, coachId);
+  return recommendationOut(_row(id));
+}
+
+/**
+ * The client's own copy of a sent meal or recipe, made on Accept: the meal
+ * with its source (`source_id`, as a copy of a shared one has), and each
+ * ingredient the client doesn't have copied into their foods too (as a day
+ * plan's foods are: source 'coach', 'food:<id>'), so it logs, splits and
+ * edits as their own with sharing off.
+ */
+function _copyMealItem(r) {
+  const m = _json(r.payload, {})?.meal;
+  if (!m || !m.name) return null;
+  const u = r.client_id;
+  const findSource = db.prepare(`SELECT * FROM foods WHERE user_id = ? AND source_app = 'coach' AND source_external_id = ? AND deleted_at IS NULL`);
+  const findBarcode = db.prepare(`SELECT * FROM foods WHERE user_id = ? AND barcode = ? AND deleted_at IS NULL LIMIT 1`);
+  const letGo = db.prepare(`UPDATE foods SET source_app = NULL, source_external_id = NULL WHERE user_id = ? AND source_app = 'coach' AND source_external_id = ? AND deleted_at IS NOT NULL`);
+  const insFood = db.prepare(`
+    INSERT INTO foods (user_id, name, brand, nutrition, portion, unit, barcode, notes, nutrition_basis, alt_units, density_g_ml, visibility, source_app, source_external_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', 'coach', ?, datetime('now'))
+  `);
+  const items = (m.items || []).map(it => {
+    const { source, ...snap } = it;
+    if (source?.kind !== 'coach_food') return snap;
+    const ext = `food:${source.id}`;
+    let food = findSource.get(u, ext) || (snap.barcode ? findBarcode.get(u, String(snap.barcode)) : null);
+    if (!food) {
+      letGo.run(u, ext);
+      const id = insFood.run(u, snap.name, snap.brand || null, JSON.stringify(snap.nutrition || {}), _num(snap.portion, 100), snap.unit || 'g',
+        snap.barcode || null, snap.notes || null, snap.nutrition_basis || null,
+        snap.alt_units == null ? null : (typeof snap.alt_units === 'string' ? snap.alt_units : JSON.stringify(snap.alt_units)),
+        _num(snap.density_g_ml), ext).lastInsertRowid;
+      food = { id };
+    }
+    return { ...snap, id: food.id, food_server_id: food.id };
+  });
+  return db.prepare(`
+    INSERT INTO meals (user_id, name, nutrition, items, img_url, notes, is_recipe, portion, unit, servings, visibility, source_id, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, datetime('now'))
+  `).run(u, m.name, JSON.stringify(m.nutrition || {}), JSON.stringify(items), m.img_url || null, m.notes || null,
+    m.is_recipe ? 1 : 0, _num(m.portion, 100), m.unit || 'g', _num(m.servings, 1), m.id ?? null).lastInsertRowid;
+}
+
 /**
  * The client's answer: accepted or declined, with an optional note. Only a
  * pending recommendation of an active pairing can be answered; otherwise a
@@ -114,10 +203,16 @@ export function answerRecommendation(id, clientId, { status, response_note } = {
     e.row = recommendationOut(r);
     throw e;
   }
-  const changed = db.prepare(`
-    UPDATE coach_recommendations SET status = ?, response_note = ?, responded_at = datetime('now'), updated_at = datetime('now')
-     WHERE id = ? AND status = 'pending'
-  `).run(status, _note(response_note), r.id).changes;
+  // A sent meal or recipe becomes the client's own in the same step: answered
+  // once, copied once.
+  const changed = db.transaction(() => {
+    const n = db.prepare(`
+      UPDATE coach_recommendations SET status = ?, response_note = ?, responded_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND status = 'pending'
+    `).run(status, _note(response_note), r.id).changes;
+    if (n && status === 'accepted' && (r.kind === 'meal' || r.kind === 'recipe')) _copyMealItem(r);
+    return n;
+  })();
   const out = _row(r.id);
   // Answered (from Goals, the Diary or the conversation): its message is read.
   db.prepare(`UPDATE coach_messages SET read_at = datetime('now'), updated_at = datetime('now') WHERE recommendation_id = ? AND read_at IS NULL`).run(r.id);
@@ -158,7 +253,9 @@ async function _notifyClient(pairing, coachId) {
 async function _notifyCoach(r) {
   try {
     const who = _name(r.client_id);
-    const what = r.kind === 'day_plan' ? `your day plan for ${r.date}` : 'your recommended targets';
+    const what = r.kind === 'day_plan' ? `your day plan for ${r.date}`
+      : r.kind === 'meal' || r.kind === 'recipe' ? `your ${r.kind}, ${_json(r.payload, {})?.meal?.name || ''}`.replace(/, $/, '')
+      : 'your recommended targets';
     await pushNotifyDefaultOn(r.coach_id, 'notifClientAnswer', 'Coaching', `${who} ${r.status === 'accepted' ? 'accepted' : 'declined'} ${what}.`, 5);
   } catch (e) { logger.warn(`[coaching] answer notification failed: ${e?.message || e}`); }
 }

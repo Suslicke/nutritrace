@@ -19,6 +19,7 @@
   import { showSuccess, showError, showToast } from '../stores/toast.js';
   import { staleIngredientNames } from '../lib/stale-ingredients.js';
   import { editorState, clearFoodEditorState } from '../stores/editorState.js';
+  import { noteSharingStatus } from '../stores/sharing.js';
   import { DB, localDateStr } from '../lib/db.js';
   import { loadEntry } from '../stores/diary.js';
   import { API, USDA, NtApi } from '../lib/api.js';
@@ -347,6 +348,7 @@
   $: _tabHasShared = activeTab === 0 ? sharedCounts.foods > 0 : activeTab === 1 ? sharedCounts.meals > 0 : sharedCounts.recipes > 0;
   function refreshSharingStatus() {
     NtApi.getSharingStatus().then(s => {
+      noteSharingStatus(s);
       sharingEnabled = s.sharing_enabled === true;
       sharedCounts = { foods: s.foods || 0, meals: s.meals || 0, recipes: s.recipes || 0 };
     }).catch(() => {});

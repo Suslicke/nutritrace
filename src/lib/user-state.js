@@ -24,5 +24,6 @@ export async function resetUserState() {
     import('../stores/fasting.js').then(m => m.resetFastingState?.()),
     import('../stores/settings.js').then(m => m.reloadSettingStores?.({ force: true })),
     import('../stores/editorState.js').then(m => { m.clearFoodEditorState?.(); m.clearMealEditorState?.(); }),
+    import('../stores/sharing.js').then(m => m.resetSharingOn?.()),
   ]);
 }

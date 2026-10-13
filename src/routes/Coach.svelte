@@ -14,8 +14,7 @@
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
   import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
   import Conversation from '../components/coaching/Conversation.svelte';
-  import TargetsCard from '../components/coaching/TargetsCard.svelte';
-  import PlanCard from '../components/coaching/PlanCard.svelte';
+  import RecommendationCard from '../components/coaching/RecommendationCard.svelte';
   import { shownStatus } from '../lib/coach-plans.js';
   import { coachRecommendations, loadCoachRecommendations } from '../stores/coaching.js';
 
@@ -123,11 +122,7 @@
 
       <!-- Recommendations waiting for an answer, pinned on top. -->
       {#each pendingRecs as rec (rec.id)}
-        {#if rec.kind === 'day_plan'}
-          <PlanCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
-        {:else}
-          <TargetsCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
-        {/if}
+        <RecommendationCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
       {/each}
 
       <!-- Requests waiting for an answer, pinned on top. -->
@@ -182,11 +177,7 @@
         <section class="past">
           <h2 class="past-title">{$_('coaching.targets.past_title')}</h2>
           {#each pastRecs as rec (rec.id)}
-            {#if rec.kind === 'day_plan'}
-              <PlanCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
-            {:else}
-              <TargetsCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
-            {/if}
+            <RecommendationCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
           {/each}
         </section>
       {/if}

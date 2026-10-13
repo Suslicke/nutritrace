@@ -193,6 +193,24 @@ test('day plans add nothing for people not in coaching: the Diary card is only t
   assert.doesNotMatch(read('../src/components/coaching/DiaryPlanCard.svelte'), /NtApi|fetch\(|loadCoachRecommendations/);
 });
 
+test('the editors: Share only when an admin has sharing on, Send to Client only for a coach with clients, neither for a shared item or with no server', () => {
+  for (const f of ['../src/routes/FoodEditor.svelte', '../src/routes/MealEditor.svelte']) {
+    const src = read(f).replace(/\r/g, '');
+    assert.match(src, /\$: _canShare = \$sharingOn && \$userMgmtActive && !\(isNative && !getServerUrl\(\)\);/, f);
+    assert.match(src, /\{#if (food|meal)\.id && !_readOnly && _canShare\}/, f);
+  }
+  const meal = read('../src/routes/MealEditor.svelte').replace(/\r/g, '');
+  assert.match(meal, /\$: _canSend = \$clientsTab && \(Number\(\$coachingState\?\.as_coach\?\.active\) \|\| 0\) > 0 && !\(isNative && !getServerUrl\(\)\);/);
+  assert.match(meal, /\{#if meal\.id && !_readOnly && _canSend\}/);
+  // Whether sharing is on comes from what the Foods page and the meal editor
+  // already ask: the food editor makes no request of its own for it.
+  assert.doesNotMatch(read('../src/routes/FoodEditor.svelte'), /getSharingStatus/);
+  // The share sheet goes to the server's per-item routes, by the server's id.
+  const share = read('../src/lib/share-item.js');
+  assert.match(share, /NtApi\.patch\(`\/api\/\$\{kind\}\/\$\{sid\}\/share`/);
+  assert.match(share, /serverIdOf\(item\)/);
+});
+
 test('Goals and the Diary add nothing for people not in coaching', () => {
   const goalsPage = read('../src/routes/Goals.svelte');
   assert.match(goalsPage, /\$: if \(\$coachTab\) loadCoachRecommendations\(\{ refresh: true \}\)/);
@@ -223,12 +241,18 @@ test('coaching strings live in en.json; Users search finds coaching', () => {
     '../src/components/coaching/CoachingNeedsServer.svelte', '../src/components/coaching/WeightTrend.svelte',
     '../src/lib/coaching-view.js', '../src/components/settings/SettingsUserManagement.svelte',
     '../src/components/coaching/PlanCard.svelte', '../src/components/coaching/PlanBuilder.svelte',
-    '../src/components/coaching/PlanItemPicker.svelte', '../src/components/coaching/DiaryPlanCard.svelte'];
+    '../src/components/coaching/PlanItemPicker.svelte', '../src/components/coaching/DiaryPlanCard.svelte',
+    '../src/components/coaching/MealRecCard.svelte', '../src/components/coaching/SendToClientSheet.svelte',
+    '../src/components/ui/ShareSheet.svelte'];
   for (const f of files) {
     for (const [, key] of read(f).matchAll(/\$?_\(\s*'([a-z_]+(?:\.[a-z0-9_]+)+)'/g)) assert.equal(typeof get(key), 'string', `${f}: ${key}`);
   }
   for (const st of ['pending', 'accepted', 'declined', 'expired', 'replaced', 'withdrawn']) assert.equal(typeof get(`coaching.plans.status_${st}`), 'string', st);
   for (const k of ['foods', 'meals', 'recipes']) assert.equal(typeof get(`coaching.plans.kind_${k}`), 'string', k);
+  for (const st of ['pending', 'accepted', 'declined', 'withdrawn', 'replaced']) {
+    assert.equal(typeof get(`coaching.send.status_${st}`), 'string', st);
+    if (st !== 'pending') assert.equal(typeof get(`coaching.send.client_status_${st}`), 'string', st);
+  }
   assert.equal(get('coaching.client.request_body'), '{name} will see your diary, your targets, your weight and your foods, meals and recipes.');
   const kw = read('../src/routes/Settings.svelte').match(/users: +\[([^\]]+)\]/)[1];
   for (const w of ['coach', 'coaching', 'client', 'pairing']) assert.match(kw, new RegExp(`'${w}'`));
