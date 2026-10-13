@@ -92,7 +92,7 @@
         <ul class="pp-list">
           {#each offResults.slice(0, 50) as x, i (x.barcode || i)}
             <li><button class="pp-row" on:click={() => pick(x)}>
-              <span class="pp-name">{x.name}{#if x.brand}<span class="pp-brand"> · {x.brand}</span>{/if}</span>
+              <span class="pp-name">{x.name}{#if x.brand}<span class="pp-brand">{' · '}{x.brand}</span>{/if}</span>
               <span class="pp-sub">{Math.round((Number(x.portion) || 100) * 10) / 10} {x.unit || 'g'} · {energy(x.nutrition?.calories)}</span>
             </button></li>
           {/each}
@@ -112,7 +112,7 @@
         <ul class="pp-list">
           {#each list as x (x.id)}
             <li><button class="pp-row" on:click={() => pick(x)}>
-              <span class="pp-name">{x.name}{#if x.brand}<span class="pp-brand"> · {x.brand}</span>{/if}</span>
+              <span class="pp-name">{x.name}{#if x.brand}<span class="pp-brand">{' · '}{x.brand}</span>{/if}</span>
               <span class="pp-sub">{sub(x)}</span>
             </button></li>
           {/each}

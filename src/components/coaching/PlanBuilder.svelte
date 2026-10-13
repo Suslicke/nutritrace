@@ -149,7 +149,7 @@
           {#each draft[slot] as it, i (i)}
             <li class="pb-item">
               <div class="pb-item-main">
-                <span class="pb-item-name">{it.name}{#if it.brand}<span class="pb-brand"> · {it.brand}</span>{/if}</span>
+                <span class="pb-item-name">{it.name}{#if it.brand}<span class="pb-brand">{' · '}{it.brand}</span>{/if}</span>
                 <span class="pb-item-sub">{amount(it)} · {energy(itemTotals(it).calories)}</span>
               </div>
               <input class="input pb-qty" type="text" inputmode="decimal" use:decimalInput value={it.quantity}
@@ -207,7 +207,7 @@
           <li>
             <button class="pb-hrow" class:active={r.date === date} on:click={() => date = r.date}>
               <span class="pb-hdate">{weekday(r.date)} {formatDay(r.date, $dateFormat)}</span>
-              <span class="pb-hstatus">{$_(`coaching.plans.status_${shownStatus(r, todayLocal())}`)}{#if r.status === 'accepted' && r.logged_meals?.length} · {$_('coaching.plans.logged_meals', { values: { meals: r.logged_meals.map(s => mealNames[s] || $_('coaching.diary.meal_n', { values: { n: s + 1 } })).join(', ') } })}{/if}</span>
+              <span class="pb-hstatus">{$_(`coaching.plans.status_${shownStatus(r, todayLocal())}`)}{#if r.status === 'accepted' && r.logged_meals?.length}{' · '}{$_('coaching.plans.logged_meals', { values: { meals: r.logged_meals.map(s => mealNames[s] || $_('coaching.diary.meal_n', { values: { n: s + 1 } })).join(', ') } })}{/if}</span>
             </button>
           </li>
         {/each}

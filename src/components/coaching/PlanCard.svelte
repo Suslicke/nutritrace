@@ -121,13 +121,13 @@
           <li>
             {#if canLog}
               <button class="pc-item pc-item-btn" on:click={() => openItem(m.meal, it)}>
-                <span class="pc-item-name">{it.name}{#if it.brand}<span class="pc-brand"> · {it.brand}</span>{/if}</span>
+                <span class="pc-item-name">{it.name}{#if it.brand}<span class="pc-brand">{' · '}{it.brand}</span>{/if}</span>
                 <span class="pc-item-amt">{amount(it)}</span>
                 <span class="pc-item-kcal">{energy(itemTotals(it).calories)}</span>
               </button>
             {:else}
               <div class="pc-item">
-                <span class="pc-item-name">{it.name}{#if it.brand}<span class="pc-brand"> · {it.brand}</span>{/if}</span>
+                <span class="pc-item-name">{it.name}{#if it.brand}<span class="pc-brand">{' · '}{it.brand}</span>{/if}</span>
                 <span class="pc-item-amt">{amount(it)}</span>
                 <span class="pc-item-kcal">{energy(itemTotals(it).calories)}</span>
               </div>
@@ -148,7 +148,7 @@
 
   {#if coachView}
     <p class="pc-status">
-      {$_(`coaching.plans.status_${status}`)}{#if rec.response_note} · {$_('coaching.targets.response_note', { values: { note: rec.response_note } })}{/if}
+      {$_(`coaching.plans.status_${status}`)}{#if rec.response_note}{' · '}{$_('coaching.targets.response_note', { values: { note: rec.response_note } })}{/if}
     </p>
     {#if rec.status === 'accepted'}
       <p class="pc-status">{loggedSet.size ? $_('coaching.plans.logged_meals', { values: { meals: meals.filter(m => loggedSet.has(m.meal)).map(m => mealName(m.meal)).join(', ') } }) : $_('coaching.plans.logged_none')}</p>
