@@ -22,6 +22,12 @@ export const coachingSupported = writable(false);
 export const coachingState = writable(null);
 /** What a coach recommended to this person, newest first (kept on the device). */
 export const coachRecommendations = writable([]);
+/**
+ * A draft Trace prepared for a coach and the coach chose to open: the
+ * client's Targets editor or Plans builder starts from it (the coach still
+ * reviews and sends). { kind: 'targets' | 'day_plan', clientId, date, payload, note }
+ */
+export const coachDraft = writable(null);
 
 /** Android with no server: coaching has nowhere to happen. */
 export const coachingNeedsServer = () => isNative && !getServerUrl();
@@ -118,6 +124,7 @@ function _lastSaved(userId) {
 export function clearCoaching() {
   coachingSupported.set(false);
   coachingState.set(null);
+  coachDraft.set(null);
   try { coachRecommendations.set([]); } catch { /* declared below */ }
   import('../lib/coach-photos.js').then(m => m.clearCoachPhotos()).catch(() => {});
   try {

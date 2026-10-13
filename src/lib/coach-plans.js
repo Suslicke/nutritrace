@@ -164,11 +164,17 @@ export const serverIdOf = (f) => (f && 'server_id' in f ? f.server_id : (typeof 
  */
 export const ingredientFoodId = (ing) => ing?.food_server_id ?? serverIdOf(ing);
 
-/** How a copy of a coach's food or recipe remembers where it came from. */
+/**
+ * How a copy made from a plan remembers where it came from: a coach's food
+ * or recipe, or one of the client's own that they deleted since (copied
+ * once, then found again by this).
+ */
 export function coachSource(item) {
   const s = item?.source;
   if (s?.kind === 'coach_food') return { source_app: 'coach', source_external_id: `food:${s.id}` };
   if (s?.kind === 'coach_recipe') return { source_app: 'coach', source_external_id: `recipe:${s.id}` };
+  if (s?.kind === 'client_food') return { source_app: 'coach', source_external_id: `own-food:${s.id}` };
+  if (s?.kind === 'client_recipe') return { source_app: 'coach', source_external_id: `own-recipe:${s.id}` };
   return null;
 }
 

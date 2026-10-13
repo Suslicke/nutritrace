@@ -2465,6 +2465,16 @@
       "none_yet": "Nothing recommended yet.",
       "pending_replaced_hint": "Sending a new recommendation replaces the one waiting for an answer."
     },
+    "trace": {
+      "draft_targets": "Draft targets for {name}",
+      "draft_plan": "Draft day plan for {name}, {date}",
+      "draft_sub": "Nothing is sent yet. Open it, change anything, and send it yourself.",
+      "open_targets": "Open in Targets",
+      "open_plan": "Open in Plans",
+      "discard": "Discard",
+      "drafted": "Drafted by Trace. Review it, change anything, then send.",
+      "dismiss_draft": "Clear Draft"
+    },
     "send": {
       "button": "Send to Client",
       "title_meal": "Send Meal to Client",

@@ -35,6 +35,8 @@
   import { isNative, getServerUrl, getAuthToken, apiUrl } from '../../lib/platform.js';
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { foldText } from '../../lib/search-text.js';
+  import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
+  import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
 
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -65,6 +67,19 @@
   //   _commitFoodCatalogOnly  — create food row, no diary write
   //   _commitFoodAndLog       — create food row AND log it to diary
   let _pendingFoodProposal = null; // { name, brand, portion, unit, nutrition, notes }
+  // A draft Trace prepared for a coach (draft_targets / draft_day_plan):
+  // only shown here; the coach opens it in the app, reviews it and sends it.
+  let _coachDraftCard = null;
+  // Coaching tools, for people in coaching only (a coach with clients, a client with a coach).
+  $: _coaching = { coach: !!$clientsTab, client: !!$coachTab };
+  function openCoachDraft() {
+    const d = _coachDraftCard;
+    if (!d) return;
+    coachDraft.set({ kind: d.kind, clientId: d.clientId, date: d.date, payload: d.payload, note: d.note });
+    _coachDraftCard = null;
+    panelOpen = false;
+    import('svelte-spa-router').then(({ push }) => push(`/goals/clients/${d.clientId}`));
+  }
   let _foodProposalCommitted = false;
   let _foodProposalCommittedKind = '';   // 'catalog' | 'logged'
   // null = Don't Log. The card starts there: saving a food must never
@@ -835,8 +850,16 @@
           _pendingProposal = null;
           return { ok: true, kind: 'food_proposal', ...payload };
         }
-        default:
+        default: {
+          // Coaching: a client's summary and catalog, drafts for a coach,
+          // and a client's recommendations (never the conversation).
+          const c = await runCoachingTool(name, args, _coaching);
+          if (c) {
+            if (c.draft) _coachDraftCard = c.draft;
+            return c.result;
+          }
           return { error: `Unknown tool: ${name}` };
+        }
       }
     });
 
@@ -1793,7 +1816,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
 
     try {
       const ctx          = await buildContext();
-      const systemPrompt = buildSystemPrompt(ctx);
+      const systemPrompt = buildSystemPrompt(ctx) + coachingPrompt(_coaching);
       // Build API messages — include image in the last user message if present
       const apiMessages  = forModel(messages)
         .map(m => ({ role: m.role, content: m.content }))
@@ -1834,10 +1857,10 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
       // cannot call a tool that isn't there this round, but it has to be
       // aimed at that case alone.
       const _cardAwaitingUser = !!_pendingProposal || !!_pendingFoodProposal;
-      const toolsForRound = image
+      const toolsForRound = [...(image
         ? TOOLS.filter(t => t.name !== 'log_quick_calories')
         : TOOLS.filter(t => t.name !== 'propose_quick_calories'
-                         && !(t.name === 'propose_food' && _cardAwaitingUser));
+                         && !(t.name === 'propose_food' && _cardAwaitingUser))), ...coachingTools(_coaching)];
       // The model can't use tools and answered without them: a note in the
       // conversation says so, once (#259). routed: the gateway picked a
       // model for this request that can't, another pick may well.
@@ -2279,6 +2302,22 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
                     Logged {_proposalCommittedKcal} kcal to {(mealNames.get() || ['Breakfast','Lunch','Dinner','Snacks'])[_pendingProposal.meal] || 'meal'}
                   </div>
                 {/if}
+              </div>
+            </div>
+          {/if}
+
+          <!-- A coaching draft (targets or a day plan) for a coach to open
+               and review in the app; nothing is sent from here. -->
+          {#if _coachDraftCard}
+            <div class="ai-msg">
+              <div class="ai-msg-avatar"><TraceFace size={24} /></div>
+              <div class="ai-msg-body coach-draft" style="width:100%">
+                <div class="proposal-name">{$_(_coachDraftCard.kind === 'targets' ? 'coaching.trace.draft_targets' : 'coaching.trace.draft_plan', { values: { name: _coachDraftCard.clientName, date: _coachDraftCard.date || '' } })}</div>
+                <p class="coach-draft-sub">{$_('coaching.trace.draft_sub')}</p>
+                <div class="proposal-actions">
+                  <button class="btn btn-secondary" on:click={() => _coachDraftCard = null}>{$_('coaching.trace.discard')}</button>
+                  <button class="btn btn-primary" on:click={openCoachDraft}>{$_(_coachDraftCard.kind === 'targets' ? 'coaching.trace.open_targets' : 'coaching.trace.open_plan')}</button>
+                </div>
               </div>
             </div>
           {/if}
@@ -2941,6 +2980,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
   }
   /* propose_food has three buttons — let them wrap on narrow viewports. */
   .proposal-actions-wide { flex-wrap: wrap; }
+  .coach-draft-sub { margin: 4px 0 8px; font-size: 13px; color: var(--text-2); }
   .proposal-actions .btn {
     display: inline-flex; align-items: center; gap: 4px;
   }

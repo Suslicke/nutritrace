@@ -13,6 +13,7 @@
   import { TARGET_KEYS } from '../../lib/coach-targets.js';
   import { coachingErrorText } from '../../lib/coaching-view.js';
   import WeightTrend from './WeightTrend.svelte';
+  import { coachDraft } from '../../stores/coaching.js';
   import TargetsCard from './TargetsCard.svelte';
 
   export let row;              // { id, client: { id, name } }
@@ -55,9 +56,29 @@
     try {
       current = await NtApi.get(`/api/coaching/clients/${row.client.id}/targets`);
       startFrom(current.goals);
+      fromDraft();
     } catch (e) { loadErr = coachingErrorText(e, $_); }
   }
   onMount(load);
+
+  // A draft Trace prepared, opened by the coach: the editor starts from it
+  // (the coach still reviews and sends).
+  let drafted = false;
+  function fromDraft() {
+    const d = $coachDraft;
+    if (!d || d.kind !== 'targets' || d.clientId !== row.client.id) return;
+    coachDraft.set(null);
+    for (const [key, g] of Object.entries(d.payload?.goals || {})) {
+      if (!ed[key]) continue;
+      const shared = g.sharedGoal !== false;
+      ed[key] = { ...ed[key], include: true, shared, isPercent: !!g.isPercent, isMin: !!g.isMin,
+        value: toShown(key, g.isMin ? g.min : g.max), days: Array.from({ length: 7 }, (_, i) => toShown(key, Array.isArray(g.days) ? g.days[i] : (g.max ?? g.min))) };
+    }
+    mode = d.payload?.mode || '';
+    note = d.note || '';
+    drafted = true;
+  }
+  function clearDraft() { drafted = false; note = ''; mode = ''; startFrom(current?.goals); }
 
   // Grams and percent of calories, converted at the calorie target being
   // recommended (else the client's), the way the Goals page converts.
@@ -130,6 +151,13 @@
   <section class="card te">
     <h3>{$_('coaching.targets.editor_title')}</h3>
     <p class="te-intro">{$_('coaching.targets.editor_intro', { values: { name: row.client.name } })}</p>
+    {#if drafted}
+      <p class="te-drafted" role="status">
+        <span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span>
+        <span>{$_('coaching.trace.drafted')}</span>
+        <button class="btn btn-ghost btn-sm" on:click={clearDraft}>{$_('coaching.trace.dismiss_draft')}</button>
+      </p>
+    {/if}
 
     {#each TARGET_KEYS as key (key)}
       {@const e = ed[key]}
@@ -201,6 +229,8 @@
 {/if}
 
 <style>
+  .te-drafted { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--surface-2); font-size: 13px; color: var(--text-2); }
+  .te-drafted .material-symbols-rounded { color: var(--accent); font-size: 18px; }
   .te { padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
   .te h3, .te-history h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); margin: 0; font-weight: 700; }
   .te-history { margin-top: 16px; }

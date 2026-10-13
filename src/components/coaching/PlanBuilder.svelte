@@ -13,10 +13,11 @@
   import { showSuccess, showError } from '../../stores/toast.js';
   import { decimalInput, parseDecimal } from '../../lib/decimal-input.js';
   import { cleanPlanPayload, planTotals, mealTotals, itemTotals, shownStatus } from '../../lib/coach-plans.js';
-  import { formatDay, shiftDay, todayLocal, weekday, coachingErrorText } from '../../lib/coaching-view.js';
+  import { formatDay, shiftDay, todayLocal, today, weekday, coachingErrorText } from '../../lib/coaching-view.js';
   import Sheet from '../ui/Sheet.svelte';
   import PlanItemPicker from './PlanItemPicker.svelte';
   import PlanCard from './PlanCard.svelte';
+  import { coachDraft } from '../../stores/coaching.js';
 
   export let row;                  // { id, client: { id, name } }
   export let recommendations = [];
@@ -42,14 +43,29 @@
   $: if (clientId && (!day || day._for !== `${clientId}:${date}`)) loadDay(clientId, date);
   $: _startFrom(clientId, date, current);
 
+  // A draft Trace prepared, opened by the coach: its date, meals and note
+  // (the coach still reviews and sends).
+  let drafted = false;
+  $: if ($coachDraft && $coachDraft.kind === 'day_plan' && $coachDraft.clientId === clientId && $coachDraft.date) date = $coachDraft.date;
+
   function _startFrom(cid, d, plan) {
     const key = `${cid}:${d}:${plan?.id ?? '-'}`;
     if (key === draftFor) return;
     draftFor = key;
     draft = {};
+    const t = $coachDraft;
+    if (t && t.kind === 'day_plan' && t.clientId === cid && t.date === d) {
+      coachDraft.set(null);
+      for (const m of t.payload?.meals || []) draft[m.meal] = m.items.map(it => ({ ...it }));
+      note = t.note || '';
+      drafted = true;
+      return;
+    }
+    drafted = false;
     for (const m of plan?.payload?.meals || []) draft[m.meal] = m.items.map(it => ({ ...it }));
     note = plan?.note || '';
   }
+  function clearDraft() { draftFor = null; drafted = false; _startFrom(clientId, date, current); }
 
   async function loadDay(cid, d) {
     const key = `${cid}:${d}`;
@@ -68,7 +84,7 @@
   $: payload = { meals: slots.filter(s => draft[s]?.length).map(s => ({ meal: s, items: draft[s] })) };
   $: total = planTotals(payload);
   $: count = payload.meals.reduce((n, m) => n + m.items.length, 0);
-  $: past = date < todayLocal();
+  $: past = date < $today;
   $: targets = day?.targets || {};
 
   const energy = (v) => { const e = Nutrition.displayEnergy(Math.round(v || 0), $energyUnit); return `${e.value.toLocaleString()} ${e.unit}`; };
@@ -110,7 +126,7 @@
   }
 
   // Copy to Other Days: this day and the two weeks after it, to choose from.
-  $: copyChoices = Array.from({ length: 15 }, (_, i) => shiftDay(date, i)).filter(d => d >= todayLocal());
+  $: copyChoices = Array.from({ length: 15 }, (_, i) => shiftDay(date, i)).filter(d => d >= $today);
   function openCopy() { copyDays = new Set(past ? [] : [date]); copyOpen = true; }
   function toggleDay(d) { const s = new Set(copyDays); s.has(d) ? s.delete(d) : s.add(d); copyDays = s; }
 
@@ -119,13 +135,20 @@
 
 <div class="pb">
   <p class="pb-intro">{$_('coaching.plans.intro', { values: { name } })}</p>
+  {#if drafted}
+    <p class="pb-drafted" role="status">
+      <span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span>
+      <span>{$_('coaching.trace.drafted')}</span>
+      <button class="btn btn-ghost btn-sm" on:click={clearDraft}>{$_('coaching.trace.dismiss_draft')}</button>
+    </p>
+  {/if}
 
   <div class="pb-daynav">
     <button class="btn-icon" on:click={() => date = shiftDay(date, -1)} aria-label={$_('coaching.diary.previous')} title={$_('coaching.diary.previous')}>
       <span class="material-symbols-rounded">chevron_left</span>
     </button>
     <div class="pb-daynav-label">
-      <strong>{date === todayLocal() ? $_('coaching.diary.today') : weekday(date)}</strong>
+      <strong>{date === $today ? $_('coaching.diary.today') : weekday(date)}</strong>
       <span>{formatDay(date, $dateFormat)}</span>
     </div>
     <button class="btn-icon" on:click={() => date = shiftDay(date, 1)} aria-label={$_('coaching.diary.next')} title={$_('coaching.diary.next')}>
@@ -209,7 +232,7 @@
           <li>
             <button class="pb-hrow" class:active={r.date === date} on:click={() => date = r.date}>
               <span class="pb-hdate">{weekday(r.date)} {formatDay(r.date, $dateFormat)}</span>
-              <span class="pb-hstatus">{$_(`coaching.plans.status_${shownStatus(r, todayLocal())}`)}{#if r.status === 'accepted' && r.logged_meals?.length}{' · '}{$_('coaching.plans.logged_meals', { values: { meals: r.logged_meals.map(s => mealNames[s] || $_('coaching.diary.meal_n', { values: { n: s + 1 } })).join(', ') } })}{/if}</span>
+              <span class="pb-hstatus">{$_(`coaching.plans.status_${shownStatus(r, $today)}`)}{#if r.status === 'accepted' && r.logged_meals?.length}{' · '}{$_('coaching.plans.logged_meals', { values: { meals: r.logged_meals.map(s => mealNames[s] || $_('coaching.diary.meal_n', { values: { n: s + 1 } })).join(', ') } })}{/if}</span>
             </button>
           </li>
         {/each}
@@ -237,6 +260,8 @@
 <style>
   .pb { min-width: 0; }
   .pb-intro { margin: 12px 0 0; font-size: 13px; color: var(--text-3); }
+  .pb-drafted { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--surface-2); font-size: 13px; color: var(--text-2); }
+  .pb-drafted .material-symbols-rounded { color: var(--accent); font-size: 18px; }
   .pb-daynav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
   .pb-daynav-label { display: flex; flex-direction: column; align-items: center; min-width: 0; }
   .pb-daynav-label span { font-size: 12px; color: var(--text-3); }

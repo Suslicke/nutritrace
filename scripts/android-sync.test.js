@@ -1643,3 +1643,61 @@ test('a sent recipe accepted offline on the phone: the copy is made on the serve
   assert.deepEqual(r.foods, [['coach', `food:${oats.id}`]], 'with its ingredient\'s food');
   assert.deepEqual(q(`SELECT name, source_app, source_external_id FROM meals WHERE user_id = ?`, CL.id), [{ name: 'Sent Bowl', source_app: 'coach', source_external_id: `meal:${bowl.id}:${rec.id}` }]);
 });
+
+// Trace in coaching (1.5): on the phone, a coach's Trace reads a client's
+// summary and foods and drafts targets and a day plan; nothing is sent. A
+// client's Trace reads what their coach recommended, never the conversation.
+test("Trace's coaching tools on the phone: a coach's drafts send nothing; a client reads recommendations, never messages", async (t) => {
+  if (skip(t)) return;
+  const coach = await account('tr-coach', A), client = await account('tr-client', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  await http(client, 'PUT', '/api/settings', { key: 'goals', value: { calories: { sharedGoal: true, isMin: false, isPercent: false, days: Array(7).fill(2200), max: 2200 } } });
+  const oats = await http(client, 'POST', '/api/foods', { name: 'Trace Oats', portion: 50, unit: 'g', nutrition: { calories: 190, proteins: 6.5, carbohydrates: 33, fat: 3.5 } });
+  await http(coach, 'POST', `/api/coaching/clients/${CL.id}/messages`, { uuid: 'tr-secret-0001', body: 'A private word' });
+  const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toLocaleDateString('sv-SE'); })();
+  const r = phone('tracecoach', coach, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CO.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CO)}, { confirm: async () => true });
+    await p.sync();
+    const tr = await import(p.src + 'lib/coach-trace.js');
+    const as = { coach: true, client: false };
+    const clients = (await tr.runCoachingTool('get_coaching_clients', {}, as)).result;
+    const summary = (await tr.runCoachingTool('get_client_summary', { client_id: ${CL.id} }, as)).result;
+    const foods = (await tr.runCoachingTool('get_client_foods', { client_id: ${CL.id}, query: 'oats' }, as)).result;
+    const targets = await tr.runCoachingTool('draft_targets', { client_id: ${CL.id}, calories: 2000, protein_g: 150, note: 'A little less' }, as);
+    const plan = await tr.runCoachingTool('draft_day_plan', { client_id: ${CL.id}, date: '${tomorrow}', meals: [{ meal: 0, items: [{ id: foods[0].id, kind: 'food', whose: 'client', servings: 2 }] }] }, as);
+    const notCoach = (await tr.runCoachingTool('draft_targets', { client_id: ${CL.id}, calories: 1 }, { coach: false, client: false })).result;
+    const names = tr.coachingTools({}).map(x => x.name);
+    p.done({ clients, summaryTargets: summary.targets, foods, targets: targets.draft, targetsResult: targets.result, plan: plan.draft, planResult: plan.result, notCoach, names, allNames: tr.coachingTools({ coach: true, client: true }).map(x => x.name) });`);
+  assert.deepEqual(r.clients.map(c => c.name), ['tr-client']);
+  assert.equal(r.summaryTargets.calories.max, 2200);
+  assert.deepEqual(r.foods.map(f => [f.id, f.name, f.calories]), [[oats.id, 'Trace Oats', 190]]);
+  assert.deepEqual(r.targets.payload.goals.calories.max, 2000);
+  assert.equal(r.targets.note, 'A little less');
+  assert.match(r.targetsResult.note, /Nothing was sent/);
+  assert.deepEqual(r.plan.payload.meals[0].items.map(i => [i.name, i.quantity, i.source.kind, i.source.id]), [['Trace Oats', 2, 'client_food', oats.id]]);
+  assert.equal(r.planResult.totals.calories, 380);
+  assert.equal(r.notCoach.error, 'This needs coaching.');
+  assert.deepEqual(r.names, [], 'nothing for people not in coaching');
+  assert.ok(!r.allNames.some(n => /message|conversation/.test(n)), 'no tool reads the conversation');
+  assert.equal(q(`SELECT COUNT(*) AS n FROM coach_recommendations WHERE client_id = ?`, CL.id)[0].n, 0, 'drafts send nothing');
+
+  // The client's Trace: what was recommended, from the recommendations.
+  await http(coach, 'POST', `/api/coaching/clients/${CL.id}/recommendations`, { payload: { goals: { calories: { max: 2000 } } }, note: 'Slightly less' });
+  const c = phone('traceclient', client, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+    await p.sync();
+    const tr = await import(p.src + 'lib/coach-trace.js');
+    const out = (await tr.runCoachingTool('get_coach_recommendations', {}, { coach: false, client: true })).result;
+    p.done({ out, text: JSON.stringify(out) });`);
+  assert.equal(c.out.length, 1);
+  assert.deepEqual([c.out[0].kind, c.out[0].status, c.out[0].note, c.out[0].recommended_goals.calories.max], ['targets', 'pending', 'Slightly less', 2000]);
+  assert.doesNotMatch(c.text, /A private word/, 'never the conversation');
+});

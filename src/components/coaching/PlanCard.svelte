@@ -15,7 +15,7 @@
   import { Nutrition } from '../../lib/nutrition.js';
   import { planTotals, mealTotals, itemTotals, shownStatus, itemKey } from '../../lib/coach-plans.js';
   import { answerPlan } from '../../lib/coach-recommendations.js';
-  import { formatDay, todayLocal } from '../../lib/coaching-view.js';
+  import { formatDay, today } from '../../lib/coaching-view.js';
 
   export let rec;
   export let coachName = '';
@@ -33,7 +33,7 @@
 
   $: names = (Array.isArray(mealNames) && mealNames.length ? mealNames : $myMealNames) || [];
   $: mealName = (slot) => names[slot] || $_('coaching.diary.meal_n', { values: { n: slot + 1 } });
-  $: status = shownStatus(rec, todayLocal());
+  $: status = shownStatus(rec, $today);
   $: meals = rec.payload?.meals || [];
   $: total = planTotals(rec.payload);
   // Meals with every item logged: on the Diary from the day's items; for

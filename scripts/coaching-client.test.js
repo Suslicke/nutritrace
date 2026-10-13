@@ -184,6 +184,23 @@ test('day plans: Expired from the date, Logged from the day\'s items, the client
     { name: 'G', brand: null, portion: 60, unit: 'g', nutrition: { calories: 270 }, barcode: null, source_app: 'coach', source_external_id: 'recipe:4' });
 });
 
+test('a client\'s own food deleted since a plan: copied once, then found again; today turns over at midnight while open', async (t) => {
+  const p = await import('../src/lib/coach-plans.js');
+  const item = { name: 'Oats', portion: 50, unit: 'g', nutrition: { calories: 190 }, barcode: null, source: { kind: 'client_food', id: 41 } };
+  assert.equal(p.findOwn(item, { foods: [] }), null, 'deleted: not theirs any more');
+  const copy = { id: 9, ...p.foodFromPlanItem(item) };
+  assert.deepEqual([copy.source_app, copy.source_external_id], ['coach', 'own-food:41']);
+  assert.equal(p.findOwn(item, { foods: [copy] }), copy, 'the copy made the first time');
+  // The coaching views' today: a timer to the next midnight while used.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: new Date(2026, 9, 13, 23, 59, 0) });
+  const { today } = await import('../src/lib/coaching-view.js?midnight');
+  const seen = [];
+  const stop = today.subscribe(v => seen.push(v));
+  t.mock.timers.tick(2 * 60 * 1000);
+  stop();
+  assert.deepEqual(seen, ['2026-10-13', '2026-10-14']);
+});
+
 test('day plans add nothing for people not in coaching: the Diary card is only theirs, the Foods page changes only for a plan item', () => {
   const foods = read('../src/routes/Foods.svelte');
   assert.match(foods, /if \(editorState\.planLog\) \{/);

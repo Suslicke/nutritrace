@@ -9,7 +9,7 @@
  * or recipe by source, an Open Food Facts product by its barcode), as
  * adding a search result does. Works offline wherever the Diary does.
  */
-import { NtApi } from './api.js';
+import { NtApi, API } from './api.js';
 import { editorState } from '../stores/editorState.js';
 import { findOwn, foodFromPlanItem, planDiaryItem, planMark, itemKey } from './coach-plans.js';
 
@@ -21,6 +21,29 @@ import { findOwn, foodFromPlanItem, planDiaryItem, planMark, itemKey } from './c
 async function _catalog() {
   const [foods, recipes] = await Promise.all([NtApi.getFoods(), NtApi.getRecipes()]);
   return { foods: foods || [], recipes: recipes || [] };
+}
+
+/**
+ * A new food for a plan item. An Open Food Facts product also gets what
+ * adding it from a search would bring (its picture, its units and their
+ * weights, the basis of its values), when Open Food Facts answers in time;
+ * the plan's own name, amount and values stay.
+ */
+async function _newFood(item) {
+  const food = foodFromPlanItem(item);
+  if (item?.source?.kind !== 'off' || !item.barcode) return food;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return food;
+  try {
+    const p = await Promise.race([API.lookupBarcode(item.barcode), new Promise(r => setTimeout(() => r(null), 4000))]);
+    if (!p) return food;
+    const extra = {};
+    if (p.imgUrl) extra.imgUrl = p.imgUrl;
+    if (Array.isArray(p.alt_units) && p.alt_units.length) extra.alt_units = p.alt_units;
+    if (p.nutrition_basis) extra.nutrition_basis = p.nutrition_basis;
+    if (p.density_g_ml) extra.density_g_ml = p.density_g_ml;
+    if (Array.isArray(p.categories) && p.categories.length) extra.categories = p.categories;
+    return { ...food, ...extra };
+  } catch { return food; }
 }
 
 /**
@@ -37,7 +60,7 @@ export async function logPlanMeal(rec, mealSlot, logged = new Set()) {
   for (const { item, i } of todo) {
     let food = findOwn(item, cat);
     if (!food) {
-      food = await NtApi.createFood({ ...foodFromPlanItem(item), created_at: new Date().toISOString() });
+      food = await NtApi.createFood({ ...(await _newFood(item)), created_at: new Date().toISOString() });
       cat.foods = [food, ...cat.foods];
     }
     await addDiaryItem(planDiaryItem(item, food, rec.id, mealSlot, i), mealSlot, rec.date);
@@ -62,7 +85,7 @@ export async function openPlanItem(rec, mealSlot, index, item) {
   const own = findOwn(item, cat);
   const food = own
     ? { ...own, portion: item.portion, unit: item.unit || 'g', nutrition: { ...(item.nutrition || {}) } }
-    : foodFromPlanItem(item);
+    : await _newFood(item);
   editorState.planLog = { food, quantity: item.quantity || 1, source: planMark(rec.id, mealSlot, index) };
   const { push } = await import('svelte-spa-router');
   push(`/foods?pick=1&meal=${mealSlot}&date=${rec.date}`);

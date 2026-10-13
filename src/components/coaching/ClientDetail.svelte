@@ -12,6 +12,7 @@
   import Conversation from './Conversation.svelte';
   import TargetsEditor from './TargetsEditor.svelte';
   import PlanBuilder from './PlanBuilder.svelte';
+  import { coachDraft } from '../../stores/coaching.js';
 
   export let row;            // the list row: { id, status, client: { id, name }, ... }
   export let showBack = true;
@@ -27,6 +28,8 @@
 
   $: clientId = row?.client?.id;
   $: if (clientId && clientId !== loadedFor) { loadedFor = clientId; tab = 'overview'; dayDate = todayLocal(); day = null; loadOverview(); loadRecs(); }
+  // A draft Trace prepared and the coach opened: its tab.
+  $: if ($coachDraft && $coachDraft.clientId === clientId) tab = $coachDraft.kind === 'targets' ? 'targets' : 'plans';
 
   // What this coach recommended to this client (the Targets tab and the
   // cards in the conversation).

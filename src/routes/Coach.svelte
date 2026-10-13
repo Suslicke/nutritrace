@@ -10,7 +10,7 @@
   import { coachingState, coachingNeedsServer, refreshCoaching, setCoachingFromServer, coachTab } from '../stores/coaching.js';
   import { confirmDialog } from '../stores/confirmDialog.js';
   import { showSuccess, showError } from '../stores/toast.js';
-  import { formatDay, localDay, coachingErrorText, coachNameFor, todayLocal } from '../lib/coaching-view.js';
+  import { formatDay, localDay, coachingErrorText, coachNameFor, today } from '../lib/coaching-view.js';
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
   import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
   import Conversation from '../components/coaching/Conversation.svelte';
@@ -39,9 +39,9 @@
   });
   // Waiting for an answer: pinned on top. Answered: history, below.
   // A day plan past its date is Expired: history.
-  const waiting = (r, pid) => r.pairing_id === pid && shownStatus(r, todayLocal()) === 'pending';
-  $: pendingRecs = $coachRecommendations.filter(r => waiting(r, pairing?.id));
-  $: pastRecs = $coachRecommendations.filter(r => !waiting(r, pairing?.id));
+  const waiting = (r, pid, day) => r.pairing_id === pid && shownStatus(r, day) === 'pending';
+  $: pendingRecs = $coachRecommendations.filter(r => waiting(r, pairing?.id, $today));
+  $: pastRecs = $coachRecommendations.filter(r => !waiting(r, pairing?.id, $today));
   const recsOf = (pid, recs) => recs.filter(r => r.pairing_id === pid);
 
   // Nothing to show here any more (left, declined, or ended by the coach):
