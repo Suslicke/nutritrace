@@ -11,6 +11,7 @@ import { sendPasswordReset, sendInvite, isEmailConfigured } from '../email.js';
 import { estimate as estimatePasswordStrength, STRONG_MIN_SCORE } from '../lib/password-strength.js';
 import { claimAnonymousData, purgeUnreferencedUserData, purgeUserRows } from '../lib/claim-anonymous-data.js';
 import { ownerOrOptIn } from '../lib/outbound-policy.js';
+import { deletePhotosForUser, deleteAllPhotos } from '../lib/coaching-messages.js';
 import { COACHING_VERSION, coachingState, endCoachingIfNotCoach, requestFromInvite, canCoach, roleOf, personName } from '../lib/coaching.js';
 
 // The roles an admin can give. A Coach is a User everywhere except coaching.
@@ -324,6 +325,8 @@ router.delete('/me', requireAuth, wrap((req, res) => {
   // CASCADE handles foods, meals, diary, settings, wellness_data, ai_chat_history, etc.
   // Tables with no FK to users(id) do not cascade — clear this user's rows.
   purgeUserRows(userId);
+  // Coaching conversations cascade with the pairing; their photo files go too.
+  deletePhotosForUser(userId);
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
   res.clearCookie('nt_token');
   res.json({ ok: true });
@@ -370,6 +373,7 @@ router.delete('/users/:id', requireAuth, requireAdmin, wrap((req, res) => {
   }
   // Tables with no FK to users(id) do not cascade — clear this user's rows.
   purgeUserRows(id);
+  deletePhotosForUser(id);
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   res.json({ ok: true });
 }));
@@ -411,6 +415,7 @@ router.delete('/management', requireAuth, requireAdmin, wrap((req, res) => {
   db.prepare('DELETE FROM users').run();
   // Tables without an FK to users(id) survive the cascade — clear them too.
   purgeUnreferencedUserData();
+  deleteAllPhotos();
   // Remember this was an intentional disable, not a fresh install — so
   // /status returns setup_required=false and the client doesn't re-route
   // to the wizard's mandatory account-creation step. Cleared on next
@@ -437,6 +442,7 @@ router.post('/recover', rateLimitLogin, wrap((req, res) => {
   db.prepare('DELETE FROM users').run();
   // Tables without an FK to users(id) survive the cascade — clear them too.
   purgeUnreferencedUserData();
+  deleteAllPhotos();
   // Same single-user-mode flag as DELETE /management (intentional disable,
   // not a fresh install). Without this the lockout-recovery path also
   // re-triggers the wizard on next load.

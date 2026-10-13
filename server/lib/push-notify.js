@@ -135,6 +135,14 @@ export async function pushNotify(userId, settingKey, title, message, priority = 
   return _pushToService(userId, title, message, priority);
 }
 
+/** Same, for a notification that is on until the person turns it off
+ *  (coaching: a setting never saved counts as on). */
+export async function pushNotifyDefaultOn(userId, settingKey, title, message, priority = 5) {
+  const v = _getUserSetting(userId, settingKey);
+  if (v === false || v === 'false') return;
+  return _pushToService(userId, title, message, priority);
+}
+
 // Persistent per-day dedup — prevents the same notification firing multiple times
 // for the same event on the same day (e.g., steps hit goal → every Fitbit sync would
 // re-fire without this). Stored in app_config so it survives server restarts.

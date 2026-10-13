@@ -18,6 +18,13 @@ import {
 import { resolveGoalFor, percentGoalToGrams } from '../../src/lib/goal-resolver.js';
 import { Nutrition } from '../../src/lib/nutrition.js';
 import { _bodyStatsWeightKg } from '../lib/adaptive-tdee.js';
+import fs from 'fs';
+import { linkBase } from '../lib/public-url.js';
+import {
+  canRead, canWrite, createMessage, deleteMessage, markRead, listMessages, messageOut,
+  notifyMessage, notifyClientAnswer, pairingById, photoPath, PHOTO_TYPES,
+} from '../lib/coaching-messages.js';
+import { UPLOAD_RESPONSE_HEADERS } from '../lib/upload-paths.js';
 
 const router = Router();
 
@@ -142,6 +149,7 @@ router.get('/clients', requireCoachRole, wrap((req, res) => {
       requested_at: r.requested_at, responded_at: r.responded_at || null, ended_at: r.ended_at || null,
     };
     if (r.status === 'active') {
+      out.unread = db.prepare(`SELECT COUNT(*) AS c FROM coach_messages WHERE pairing_id = ? AND sender_id != ? AND read_at IS NULL AND deleted_at IS NULL`).get(r.id, req.user.id).c;
       out.last_logged = _lastLogged(r.client_id);
       out.week = _summary(_recentDays(r.client_id, today));
     }
@@ -207,6 +215,7 @@ function _answer(status) {
       if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: LEAVE_FIRST, code: 'leave_first' });
       throw e;
     }
+    notifyClientAnswer(row, status === 'active' ? 'accepted' : 'declined');
     res.json(coachingState(req.user.id));
   });
 }
@@ -221,7 +230,64 @@ router.post('/pairings/:id/end', requireAccount, wrap((req, res) => {
   const mine = row && (row.coach_id === me || row.client_id === me);
   if (!row || (!mine && roleOf(me) !== 'admin')) return res.status(404).json({ error: 'Pairing not found' });
   if (!endPairing(row.id, me)) return res.status(409).json({ error: 'This coaching has already ended.' });
+  if (row.status === 'active' && me === row.client_id) notifyClientAnswer(row, 'left');
   res.json(coachingState(me));
+}));
+
+// ── The conversation ────────────────────────────────────────────────────────
+// The same three handlers for both sides: the client reaches them by
+// /pairings/:id/messages (readable after coaching ends), the coach by
+// /clients/:clientId/messages behind the coach guard (active only).
+function _listMessages(p, req, res) {
+  const since = typeof req.query.since === 'string' && /^\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?$/.test(req.query.since) ? req.query.since : null;
+  const serverTime = new Date().toISOString();
+  res.json({ pairing_id: p.id, status: p.status, can_send: canWrite(p, req.user.id), messages: listMessages(p.id, since), server_time: serverTime });
+}
+function _sendMessage(p, req, res) {
+  let out;
+  try { out = createMessage(p, req.user.id, req.body || {}); }
+  catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+  if (out.created) notifyMessage(p, out.row, linkBase(req));
+  res.json(messageOut(out.row));
+}
+function _readMessages(p, req, res) {
+  res.json({ marked: markRead(p.id, req.user.id) });
+}
+
+function _clientPairing(req, res, { write = false } = {}) {
+  const p = pairingById(Number(req.params.id));
+  if (!p || p.client_id !== req.user.id || !(write ? canWrite(p, req.user.id) : canRead(p, req.user.id))) {
+    res.status(404).json({ error: 'Conversation not found' });
+    return null;
+  }
+  return p;
+}
+router.get('/pairings/:id/messages', requireAccount, wrap((req, res) => {
+  const p = _clientPairing(req, res); if (p) _listMessages(p, req, res);
+}));
+router.post('/pairings/:id/messages', requireAccount, wrap((req, res) => {
+  const p = _clientPairing(req, res, { write: true }); if (p) _sendMessage(p, req, res);
+}));
+router.post('/pairings/:id/messages/read', requireAccount, wrap((req, res) => {
+  const p = _clientPairing(req, res); if (p) _readMessages(p, req, res);
+}));
+
+// Delete your own message, from either side ("Message deleted").
+router.delete('/messages/:uuid', requireAccount, wrap((req, res) => {
+  try { res.json(messageOut(deleteMessage(String(req.params.uuid), req.user.id))); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
+
+// A photo from a conversation: only to the two people in it (the coach only
+// while coaching), and never once its message is deleted.
+router.get('/photos/:name', requireAccount, wrap((req, res) => {
+  const file = photoPath(req.params.name);
+  const m = file && db.prepare('SELECT pairing_id FROM coach_messages WHERE image_url = ? AND deleted_at IS NULL').get(req.params.name);
+  if (!m || !canRead(pairingById(m.pairing_id), req.user.id) || !fs.existsSync(file)) return res.status(404).json({ error: 'Not found' });
+  res.set(UPLOAD_RESPONSE_HEADERS);
+  res.set('Cache-Control', 'private, no-store');
+  res.type(PHOTO_TYPES[req.params.name.split('.').pop()] || 'application/octet-stream');
+  fs.createReadStream(file).pipe(res);
 }));
 
 // ── Admin: see and end pairings ─────────────────────────────────────────────
@@ -248,6 +314,10 @@ router.get('/admin/pairings', requireAccount, requireAdmin, wrap((req, res) => {
 // ── A client, as their coach sees them ──────────────────────────────────────
 // The guard runs for every route below this line that starts /clients/:clientId.
 router.use('/clients/:clientId', requireCoachOf);
+
+router.get('/clients/:clientId/messages', wrap((req, res) => _listMessages(req.pairing, req, res)));
+router.post('/clients/:clientId/messages', wrap((req, res) => _sendMessage(req.pairing, req, res)));
+router.post('/clients/:clientId/messages/read', wrap((req, res) => _readMessages(req.pairing, req, res)));
 
 router.get('/clients/:clientId/overview', wrap((req, res) => {
   const clientId = req.pairing.client_id;

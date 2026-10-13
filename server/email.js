@@ -307,6 +307,30 @@ export async function sendInvite(email, inviteUrl, inviterName) {
   });
 }
 
+// ── Coaching: a new message ────────────────────────────────────────────────
+// Only that there is one and who sent it: the message itself stays in the app.
+// At most once per 30 minutes per conversation (lib/coaching-messages.js).
+export async function sendCoachMessage(email, senderName, appUrl) {
+  const origin = new URL(appUrl).origin;
+  const who = `<strong style="color:#FFFFFF;">${_escapeHtml(senderName || 'Someone')}</strong>`;
+  const body = `
+    ${greeting(null)}
+    <p class="nt-heading" style="margin:0 0 10px;font-size:20px;font-weight:700;color:#FFFFFF;line-height:1.3;">
+      New Message
+    </p>
+    <p class="nt-body-txt" style="margin:0 0 32px;font-size:15px;color:#8A93A8;line-height:1.7;">
+      ${who} sent you a message in NutriTrace. Open the app to read it.
+    </p>
+    ${ctaButton(appUrl, 'Open NutriTrace')}
+    ${fallbackUrl(appUrl)}`;
+  await sendMail({
+    to: email,
+    subject: `New message from ${senderName || 'your coach'}`,
+    html: emailWrapper(origin, body, null, 'You get this because you turned on email for new coaching messages. Turn it off in Settings, Notifications.'),
+    text: `${senderName || 'Someone'} sent you a message in NutriTrace. Open the app to read it:\n${appUrl}\n\nTurn these emails off in Settings, Notifications.`,
+  });
+}
+
 // ── Food Shared With You ───────────────────────────────────────────────────
 // Fired when a user grants another user access to a food via the per-user
 // share dialog. Best-effort; the share succeeds even if the email fails.

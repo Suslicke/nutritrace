@@ -47,7 +47,8 @@ export function coachingSignature(s) {
   if (!s) return null;
   const c = s.as_client ? String(s.as_client.id) : '-';
   const r = (s.requests || []).map(x => x.id).join(',') || '-';
-  return `${s.role || '-'};${c};${r};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0}`;
+  const p = (s.past || []).map(x => x.id).join(',') || '-';
+  return `${s.role || '-'};${c};${r};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0};${p};${Number(s.unread) || 0}`;
 }
 
 function _save(userId) {

@@ -57,8 +57,8 @@ test('Goals tabs: Coach for a client, Clients for coaches', () => {
 });
 
 test('the fingerprint has the server\'s shape', () => {
-  assert.equal(signature({ role: 'user', as_client: null, requests: [], as_coach: none }), 'user;-;-;0.0');
-  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], as_coach: { pending: 2, active: 3 } }), 'coach;12;15,14;2.3');
+  assert.equal(signature({ role: 'user', as_client: null, requests: [], past: [], as_coach: none, unread: 0 }), 'user;-;-;0.0;-;0');
+  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], past: [{ id: 3 }], as_coach: { pending: 2, active: 3 }, unread: 4 }), 'coach;12;15,14;2.3;3;4');
   // The real server's header is compared with this in coaching-server.test.js.
 });
 

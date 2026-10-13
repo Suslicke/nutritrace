@@ -365,6 +365,20 @@ function restoreFromZip(zip) {
     for (const c of data.coach_clients || []) insPairing.run({
       note: null, requested_at: null, responded_at: null, ended_at: null, ended_by: null, updated_at: null, ...c,
     });
+
+    // Coaching conversations; their photos come back with the other images
+    // (images/coaching/ in the archive).
+    db.prepare('DELETE FROM coach_messages').run();
+    const insMessage = db.prepare(`
+      INSERT OR IGNORE INTO coach_messages (id, uuid, pairing_id, sender_id, body, image_url, recommendation_id, read_at, created_at, updated_at, deleted_at)
+      VALUES (@id, @uuid, @pairing_id, @sender_id, @body, @image_url, @recommendation_id, @read_at, COALESCE(@created_at, datetime('now')), COALESCE(@updated_at, datetime('now')), @deleted_at)
+    `);
+    // Only for pairings the archive has (a hand-edited archive could hold
+    // messages without their pairing; they are skipped, not fatal).
+    const pairingIds = new Set(db.prepare('SELECT id FROM coach_clients').all().map(r => r.id));
+    for (const m of (data.coach_messages || []).filter(x => pairingIds.has(x.pairing_id))) insMessage.run({
+      body: null, image_url: null, recommendation_id: null, read_at: null, created_at: null, updated_at: null, deleted_at: null, ...m,
+    });
   })();
 
   // Restore images — guard against zip-slip and zip-bomb attacks
@@ -452,6 +466,7 @@ function dumpDatabase() {
     invite_tokens:    db.prepare('SELECT * FROM invite_tokens').all(),
     // Coaching pairings: who coaches whom, and requests waiting for an answer.
     coach_clients:    db.prepare('SELECT * FROM coach_clients').all(),
+    coach_messages:   db.prepare('SELECT * FROM coach_messages').all(),
   };
 }
 

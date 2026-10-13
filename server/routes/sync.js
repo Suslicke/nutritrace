@@ -19,6 +19,8 @@ import { localizeImage, isExternalUrl } from '../lib/image-localizer.js';
 import { mirrorWeightToBodyStats } from '../lib/wellness-mirror.js';
 import { cleanCreateKey, findByCreateKey, setCreateKey } from '../lib/create-keys.js';
 import { clientClock, parseUtc, pushWins as clockPushWins, editStamp, resolveNote } from '../lib/sync-clock.js';
+import { readablePairingIds, createMessage, deleteMessage, messageOut, notifyMessage, pairingById } from '../lib/coaching-messages.js';
+import { linkBase } from '../lib/public-url.js';
 
 // #199 (@tellis82): the POST /api/foods and POST /api/meals routes
 // localize incoming data URLs to /uploads/ (via image-localizer). This
@@ -185,7 +187,21 @@ router.get('/pull', wrap((req, res) => {
 
   // server_time is the cursor (taken before the queries); clock_time is
   // the server's clock as the answer goes out, for the phone's edit times.
-  res.json({ foods, meals, diary, diary_tombstones, activity, fasts, settings, wellness, workouts, chat_history, deletions, server_time: serverTime, clock_time: new Date().toISOString() });
+  // Coaching conversations, only for an app that asks (?coaching=1): an
+  // Android app from before coaching gets exactly the answer it always did.
+  // `coaching.pairings` lists every conversation this person may still read,
+  // so the phone drops one a coach no longer has.
+  const coachingOut = {};
+  if (req.query.coaching && u != null) {
+    const pairings = readablePairingIds(u);
+    const msgs = pairings.length
+      ? db.prepare(`SELECT * FROM coach_messages WHERE updated_at >= ? AND pairing_id IN (${pairings.map(() => '?').join(',')}) ORDER BY updated_at, id`).all(sinceSql, ...pairings)
+      : [];
+    coachingOut.coach_messages = msgs.map(messageOut);
+    coachingOut.coaching = { pairings };
+  }
+
+  res.json({ foods, meals, diary, diary_tombstones, activity, fasts, settings, wellness, workouts, chat_history, deletions, ...coachingOut, server_time: serverTime, clock_time: new Date().toISOString() });
 }));
 
 export function _deletionsSince(u, sinceSql) {
@@ -707,6 +723,28 @@ router.post('/push', wrap(async (req, res) => {
   });
 
   run();
+
+  // Coaching messages written on the phone, each with the uuid it was made
+  // with: one sent again (a retry after a lost answer) is stored once.
+  // Deleting one's own message travels the same way.
+  if (Array.isArray(req.body?.coach_messages) && u != null) {
+    result.coach_messages = [];
+    for (const m of req.body.coach_messages.slice(0, 200)) {
+      const uuid = String(m?.uuid || '');
+      try {
+        if (m?.deleted_at) {
+          result.coach_messages.push({ uuid, row: messageOut(deleteMessage(uuid, u)) });
+          continue;
+        }
+        const p = pairingById(Number(m?.pairing_id));
+        const out = createMessage(p, u, { uuid, body: m?.body, image: m?.image || null });
+        if (out.created) notifyMessage(p, out.row, linkBase(req));
+        result.coach_messages.push({ uuid, row: messageOut(out.row) });
+      } catch (e) {
+        result.coach_messages.push({ uuid, error: e.message, status: e.status || 500 });
+      }
+    }
+  }
 
   logger.debug(`[sync] push: foods=${foods.length} meals=${meals.length} diary=${diary.length} activity=${activity.length} fasts=${fasts.length} wellness=${wellness.length} settings=${settings.length} workouts=${workouts.length}`);
   // The server's clock, for the phone to stamp its next edits on.

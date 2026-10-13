@@ -22,7 +22,9 @@ const uploadsPath = process.env.UPLOADS_PATH || './uploads';
  * admin-only. The archive holds the whole database dump, so this was
  * strictly more than the admin API itself would hand over.
  */
-const PRIVATE_SUBDIRS = ['backups'];
+// backups: database dumps. coaching: photos in a coach's conversation with a
+// client, served only to those two (routes/coaching.js).
+const PRIVATE_SUBDIRS = ['backups', 'coaching'];
 
 /**
  * True when a request path under the /uploads mount would land inside a

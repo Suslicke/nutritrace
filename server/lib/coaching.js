@@ -102,6 +102,24 @@ export function coachingState(userId) {
        AND ((status = 'declined' AND responded_at >= datetime('now', '-7 days'))
          OR (status = 'ended' AND ended_by IS NOT coach_id AND ended_at >= datetime('now', '-7 days')))
   `).get(userId).c;
+  // Messages the other person sent that this one hasn't read: per pairing.
+  const unreadStmt = db.prepare(`SELECT COUNT(*) AS c FROM coach_messages WHERE pairing_id = ? AND sender_id != ? AND read_at IS NULL AND deleted_at IS NULL`);
+  const unread = (pid) => unreadStmt.get(pid, userId).c;
+  // Coaching that ended keeps its conversation for the client (not the coach).
+  const past = db.prepare(`
+    SELECT cc.id, cc.ended_at, cc.responded_at, u.id AS coach_id, u.full_name, u.username
+      FROM coach_clients cc JOIN users u ON u.id = cc.coach_id
+     WHERE cc.client_id = ? AND cc.status = 'ended'
+       AND EXISTS (SELECT 1 FROM coach_messages m WHERE m.pairing_id = cc.id)
+     ORDER BY cc.ended_at DESC
+  `).all(userId).map(r => ({ id: r.id, coach: person(r.coach_id, r.full_name, r.username), ended_at: r.ended_at, unread: unread(r.id) }));
+  const coachActive = canCoach(role)
+    ? db.prepare(`SELECT id FROM coach_clients WHERE coach_id = ? AND status = 'active' ORDER BY id`).all(userId).map(r => r.id)
+    : [];
+  counts.active_ids = coachActive;
+  counts.unread = coachActive.reduce((n, id) => n + unread(id), 0);
+  const asClientUnread = row ? unread(row.id) : 0;
+  const requests = rows.filter(r => r.status === 'pending');
   return {
     role,
     can_coach: canCoach(role),
@@ -113,15 +131,22 @@ export function coachingState(userId) {
       note: row.note || null,
       requested_at: row.requested_at,
       responded_at: row.responded_at || null,
+      unread: asClientUnread,
     } : null,
     // Requests waiting for this person's answer, newest first.
-    requests: rows.filter(r => r.status === 'pending').map(r => ({
+    requests: requests.map(r => ({
       id: r.id,
       coach: person(r.coach_id, r.full_name, r.username),
       note: r.note || null,
       requested_at: r.requested_at,
     })),
+    // Ended coaching whose conversation the client can still read.
+    past,
     as_coach: counts,
+    // For the dot on Goals: unread messages, and things waiting for this
+    // person's answer (requests now; recommendations later).
+    unread: asClientUnread + past.reduce((n, x) => n + x.unread, 0) + counts.unread,
+    awaiting: requests.length,
   };
 }
 
@@ -134,7 +159,8 @@ export function coachingSignature(userId) {
   const s = coachingState(userId);
   const c = s.as_client ? String(s.as_client.id) : '-';
   const r = s.requests.map(x => x.id).join(',') || '-';
-  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active}`;
+  const p = s.past.map(x => x.id).join(',') || '-';
+  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active};${p};${s.unread}`;
 }
 
 /** End a pairing (pending or active). Returns true when one was ended. */

@@ -118,9 +118,12 @@ function clientRoutes() {
   return [...src.matchAll(/router\.(get|post|put|patch|delete)\('(\/clients\/:clientId[^']*)'/g)].map(([, m, p]) => [m.toUpperCase(), p]);
 }
 const fill = (p, clientId) => '/api/coaching' + p.replace(':clientId', clientId).replace(':date', TODAY);
+// A valid body for every write, so only the guard decides the answer.
+let _n = 0;
+const bodyFor = (m) => (m === 'GET' ? undefined : { uuid: `privacy-${Date.now()}-${++_n}`, body: 'Hello' });
 
 // Any object that looks like a person must be { id, name } and nothing else.
-const ROW_KEYS = ['password_hash', 'email', 'username', 'birthday', 'gender', 'avatar_url', 'full_name', 'nickname', 'created_at'];
+const ROW_KEYS = ['password_hash', 'email', 'username', 'birthday', 'gender', 'avatar_url', 'full_name', 'nickname', 'role_id'];
 function assertNoUserRows(value, where) {
   if (Array.isArray(value)) return value.forEach((v) => assertNoUserRows(v, where));
   if (!value || typeof value !== 'object') return;
@@ -132,7 +135,7 @@ function assertNoUserRows(value, where) {
 test('the server says it supports coaching, and /me says where you stand', { skip: !ready }, async () => {
   assert.equal((await call(null, 'GET', '/api/auth/status')).data.coaching, 1);
   const me = (await call('plain', 'GET', '/api/auth/me')).data;
-  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, requests: [], as_coach: { pending: 0, active: 0, recent: 0 } });
+  assert.deepEqual(me.coaching, { role: 'user', can_coach: false, as_client: null, requests: [], past: [], as_coach: { pending: 0, active: 0, recent: 0, active_ids: [], unread: 0 }, unread: 0, awaiting: 0 });
   assert.equal((await call('coach1', 'GET', '/api/auth/me')).data.coaching.can_coach, true);
 });
 
@@ -148,7 +151,7 @@ test('a request, the answer, and the privacy table for every client route', { sk
   assert.equal(pending.status, 'pending');
   assert.deepEqual(pending.coach, { id: ids.coach1, name: 'Sam Coach' });
   assert.equal(pending.note, 'Happy to help with your cut');
-  for (const [m, p] of routes) assert.equal((await call('coach1', m, fill(p, ids.client1))).status, 404, `pending: ${m} ${p}`);
+  for (const [m, p] of routes) assert.equal((await call('coach1', m, fill(p, ids.client1), bodyFor(m))).status, 404, `pending: ${m} ${p}`);
 
   await ok('client1', 'POST', `/api/coaching/pairings/${pending.id}/accept`);
   assert.equal((await pairingOf('client1')).status, 'active');
@@ -178,7 +181,7 @@ test('a request, the answer, and the privacy table for every client route', { sk
   const rows = [];
   for (const [m, p] of routes) {
     for (const [label, who, client, want] of table) {
-      const r = await call(who, m, fill(p, client ? ids[client] : 99999));
+      const r = await call(who, m, fill(p, client ? ids[client] : 99999), bodyFor(m));
       assert.equal(r.status, want, `${label}: ${m} ${p} -> ${r.status}`);
       if (want === 200) assertNoUserRows(r.data, `${m} ${p}`);
       rows.push(`${m} ${p} | ${label} | ${r.status}`);
@@ -206,7 +209,8 @@ test('a request, the answer, and the privacy table for every client route', { sk
   // client-ended ones for a week; nothing of coach2's.
   const list = await ok('coach1', 'GET', `/api/coaching/clients?today=${TODAY}`);
   // The answers the list still shows are counted, so an admin who coaches keeps the tab.
-  assert.deepEqual((await ok('coach1', 'GET', '/api/coaching/state')).as_coach, { pending: 0, active: 1, recent: 2 });
+  const asCoach = (await ok('coach1', 'GET', '/api/coaching/state')).as_coach;
+  assert.deepEqual({ pending: asCoach.pending, active: asCoach.active, recent: asCoach.recent }, { pending: 0, active: 1, recent: 2 });
   assertNoUserRows(list, 'GET /clients');
   const byClient = Object.fromEntries(list.map((r) => [r.client.id, r]));
   assert.equal(byClient[ids.client1].status, 'active');
@@ -384,6 +388,7 @@ test('backup and restore keep pairings; a backup from before coaching restores',
 
   // A 1.4 backup: no coach_clients, invites without coach_id.
   delete data.coach_clients;
+  delete data.coach_messages;
   for (const i of data.invite_tokens || []) delete i.coach_id;
   const old = new AdmZip();
   old.addFile('database.json', Buffer.from(JSON.stringify(data)));
