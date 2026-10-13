@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import { loadServerSettings } from './settings.js';
 import { isNative, getServerUrl, getAuthToken, apiUrl as _apiUrl } from '../lib/platform.js';
+import { setCoachingFromServer, loadCachedCoaching, clearCoaching } from './coaching.js';
 
 function _authHeaders() {
   const h = {};
@@ -88,6 +89,7 @@ export async function loadAuthState() {
   // server and local modes. Wizard + Profile.svelte write to these keys.
   if (isNative && !getServerUrl()) {
     userMgmtActive.set(false);
+    clearCoaching();
     await _hydrateLocalUser();
     return;
   }
@@ -102,6 +104,7 @@ export async function loadAuthState() {
         currentUser.set(user);
         userMgmtActive.set(localStorage.getItem('nt:cachedUserMgmt') === '1');
         localStorage.setItem('wl:userId', String(user.id));
+        loadCachedCoaching(user.id);
       } catch {}
     }
     // Refresh auth from server in the background (non-blocking)
@@ -135,6 +138,7 @@ async function _fetchAuthFromServer() {
     // `wl:userId`: settings already live under the anonymous `wl_<key>`
     // prefix and switching to per-user keys would silently orphan them.
     if (!active && !user) {
+      clearCoaching();
       await _hydrateLocalUser({ setUserId: false });
       localStorage.removeItem('wl:userId');
       if (meData.csrf) localStorage.setItem('nt:csrf', meData.csrf);
@@ -145,6 +149,8 @@ async function _fetchAuthFromServer() {
     currentUser.set(user);
     if (user) localStorage.setItem('wl:userId', String(user.id));
     else       localStorage.removeItem('wl:userId');
+    // Coaching: a server from before it sends neither field, and the tabs stay away.
+    setCoachingFromServer({ supported: statusData.coaching ?? 0, state: user ? (meData.coaching ?? null) : null, userId: user?.id });
     if (meData.csrf) localStorage.setItem('nt:csrf', meData.csrf);
     else             localStorage.removeItem('nt:csrf');
     // Cache for offline fallback
@@ -162,6 +168,7 @@ async function _fetchAuthFromServer() {
         currentUser.set(user);
         userMgmtActive.set(localStorage.getItem('nt:cachedUserMgmt') === '1');
         localStorage.setItem('wl:userId', String(user.id));
+        loadCachedCoaching(user.id);
         return;
       } catch {}
     }
@@ -184,18 +191,21 @@ async function _refreshAuthFromServer() {
       // Status tells us whether multi-user mode is on. Always update if it
       // came back ok — independent of whether /me succeeds.
       let active = null;
+      let coachingSupportedNow;
       if (statusRes.ok) {
         try {
           const sd = await statusRes.json();
           active = !!sd.active;
           userMgmtActive.set(active);
           localStorage.setItem('nt:cachedUserMgmt', active ? '1' : '0');
+          coachingSupportedNow = sd.coaching ?? 0;
         } catch {}
       }
       // 401 from /me means logged-out (after a logout call, or token expired).
       // Clear local user state so needsLogin in App.svelte fires the Login route.
       if (meRes.status === 401) {
         currentUser.set(null);
+        clearCoaching();
         localStorage.removeItem('wl:userId');
         localStorage.removeItem('nt:cachedUser');
         localStorage.removeItem('nt:csrf');
@@ -214,6 +224,7 @@ async function _refreshAuthFromServer() {
       localStorage.setItem('wl:userId', String(user.id));
       localStorage.setItem('nt:cachedUser', JSON.stringify(user));
       if (meData.csrf) localStorage.setItem('nt:csrf', meData.csrf);
+      setCoachingFromServer({ supported: coachingSupportedNow, state: meData.coaching ?? null, userId: user.id });
       await loadServerSettings();
     } catch {} // server unreachable — silently keep cached auth
     return;
@@ -362,6 +373,7 @@ export async function logout() {
   localStorage.removeItem('wl:userId');
   localStorage.removeItem('nt:cachedUser');
   localStorage.removeItem('nt:csrf');
+  clearCoaching();
   // The day, activities and fasts on show are this account's: gone before
   // anyone else signs in (lib/user-state.js).
   try {

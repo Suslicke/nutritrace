@@ -372,10 +372,14 @@ export const NtApiCached = {
     return data.url;
   },
 
+  /** Same as the browser's: copies of a former client's views go. */
+  async forgetCoachingReads(activeClientIds = []) { return _coachingForget(activeClientIds); },
+
   // ── Pass-through for NtApi.post/get/put/del ───────────────────────────
   // GET: 3s (status checks, data reads — fail fast when server is down)
   // POST/PUT/PATCH/DELETE: 30s (sync operations call external APIs and can take time)
   async get(path) {
+    if (_COACHING.test(path)) return _coachingGet(path);
     // Local-first for IF endpoints so the timer keeps working when the
     // server is unreachable. Server pulls on the next sync will reconcile.
     if (path.startsWith('/api/fasts')) return _fastsCachedGet(path);
@@ -392,6 +396,7 @@ export const NtApiCached = {
     return _serverFetch('GET', path);
   },
   async post(path, body) {
+    if (_COACHING.test(path)) return _coachingFetch('POST', path, body);
     if (path.startsWith('/api/fasts')) return _fastsCachedPost(path, body);
     return _serverFetch('POST', path, body, 30000);
   },
@@ -408,6 +413,78 @@ export const NtApiCached = {
     return _serverFetch('DELETE', path, null, 30000);
   },
 };
+
+// ── Coaching ────────────────────────────────────────────────────────────────
+// Reads (where you stand, a coach's list and their views of a client) keep a
+// copy on the phone for a dead zone; answering, asking and ending need the
+// server and say so. The server's own message comes through (this person
+// can't take a request, already answered), not just a status code.
+const _COACHING = /^\/api\/coaching\//;
+const _COACH_KEEP = /^\/api\/coaching\/(state|clients)(\?|$)|^\/api\/coaching\/clients\/\d+\/(overview|diary\/\d{4}-\d{2}-\d{2})(\?|$)/;
+const _COACH_PREFIX = 'nt:coach-read:';
+const _COACH_MAX = 60;
+const _coachKey = (path) => `${_COACH_PREFIX}${localStorage.getItem('wl:userId') || ''}:${String(path).replace(/([?&])today=\d{4}-\d{2}-\d{2}(&|$)/, (_m, a, b) => (b ? a : '')).replace(/[?&]$/, '')}`;
+
+async function _coachingFetch(method, path, body) {
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method, headers: _headers(), credentials: 'include', cache: 'no-store',
+      body: body != null && method !== 'GET' ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(method === 'GET' ? 5000 : 15000),
+    });
+  } catch {
+    const err = new Error('This needs a connection.');
+    err.offline = true;
+    throw err;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.error || `API error ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+async function _coachingGet(path) {
+  const keep = _COACH_KEEP.test(path);
+  try {
+    const answer = await _coachingFetch('GET', path);
+    if (keep) {
+      try {
+        localStorage.setItem(_coachKey(path), JSON.stringify({ at: Date.now(), body: answer }));
+        const keys = Object.keys(localStorage).filter(k => k.startsWith(_COACH_PREFIX));
+        if (keys.length > _COACH_MAX) {
+          keys.map(k => [k, JSON.parse(localStorage.getItem(k) || '{}').at || 0])
+            .sort((a, b) => a[1] - b[1]).slice(0, keys.length - _COACH_MAX)
+            .forEach(([k]) => localStorage.removeItem(k));
+        }
+      } catch { /* storage full: the copy is only a convenience */ }
+    }
+    return answer;
+  } catch (err) {
+    if (!err.offline || !keep) throw err;
+    try {
+      const kept = JSON.parse(localStorage.getItem(_coachKey(path)) || 'null');
+      if (kept) return kept.body;
+    } catch { /* nothing usable kept */ }
+    throw err;
+  }
+}
+
+function _coachingForget(activeClientIds = []) {
+  const keep = new Set((activeClientIds || []).map(String));
+  let n = 0;
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (!k.startsWith(_COACH_PREFIX)) continue;
+      const m = k.match(/:\/api\/coaching\/clients\/(\d+)\//);
+      if (m && !keep.has(m[1])) { localStorage.removeItem(k); n++; }
+    }
+  } catch { /* private mode */ }
+  return n;
+}
 
 // ── Fasting: local-first writes, server reconciliation in background ────────
 

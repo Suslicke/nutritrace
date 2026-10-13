@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { DB } from '../lib/db.js';
+import { noteCoachingSignature } from './coaching.js';
 
 // Verbose settings sync logs gated on dev OR opt-in verbose mode
 // (Settings → Diagnostics → Verbose diagnostic logging).
@@ -347,6 +348,9 @@ export async function loadServerSettings() {
   try {
     const res = await fetch(_settingsUrl(), { credentials: 'include', headers: _authHeaders(), signal: AbortSignal.timeout(8000) });
     if (!res.ok) return;
+    // Coaching rides along as a header: a new request or an ended pairing
+    // shows up here without a request of its own (stores/coaching.js).
+    try { noteCoachingSignature(res.headers.get('X-NT-Coaching')); } catch { /* older server */ }
     const serverSettings = await res.json();
     const forUser = Number(localStorage.getItem('wl:userId'));
     const unsent = isNative ? await _unsentSettingKeys(forUser) : new Set();

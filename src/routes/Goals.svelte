@@ -17,6 +17,7 @@
   import MacroRing from '../components/diary/MacroRing.svelte';
   import { foldText } from '../lib/search-text.js';
   import { fold } from '../lib/fold.js';
+  import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
 
 
   // Mirror settings/Goals.svelte: any wearable that reports calorie burn
@@ -690,6 +691,8 @@
   <header class="page-header" class:banner-gradient={$bannerStyle === 'gradient'} class:banner-animated={$bannerStyle === 'animated'}>
     <h1>{$_('routes.goals.title')}</h1>
   </header>
+  <!-- Goals | Coach | Clients: only for people in coaching. -->
+  <CoachingTabs />
 
   <!-- Tabs -->
   <div class="tab-bar">

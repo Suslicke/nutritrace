@@ -205,6 +205,8 @@
   import MealEditor from './routes/MealEditor.svelte';
   import Statistics from './routes/Statistics.svelte';
   import Goals      from './routes/Goals.svelte';
+  import Coach      from './routes/Coach.svelte';
+  import Clients    from './routes/Clients.svelte';
   import Settings   from './routes/Settings.svelte';
   import Wizard     from './routes/Wizard.svelte';
   import Login          from './routes/Login.svelte';
@@ -226,6 +228,9 @@
     '/statistics':      Statistics,
     '/wellness':        Wellness,
     '/goals':           Goals,
+    '/goals/coach':     Coach,
+    '/goals/clients':   Clients,
+    '/goals/clients/:id': Clients,
     '/settings':          Settings,
     '/settings/:section': Settings,
     '/wizard':          Wizard,

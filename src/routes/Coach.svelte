@@ -1,0 +1,150 @@
+<script>
+  // The Coach tab, for the person being coached: the request to answer, or
+  // the coach and Leave Coach. Nothing about the client is visible to the
+  // coach before Accept.
+  import { onMount } from 'svelte';
+  import { _ } from 'svelte-i18n';
+  import { replace } from 'svelte-spa-router';
+  import { NtApi } from '../lib/api.js';
+  import { bannerStyle, dateFormat } from '../stores/settings.js';
+  import { coachingState, coachingNeedsServer, refreshCoaching, setCoachingFromServer, coachTab } from '../stores/coaching.js';
+  import { confirmDialog } from '../stores/confirmDialog.js';
+  import { showSuccess, showError } from '../stores/toast.js';
+  import { formatDay, localDay, coachingErrorText } from '../lib/coaching-view.js';
+  import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
+  import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
+
+  const needsServer = coachingNeedsServer();
+  let loaded = false;
+  let busy = false;
+
+  $: pairing = $coachingState?.as_client || null;
+  $: coachName = pairing?.coach?.name || '';
+
+  onMount(async () => {
+    if (!needsServer) await refreshCoaching();
+    loaded = true;
+  });
+
+  // Nothing to show here any more (left, declined, or ended by the coach):
+  // back to Goals rather than an empty page.
+  $: if (loaded && !needsServer && !$coachTab) replace('/goals');
+
+  async function answer(kind) {
+    if (busy || !pairing) return;
+    if (kind === 'decline' && !await confirmDialog({
+      title: $_('coaching.client.decline_title', { values: { name: coachName } }),
+      message: $_('coaching.client.decline_message'),
+      confirmText: $_('coaching.client.decline'),
+      cancelText: $_('common.cancel'),
+    })) return;
+    busy = true;
+    try {
+      const state = await NtApi.post(`/api/coaching/pairings/${pairing.id}/${kind}`, {});
+      setCoachingFromServer({ state, userId: localStorage.getItem('wl:userId') });
+      showSuccess(kind === 'accept'
+        ? $_('coaching.client.accepted', { values: { name: coachName } })
+        : $_('coaching.client.declined'));
+    } catch (e) {
+      showError(coachingErrorText(e, $_));
+      await refreshCoaching();
+    }
+    busy = false;
+  }
+
+  async function leave() {
+    if (busy || !pairing) return;
+    if (!await confirmDialog({
+      title: $_('coaching.client.leave_title', { values: { name: coachName } }),
+      message: $_('coaching.client.leave_message', { values: { name: coachName } }),
+      confirmText: $_('coaching.client.leave'),
+      cancelText: $_('common.cancel'),
+      dangerous: true,
+    })) return;
+    busy = true;
+    try {
+      const state = await NtApi.post(`/api/coaching/pairings/${pairing.id}/end`, {});
+      setCoachingFromServer({ state, userId: localStorage.getItem('wl:userId') });
+      showSuccess($_('coaching.client.left', { values: { name: coachName } }));
+    } catch (e) {
+      showError(coachingErrorText(e, $_));
+      await refreshCoaching();
+    }
+    busy = false;
+  }
+</script>
+
+<div class="page-shell">
+  <header class="page-header" class:banner-gradient={$bannerStyle === 'gradient'} class:banner-animated={$bannerStyle === 'animated'}>
+    <h1>{$_('routes.goals.title')}</h1>
+  </header>
+  <CoachingTabs force />
+
+  <div class="page-content coach-page">
+    {#if needsServer}
+      <CoachingNeedsServer />
+    {:else if pairing?.status === 'pending'}
+      <section class="card consent-card" aria-labelledby="consent-title">
+        <div class="consent-head">
+          <span class="material-symbols-rounded consent-icon" aria-hidden="true">sports</span>
+          <h2 id="consent-title" class="consent-title">{$_('coaching.client.request_title', { values: { name: coachName } })}</h2>
+        </div>
+        <p class="consent-body">{$_('coaching.client.request_body', { values: { name: coachName } })}</p>
+        {#if pairing.note}
+          <blockquote class="consent-note">{pairing.note}</blockquote>
+        {/if}
+        <div class="consent-actions">
+          <button class="btn btn-secondary" disabled={busy} on:click={() => answer('decline')}>{$_('coaching.client.decline')}</button>
+          <button class="btn btn-primary" disabled={busy} on:click={() => answer('accept')}>{$_('coaching.client.accept')}</button>
+        </div>
+      </section>
+    {:else if pairing?.status === 'active'}
+      <section class="card coach-card">
+        <div class="coach-avatar" aria-hidden="true">{coachName.slice(0, 1).toUpperCase()}</div>
+        <div class="coach-info">
+          <div class="coach-label">{$_('coaching.client.your_coach')}</div>
+          <div class="coach-name">{coachName}</div>
+          {#if pairing.responded_at}
+            <div class="coach-since">{$_('coaching.client.since', { values: { date: formatDay(localDay(pairing.responded_at), $dateFormat) } })}</div>
+          {/if}
+        </div>
+      </section>
+      <p class="coach-sees">{$_('coaching.client.coach_sees', { values: { name: coachName } })}</p>
+      <button class="btn btn-ghost leave-btn" disabled={busy} on:click={leave}>
+        <span class="material-symbols-rounded" aria-hidden="true">logout</span>
+        {$_('coaching.client.leave')}
+      </button>
+    {:else if loaded}
+      <p class="coach-empty">{$_('coaching.client.none')}</p>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .coach-page { max-width: 640px; }
+  .card { border-left: 3px solid var(--accent); padding: 16px; margin-top: 12px; }
+  .consent-head { display: flex; align-items: center; gap: 12px; }
+  .consent-icon { font-size: 28px; color: var(--accent); flex-shrink: 0; }
+  .consent-title { font-size: 17px; font-weight: 700; margin: 0; }
+  .consent-body { margin: 12px 0 0; color: var(--text-2); line-height: 1.45; }
+  .consent-note {
+    margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--border-strong);
+    background: var(--surface-2); border-radius: var(--radius-sm); color: var(--text-1);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .consent-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 16px; }
+  .coach-card { display: flex; align-items: center; gap: 14px; }
+  .coach-avatar {
+    width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 20px; font-weight: 700;
+    background: var(--accent-dim); color: var(--accent);
+  }
+  .coach-info { min-width: 0; }
+  .coach-label { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .coach-name { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+  .coach-since { font-size: 13px; color: var(--text-3); margin-top: 2px; }
+  .coach-sees { color: var(--text-3); font-size: 13px; line-height: 1.45; margin: 12px 4px 0; }
+  .leave-btn { margin-top: 16px; color: var(--danger); display: inline-flex; align-items: center; gap: 6px; }
+  .leave-btn .material-symbols-rounded { font-size: 18px; }
+  .coach-empty { color: var(--text-3); margin-top: 24px; text-align: center; }
+</style>

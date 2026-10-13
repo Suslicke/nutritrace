@@ -596,8 +596,15 @@ const _KEEP_READS = [
   /^\/api\/wellness\/[\w-]+\/status$/,
   /^\/api\/wellness\/calories-out(\?|$)/,
   /^\/api\/wellness\/latest(\?|$)/,
+  // Coaching: where you stand, a coach's client list and their read-only
+  // views of a client. Answering, asking and ending need the server.
+  /^\/api\/coaching\/(state|clients)(\?|$)/,
+  /^\/api\/coaching\/clients\/\d+\/(overview|diary\/\d{4}-\d{2}-\d{2})(\?|$)/,
 ];
 const _keepsRead = (path) => _KEEP_READS.some(re => re.test(String(path)));
+// The copy is kept under the path without the app's `today`, so a coach who
+// opens the list on a new day with no connection still sees the last one.
+const _readKey = (path) => String(path).replace(/([?&])today=\d{4}-\d{2}-\d{2}(&|$)/, (_m, a, b) => (b ? a : '')).replace(/[?&]$/, '');
 
 const _FASTS = /^\/api\/fasts(\/|\?|$)/;
 const _isActivePath = (path) => String(path).split('?')[0] === '/api/fasts/active';
@@ -640,6 +647,22 @@ export function createOfflineApi(http) {
   _wire();
 
   const impl = {
+    /**
+     * A coach keeps copies of what they read about a client. Once that
+     * client is no longer theirs, the copies go too: ending coaching takes
+     * the coach's view with it, connection or not.
+     */
+    async forgetCoachingReads(activeClientIds = []) {
+      const keep = new Set((activeClientIds || []).map(String));
+      const rows = await _all('reads');
+      const gone = rows.map(r => r.key).filter(k => {
+        const m = String(k).match(/^\/api\/coaching\/clients\/(\d+)\//);
+        return m && !keep.has(m[1]);
+      });
+      if (gone.length) await _tx('reads', 'readwrite', s => { for (const k of gone) s.delete(k); });
+      return gone.length;
+    },
+
     async getDiaryDate(date) {
       try {
         const day = await http.getDiaryDate(date);
@@ -982,12 +1005,12 @@ export function createOfflineApi(http) {
         if (!_keepsRead(path)) return _through(http, 'get', path, rest);
         try {
           const answer = await http.get(path, ...rest);
-          await _rememberRead(String(path), answer);
+          await _rememberRead(_readKey(path), answer);
           return answer;
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
-          const kept = await _tx('reads', 'readonly', s => s.get(String(path)));
+          const kept = await _tx('reads', 'readonly', s => s.get(_readKey(path)));
           // Nothing seen for this day yet: the screen says it needs a connection.
           if (!kept) throw _offlineError();
           return kept.body;
