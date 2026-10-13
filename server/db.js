@@ -1193,4 +1193,33 @@ try {
   console.warn('[db] foods nutriment key canonicalization failed:', e?.message || e);
 }
 
+// ── Coaching (1.5) ─────────────────────────────────────────────────────────
+// A coach and a client. The coach asks, the client accepts or declines, and
+// either side (or an admin) can end it. One pending or active row per client,
+// so a client with a coach can't take a second one until they leave the
+// first. Both people cascade: deleting either account removes the pairing.
+// Only adds: no existing table is rebuilt and no column changed.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS coach_clients (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    coach_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'declined', 'ended')),
+    note         TEXT,
+    requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+    responded_at TEXT,
+    ended_at     TEXT,
+    ended_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_clients_open
+    ON coach_clients(client_id) WHERE status IN ('pending', 'active');
+  CREATE INDEX IF NOT EXISTS idx_coach_clients_coach ON coach_clients(coach_id, status);
+`);
+// An admin's invite can name a coach: the request is made when the new
+// account is created and waits for the person to answer it.
+if (!columnExists('invite_tokens', 'coach_id')) {
+  db.exec(`ALTER TABLE invite_tokens ADD COLUMN coach_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+}
+
 export default db;

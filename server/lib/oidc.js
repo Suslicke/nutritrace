@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import db from '../db.js';
 import { encrypt, decrypt } from './token-crypto.js';
 import { logger } from '../logger.js';
+import { endCoachingIfNotCoach } from './coaching.js';
 
 // openid-client v5.7.x defaults outgoing HTTP requests to a 3500ms timeout,
 // which is too tight in practice — first-time Authentik / Keycloak / Authelia
@@ -306,11 +307,15 @@ export function applyAdminMapping(provider, user, claims) {
     isAdmin = claimVal === provider.admin_group_value
            || claimVal.split(/[\s,]+/).includes(provider.admin_group_value);
   }
-  const desired = isAdmin ? 'admin' : 'user';
+  // The provider only knows admin or not. A Coach an admin made in Users
+  // stays a Coach; it is a User everywhere except coaching.
+  const desired = isAdmin ? 'admin' : (user.role === 'coach' ? 'coach' : 'user');
   if (user.role !== desired) {
     db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(desired, user.id);
     user.role = desired;
     logger.info(`[oidc] role for user ${user.id} (${user.username}) → ${desired} via provider ${provider.id}`);
+    // An admin who coached and lost admin stops coaching.
+    endCoachingIfNotCoach(user.id, null);
   }
 }
 

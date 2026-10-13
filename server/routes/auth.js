@@ -11,6 +11,10 @@ import { sendPasswordReset, sendInvite, isEmailConfigured } from '../email.js';
 import { estimate as estimatePasswordStrength, STRONG_MIN_SCORE } from '../lib/password-strength.js';
 import { claimAnonymousData, purgeUnreferencedUserData, purgeUserRows } from '../lib/claim-anonymous-data.js';
 import { ownerOrOptIn } from '../lib/outbound-policy.js';
+import { COACHING_VERSION, coachingState, endCoachingIfNotCoach, requestFromInvite, canCoach, roleOf, personName } from '../lib/coaching.js';
+
+// The roles an admin can give. A Coach is a User everywhere except coaching.
+const ROLES = ['user', 'coach', 'admin'];
 
 const router = Router();
 
@@ -155,6 +159,9 @@ router.get('/status', wrap((req, res) => {
     // day's note. Servers before this report none, and treat a save
     // without a note as clearing it, so the app sends its note every time.
     sync_version: 2,
+    // Coaching (1.5). Servers before it report none, and the app hides
+    // coaching there.
+    coaching: COACHING_VERSION,
   });
 }));
 
@@ -169,7 +176,10 @@ router.get('/me', wrap((req, res) => {
   const features = {};
   if (!req.user) return res.json({ user: null, csrf: null, features });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  res.json({ user: user ? safeUser(user) : null, csrf: req.user.csrf || null, features });
+  // Where this person stands in coaching, so the app knows whether to show
+  // the Coach and Clients tabs without asking again.
+  const coaching = user && userMgmtActive() ? coachingState(user.id) : null;
+  res.json({ user: user ? safeUser(user) : null, csrf: req.user.csrf || null, features, coaching });
 }));
 
 // ── Login ──────────────────────────────────────────────────────────────────
@@ -218,7 +228,7 @@ router.post('/register', wrap((req, res) => {
   { const pwErr = validatePassword(password, [username, email, full_name].filter(Boolean)); if (pwErr) return res.status(400).json({ error: pwErr }); }
 
   const hash = bcrypt.hashSync(password, 12);
-  const assignedRole = isFirst ? 'admin' : (role === 'admin' ? 'admin' : 'user');
+  const assignedRole = isFirst ? 'admin' : (ROLES.includes(role) ? role : 'user');
 
   const result = db.prepare(
     `INSERT INTO users (username, password_hash, full_name, nickname, birthday, gender, role, email)
@@ -373,11 +383,11 @@ router.put('/users/:id/password', requireAuth, requireAdmin, wrap((req, res) => 
   res.json({ ok: true });
 }));
 
-// ── Admin: change another user's role (user | admin) ──────────────────────
+// ── Admin: change another user's role (user | coach | admin) ──────────────
 router.put('/users/:id/role', requireAuth, requireAdmin, wrap((req, res) => {
   const id = parseInt(req.params.id);
   const { role } = req.body;
-  if (!['admin', 'user'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (id === req.user.id) return res.status(400).json({ error: 'Cannot change your own role' });
   // Last-admin guard — refuse to demote the only admin and lock the instance out.
   if (role !== 'admin') {
@@ -390,7 +400,10 @@ router.put('/users/:id/role', requireAuth, requireAdmin, wrap((req, res) => {
     }
   }
   db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
-  res.json({ ok: true });
+  // Someone who can no longer coach stops coaching: their requests and
+  // pairings end.
+  const ended = endCoachingIfNotCoach(id, req.user.id);
+  res.json({ ok: true, coaching_ended: ended });
 }));
 
 // ── Admin: disable user management (delete all users) ─────────────────────
@@ -490,6 +503,13 @@ router.post('/reset-password', wrap((req, res) => {
 // ── Admin: create invite ───────────────────────────────────────────────────
 router.post('/invite', requireAuth, requireAdmin, wrap(async (req, res) => {
   const { email, role = 'user' } = req.body;
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  // An invite can name a coach (a Coach or an admin). The request is made
+  // when the account is created and waits for the person to answer it.
+  let coachId = req.body?.coach_id == null || req.body.coach_id === '' ? null : Number(req.body.coach_id);
+  if (coachId != null && (!Number.isInteger(coachId) || !canCoach(roleOf(coachId)))) {
+    return res.status(400).json({ error: 'That person is not a coach.' });
+  }
 
   // Refuse if the email is already registered — silently sending an invite
   // to an existing user would let the recipient create a second account.
@@ -505,8 +525,8 @@ router.post('/invite', requireAuth, requireAdmin, wrap(async (req, res) => {
 
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-  db.prepare('INSERT INTO invite_tokens (token, email, role, created_by, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(token, email ? email.trim().toLowerCase() : null, role, req.user.id, expires);
+  db.prepare('INSERT INTO invite_tokens (token, email, role, created_by, expires_at, coach_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(token, email ? email.trim().toLowerCase() : null, role, req.user.id, expires, coachId);
 
   const baseUrl = linkBase(req);
   if (!baseUrl) return res.status(500).json({ error: 'The app\'s address is unknown. Set PUBLIC_URL, then try again.' });
@@ -525,12 +545,16 @@ router.post('/invite', requireAuth, requireAdmin, wrap(async (req, res) => {
 // ── Admin: list pending invites (not used, not expired) ───────────────────
 router.get('/invites', requireAuth, requireAdmin, wrap((req, res) => {
   const rows = db.prepare(
-    `SELECT token, email, role, expires_at, created_by
-     FROM invite_tokens
-     WHERE used = 0 AND expires_at > datetime('now')
-     ORDER BY expires_at DESC`
+    `SELECT i.token, i.email, i.role, i.expires_at, i.created_by, i.coach_id,
+            c.full_name AS coach_full_name, c.username AS coach_username
+     FROM invite_tokens i LEFT JOIN users c ON c.id = i.coach_id
+     WHERE i.used = 0 AND i.expires_at > datetime('now')
+     ORDER BY i.expires_at DESC`
   ).all();
-  res.json(rows);
+  res.json(rows.map(({ coach_full_name, coach_username, ...r }) => ({
+    ...r,
+    coach: r.coach_id != null ? { id: r.coach_id, name: personName({ full_name: coach_full_name, username: coach_username }) } : null,
+  })));
 }));
 
 // ── Admin: revoke a pending invite ────────────────────────────────────────
@@ -569,6 +593,8 @@ router.post('/accept-invite', wrap((req, res) => {
   );
 
   db.prepare('UPDATE invite_tokens SET used = 1 WHERE token = ?').run(token);
+  // The coach the invite named asks now; the request waits for an answer.
+  requestFromInvite(invite.coach_id ?? null, Number(result.lastInsertRowid));
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
   res.cookie('nt_token', signToken(user), COOKIE_OPTS);

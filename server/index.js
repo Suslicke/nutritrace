@@ -41,6 +41,7 @@ import mcpRoutes        from './routes/mcp.js';
 import nutritionImportRoutes from './routes/nutrition-import.js';
 import offLocalRoutes from './routes/off-local.js';
 import updatesRoutes  from './routes/updates.js';
+import coachingRoutes from './routes/coaching.js';
 import { logger }   from './logger.js';
 import { authenticate, userMgmtActive, setupRequired } from './middleware/auth.js';
 import { csrfProtect } from './middleware/csrf.js';
@@ -144,7 +145,7 @@ router.use((req, res, next) => {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Request-ID');
-      res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID');
+      res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID, X-NT-Coaching');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
   }
@@ -265,6 +266,7 @@ router.use('/api/settings',  settingsRoutes);
 router.use('/api/app-config',  appConfigRoutes);
 router.use('/api/off-local',   offLocalRoutes);
 router.use('/api/updates',     updatesRoutes);
+router.use('/api/coaching',    coachingRoutes);
 router.use('/api/ai',          aiRoutes);
 router.use('/api/full-backup',        fullBackupRoutes);
 // Per-IP rate limit on OAuth callbacks — these run unauthenticated and trigger

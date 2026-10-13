@@ -1,0 +1,149 @@
+/**
+ * Coaching: who coaches whom, and the one guard every coach endpoint uses.
+ *
+ * A coach (the Coach role, or an admin) asks; the client accepts or declines.
+ * Accepting is the consent: before it, the coach sees nothing. Either side can
+ * end it, and an admin can end any pairing. The role is read from the
+ * database on every request, not from the sign-in token, so a role an admin
+ * takes away stops working at once.
+ *
+ * Nothing here returns a full user row: people are { id, name } only.
+ */
+import db from '../db.js';
+import { userMgmtActive } from '../middleware/auth.js';
+
+/** What /api/auth/status reports, so an app can hide coaching on an older server. */
+export const COACHING_VERSION = 1;
+export const NOTE_MAX = 500;
+
+export const canCoach = (role) => role === 'coach' || role === 'admin';
+
+export function roleOf(userId) {
+  if (userId == null) return null;
+  return db.prepare('SELECT role FROM users WHERE id = ?').get(userId)?.role || null;
+}
+
+/** The name the sharing picker shows: full name, else username. */
+export const personName = (u) => (u?.full_name || u?.username || '');
+export const person = (id, full_name, username) => ({ id, name: personName({ full_name, username }) });
+
+/**
+ * The one guard: an active pairing between this coach and this client,
+ * with the coach still allowed to coach. Null otherwise.
+ */
+export function activePairing(coachId, clientId) {
+  if (coachId == null || clientId == null) return null;
+  return db.prepare(`
+    SELECT cc.* FROM coach_clients cc
+      JOIN users c ON c.id = cc.coach_id
+     WHERE cc.coach_id = ? AND cc.client_id = ? AND cc.status = 'active'
+       AND c.role IN ('coach', 'admin')
+  `).get(coachId, clientId) || null;
+}
+
+/** Signed in, with accounts on: coaching needs more than one person. */
+function _signedIn(req, res) {
+  if (!userMgmtActive() || !req.user?.id) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return false;
+  }
+  return true;
+}
+
+/** Middleware: the signed-in account may coach (Coach role or admin). */
+export function requireCoachRole(req, res, next) {
+  if (!_signedIn(req, res)) return;
+  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.' });
+  next();
+}
+
+/** Middleware: the signed-in account is signed in with accounts on. */
+export function requireAccount(req, res, next) {
+  if (!_signedIn(req, res)) return;
+  next();
+}
+
+/**
+ * Middleware for every route under /clients/:clientId. Answers the same 404
+ * for another coach's client, a pending request, an ended pairing and an
+ * account that doesn't exist, so a coach learns nothing about other people.
+ */
+export function requireCoachOf(req, res, next) {
+  if (!_signedIn(req, res)) return;
+  if (!canCoach(roleOf(req.user.id))) return res.status(403).json({ error: 'Only coaches can do this.' });
+  const clientId = Number(req.params.clientId);
+  const pairing = Number.isInteger(clientId) ? activePairing(req.user.id, clientId) : null;
+  if (!pairing) return res.status(404).json({ error: 'Client not found' });
+  req.pairing = pairing;
+  next();
+}
+
+/** Where this person stands in coaching, for their own screens. */
+export function coachingState(userId) {
+  const role = roleOf(userId);
+  const row = db.prepare(`
+    SELECT cc.id, cc.status, cc.note, cc.requested_at, cc.responded_at,
+           u.id AS coach_id, u.full_name, u.username
+      FROM coach_clients cc JOIN users u ON u.id = cc.coach_id
+     WHERE cc.client_id = ? AND cc.status IN ('pending', 'active')
+  `).get(userId);
+  const counts = { pending: 0, active: 0 };
+  for (const r of db.prepare(`
+    SELECT status, COUNT(*) AS c FROM coach_clients
+     WHERE coach_id = ? AND status IN ('pending', 'active') GROUP BY status
+  `).all(userId)) counts[r.status] = r.c;
+  return {
+    role,
+    can_coach: canCoach(role),
+    as_client: row ? {
+      id: row.id,
+      status: row.status,
+      coach: person(row.coach_id, row.full_name, row.username),
+      note: row.note || null,
+      requested_at: row.requested_at,
+      responded_at: row.responded_at || null,
+    } : null,
+    as_coach: counts,
+  };
+}
+
+/**
+ * A short fingerprint of coachingState, sent as a header on the settings
+ * refresh the app already makes, so a new request or an ended pairing shows
+ * up without an extra request or timer for people not in coaching.
+ */
+export function coachingSignature(userId) {
+  const s = coachingState(userId);
+  const c = s.as_client ? `${s.as_client.id}.${s.as_client.status}` : '-';
+  return `${s.role || '-'};${c};${s.as_coach.pending}.${s.as_coach.active}`;
+}
+
+/** End a pairing (pending or active). Returns true when one was ended. */
+export function endPairing(pairingId, byUserId) {
+  const r = db.prepare(`
+    UPDATE coach_clients
+       SET status = 'ended', ended_at = datetime('now'), ended_by = ?, updated_at = datetime('now')
+     WHERE id = ? AND status IN ('pending', 'active')
+  `).run(byUserId ?? null, pairingId);
+  return r.changes > 0;
+}
+
+/**
+ * Someone who can no longer coach (their role changed to User) stops
+ * coaching: their pending requests and active pairings end.
+ */
+export function endCoachingIfNotCoach(userId, byUserId) {
+  if (canCoach(roleOf(userId))) return 0;
+  const rows = db.prepare(`SELECT id FROM coach_clients WHERE coach_id = ? AND status IN ('pending', 'active')`).all(userId);
+  for (const r of rows) endPairing(r.id, byUserId);
+  return rows.length;
+}
+
+/** A pending request the invite named, made when the invited account is created. */
+export function requestFromInvite(coachId, clientId) {
+  if (coachId == null || coachId === clientId || !canCoach(roleOf(coachId))) return null;
+  try {
+    return db.prepare(`INSERT INTO coach_clients (coach_id, client_id, status) VALUES (?, ?, 'pending')`)
+      .run(coachId, clientId).lastInsertRowid;
+  } catch { return null; }
+}

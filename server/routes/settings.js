@@ -4,6 +4,7 @@ import { wrap } from '../logger.js';
 import { requireAuth, userMgmtActive } from '../middleware/auth.js';
 import { isServerOnlyKey } from '../lib/server-only-keys.js';
 import { fetchChecked, serviceBase } from '../lib/ssrf-guard.js';
+import { coachingSignature } from '../lib/coaching.js';
 
 // Push services usually live on the home network, so that's allowed for
 // every account; the address is still checked, and a redirect only
@@ -30,6 +31,10 @@ router.use(requireAuth);
 // SECURITY: server-only keys (OAuth secrets, admin config) are filtered out.
 router.get('/', wrap((req, res) => {
   if (!userMgmtActive() || !req.user) return res.json({});
+  // Where this person stands in coaching, as a short fingerprint: the app
+  // already refreshes settings, so a new coaching request or an ended
+  // pairing shows up without another request or timer.
+  res.set('X-NT-Coaching', coachingSignature(req.user.id));
   const rows = db.prepare('SELECT key, value FROM user_settings WHERE user_id = ? AND deleted_at IS NULL').all(req.user.id);
   const out = {};
   for (const { key, value } of rows) {

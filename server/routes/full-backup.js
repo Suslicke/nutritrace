@@ -349,10 +349,22 @@ function restoreFromZip(zip) {
     // Outstanding invite tokens so pending invites don't 404 after restore.
     db.prepare('DELETE FROM invite_tokens').run();
     const insInvite = db.prepare(`
-      INSERT OR IGNORE INTO invite_tokens (token, email, role, created_by, expires_at, used)
-      VALUES (@token, @email, @role, @created_by, @expires_at, @used)
+      INSERT OR IGNORE INTO invite_tokens (token, email, role, created_by, expires_at, used, coach_id)
+      VALUES (@token, @email, @role, @created_by, @expires_at, @used, @coach_id)
     `);
-    for (const i of data.invite_tokens || []) insInvite.run({ email: null, role: 'user', created_by: null, used: 0, ...i });
+    for (const i of data.invite_tokens || []) insInvite.run({ email: null, role: 'user', created_by: null, used: 0, coach_id: null, ...i });
+
+    // Coaching pairings (1.5). A backup from before coaching has none. The
+    // users above cascade these away first, so this only adds back what the
+    // archive holds.
+    db.prepare('DELETE FROM coach_clients').run();
+    const insPairing = db.prepare(`
+      INSERT OR IGNORE INTO coach_clients (id, coach_id, client_id, status, note, requested_at, responded_at, ended_at, ended_by, updated_at)
+      VALUES (@id, @coach_id, @client_id, @status, @note, COALESCE(@requested_at, datetime('now')), @responded_at, @ended_at, @ended_by, COALESCE(@updated_at, datetime('now')))
+    `);
+    for (const c of data.coach_clients || []) insPairing.run({
+      note: null, requested_at: null, responded_at: null, ended_at: null, ended_by: null, updated_at: null, ...c,
+    });
   })();
 
   // Restore images — guard against zip-slip and zip-bomb attacks
@@ -438,6 +450,8 @@ function dumpDatabase() {
     api_tokens:       db.prepare('SELECT * FROM api_tokens').all(),
     // Outstanding invite tokens so pending invites survive a restore.
     invite_tokens:    db.prepare('SELECT * FROM invite_tokens').all(),
+    // Coaching pairings: who coaches whom, and requests waiting for an answer.
+    coach_clients:    db.prepare('SELECT * FROM coach_clients').all(),
   };
 }
 
