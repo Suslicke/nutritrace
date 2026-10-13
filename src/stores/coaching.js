@@ -93,3 +93,13 @@ export function noteCoachingSignature(sig) {
   if (sig === coachingSignature(get(coachingState))) return;
   refreshCoaching();
 }
+
+// The Android app shows its first screen before it has asked the server who
+// is signed in, so it starts from what this account knew last time; a Coach
+// or Clients link opened at launch then lands where it points.
+if (isNative) {
+  try {
+    const uid = localStorage.getItem('wl:userId');
+    if (uid && getServerUrl()) loadCachedCoaching(uid);
+  } catch { /* private mode */ }
+}

@@ -208,6 +208,7 @@ test('a request, the answer, and the privacy table for every client route', { sk
   assert.equal(byClient[ids.client3].status, 'declined');
   assert.equal(byClient[ids.client4].status, 'ended');
   assert.equal(byClient[ids.client2], undefined);
+  assert.equal(new Set(list.map((r) => r.client.id)).size, list.length, 'one row per client');
 
   // No other coaching answer carries a user row either.
   for (const [who, path] of [['coach1', '/api/coaching/candidates'], ['client1', '/api/coaching/state'], ['admin', '/api/coaching/admin/pairings'], ['admin', '/api/auth/invites']]) {

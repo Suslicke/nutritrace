@@ -7,12 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Coaching, part one: a coach and a client connect.** An admin gives an account the new Coach role in Settings > Users (admins can coach too). A coach sends a request from the Clients tab in Goals, with an optional note; the person answers it on their Coach tab, and the coach sees nothing until they accept. Then the coach sees the client's last 7 days against their targets, their weight trend and their diary, read-only. Either side can end it at any time, and an admin sees and ends every pairing in Users. An invite can name a coach, and the new account gets the request at its first sign-in. Anyone not in coaching sees Goals exactly as before. Coaching needs a server: answering, asking and ending need a connection, and a coach's views already opened stay readable offline. Recommendations and messages come next.
+
 ### Changed
 
 - **Garmin sync is no longer marked Experimental** in Settings > Wellness.
 
 ### Fixed
 
+- **An invite can only give the User, Coach or Admin role.** Any other value was stored as it came and became the new account's role.
 - **The Android app says when a server isn't set up yet.** Connecting to a fresh install said the server couldn't be reached (or that only HTTPS works). Now it says to open the server in a browser and create the first account first; Android apps from before this get the same answer when they sign in. `/api/health` answers before setup too, with `setup_required: true`, so a container healthcheck passes from the first start.
 - **The Android app does less when nothing changed.** With Health Connect on, every 30-second sync sent the day's steps and other readings again, even when they hadn't changed, and downloaded them back. Now only a new value goes up. The connection check also stops while the app is hidden, the Diary and Wellness pages only reload when a sync brought something, and in the browser the settings refresh waits while the tab is in the background.
 - **Trace answers with models that can't use tools** ([#259](https://github.com/TraceApps/nutritrace/issues/259)). With an OpenAI-compatible model that has no tool support, every chat failed with `tool use is not supported`. Trace now asks again without tools and says once that the model can't log food or look things up. Thanks @jsapede for the report.

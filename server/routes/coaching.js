@@ -107,6 +107,8 @@ const _note = (v) => {
   return s ? s.slice(0, NOTE_MAX) : null;
 };
 
+const _rank = (r) => (r.status === 'active' || r.status === 'pending' ? 0 : 1);
+
 const _pairingRow = (id) => db.prepare('SELECT * FROM coach_clients WHERE id = ?').get(id);
 
 // ── Your own place in coaching ──────────────────────────────────────────────
@@ -130,7 +132,11 @@ router.get('/clients', requireCoachRole, wrap((req, res) => {
      ORDER BY CASE cc.status WHEN 'active' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
               COALESCE(u.full_name, u.username) COLLATE NOCASE
   `).all(req.user.id);
-  res.json(rows.map(r => {
+  // One row per client: the open pairing, else the latest answer.
+  const seen = new Set();
+  const latest = [...rows].sort((a, b) => _rank(a) - _rank(b) || String(b.responded_at || b.ended_at || '').localeCompare(String(a.responded_at || a.ended_at || '')));
+  const keep = new Set(latest.filter(r => !seen.has(r.client_id) && seen.add(r.client_id)).map(r => r.id));
+  res.json(rows.filter(r => keep.has(r.id)).map(r => {
     const out = {
       id: r.id, status: r.status, client: person(r.client_id, r.full_name, r.username),
       requested_at: r.requested_at, responded_at: r.responded_at || null, ended_at: r.ended_at || null,
