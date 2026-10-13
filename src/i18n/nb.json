@@ -1048,6 +1048,29 @@
     "show_activity_desc": "En aktivitetssamling i dagboken for registrering av trening. Hver oppføring har navn og forbrente kalorier. Nyttig hvis du ikke har integrasjon mot en pulsklokke eller aktivitetsmåler.",
     "adjust_calorie_goal": "Juster kalorimål ut fra aktivitet",
     "adjust_calorie_goal_desc": "Når denne er slått på, vil dagens forbruk (manuelt + fra aktivitetsmåler i henhold til retningslinjene nedenfor) øke gjenstående kalorier for dagen («opptjening på nytt»). Når den er slått av, registreres og vises aktivitetene fremdeles, men kalorimålet forblir på grunnverdien.",
-    "policy_wearable_wins": "Aktivitetsmåler overstyrer"
+    "policy_wearable_wins": "Aktivitetsmåler overstyrer",
+    "policy_wearable_desc": ", manuelle oppføringer vises i dagboken uten å endre målberegningen. Standard innstilling, forhindrer dobbelttelling.",
+    "policy_manual_wins": "Manuell overstyrer",
+    "policy_manual_desc": ", ditt manuelt registrerte sum erstatter dagsforbruket fra aktivitetsmåleren.",
+    "policy_add": "Legg sammen",
+    "policy_add_desc": ", legges begge sammen. ⚠ Fare for dobbeltføring dersom aktivitetsmåleren allerede har registrert økten.",
+    "show_fasting": "Vis sporing av faste",
+    "show_fasting_desc": "Legger til en tidtaker for periodisk faste øverst i dagboken. Start en faste, se medgått tid og fremdrift mot målet ditt, og avslutt når du er ferdig.",
+    "default_fast_goal": "Standard fastemål",
+    "notify_goal": "Varsle når målet er nådd",
+    "notify_goal_desc": "Sender et varsel når den aktive fasten når målet sitt, slik at du slipper å sjekke dagboken hele tiden.",
+    "recurring_schedule": "Gjentakende tidsplan",
+    "start_time": "Starttid",
+    "repeat_on": "Gjentas",
+    "schedule_goal": "Mål for tidsplan",
+    "show_progress_bar": "Vis fremdriftslinje for daglige mål",
+    "show_progress_bar_desc": "Fremdriftsfelt nederst i dagboken som viser hvor nærme du er å nå de daglige målene dine",
+    "meal_names": "Måltidsnavn"
+  },
+  "settings_water": {
+    "display_unit": "Enhet for visning",
+    "show_in_diary": "Vis i dagbok",
+    "show_in_statistics": "Vis i statistikk",
+    "containers_title": "Vannbeholdere"
   }
 }
