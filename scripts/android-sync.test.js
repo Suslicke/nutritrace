@@ -1362,7 +1362,7 @@ test('the connection check and the sync stop while the app is hidden, and syncs 
 // loses it from the phone too.
 test('a coaching message written offline on the phone is stored once; the conversation stays on the phone; a former coach loses it', async (t) => {
   if (skip(t)) return;
-  const coach = await account('cora', A), client = await account('cliff', A);
+  const coach = await account('cm-coach', A), client = await account('cm-client', A);
   const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
   const CO = await me(coach), CL = await me(client);
   await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
@@ -1430,7 +1430,7 @@ test('a coaching message written offline on the phone is stored once; the conver
 // waits; the next sync sends both. Undo brings the goals back exactly.
 test('targets accepted offline on the phone: goals change there, the answer and the goals reach the server; Undo restores them exactly', async (t) => {
   if (skip(t)) return;
-  const coach = await account('tess', A), client = await account('troy', A);
+  const coach = await account('tg-coach', A), client = await account('tg-client', A);
   const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
   const CO = await me(coach), CL = await me(client);
   await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
@@ -1495,7 +1495,7 @@ test('targets accepted offline on the phone: goals change there, the answer and 
 // card says it was replaced.
 test('targets accepted offline but replaced meanwhile: the phone puts the goals back', async (t) => {
   if (skip(t)) return;
-  const coach = await account('uma', A), client = await account('vic', A);
+  const coach = await account('rc-coach', A), client = await account('rc-client', A);
   const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
   const CO = await me(coach), CL = await me(client);
   await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
