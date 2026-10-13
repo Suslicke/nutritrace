@@ -162,7 +162,8 @@ export async function acceptTargets(rec, { note = '', t, date = new Date().toLoc
       const status = Number(e?.status) || 0;
       if (!(e?.offline || !status || status >= 500)) {
         // Refused: nothing changes; the card shows what it is now.
-        try { const now = (await NtApi.get('/api/coaching/recommendations') || []).find(r => r.id === rec.id); if (now) await store.settle(now); } catch { /* shown on the next look */ }
+        // (and a newer one, if that's what replaced it).
+        try { await refreshRecommendations(); } catch { /* shown on the next look */ }
         if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
         return { applied: false, offline: false, refused: true };
       }
