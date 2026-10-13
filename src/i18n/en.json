@@ -2182,7 +2182,7 @@
       "email": "Email Me Too",
       "email_desc": "At most one email per conversation every 30 minutes, saying who wrote. Needs an email on your account and email set up on the server.",
       "recommendation": "New Recommendation",
-      "recommendation_desc": "When a coach asks to coach you, or your coach recommends targets or a day plan.",
+      "recommendation_desc": "When a coach asks to coach you, or your coach recommends targets, a day plan, a meal or a recipe.",
       "answer": "Client's Answer",
       "answer_desc": "When someone accepts or declines your request, or leaves."
     },

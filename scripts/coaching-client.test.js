@@ -271,6 +271,7 @@ test('coaching strings live in en.json; Users search finds coaching', () => {
   }
   for (const st of ['pending', 'accepted', 'declined', 'expired', 'replaced', 'withdrawn']) assert.equal(typeof get(`coaching.plans.status_${st}`), 'string', st);
   for (const k of ['foods', 'meals', 'recipes']) assert.equal(typeof get(`coaching.plans.kind_${k}`), 'string', k);
+  for (const k of ['draft_targets', 'draft_plan', 'draft_sub', 'open_targets', 'open_plan', 'discard', 'drafted', 'dismiss_draft']) assert.equal(typeof get(`coaching.trace.${k}`), 'string', k);
   for (const st of ['pending', 'accepted', 'declined', 'withdrawn', 'replaced']) {
     assert.equal(typeof get(`coaching.send.status_${st}`), 'string', st);
     if (st !== 'pending') assert.equal(typeof get(`coaching.send.client_status_${st}`), 'string', st);
