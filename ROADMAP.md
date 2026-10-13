@@ -16,6 +16,19 @@ Items marked ~~strikethrough~~ have been implemented.
 
 ---
 
+## Planned for 1.5: Coaching
+
+A coach recommends calorie and macro targets and day plans, the client accepts or declines each one, and the two talk in one conversation. The coach only suggests: nothing in the client's targets, diary or catalog changes until the client accepts.
+
+- **Connecting.** An admin gives an account the Coach role (admins can coach too). The coach sends a request and the client accepts it before the coach sees anything. One coach per client; either side can end it at any time.
+- **What a coach sees.** The client's diary, targets, weight trend, foods, meals and recipes. No wellness data.
+- **Recommendations.** Targets and day plans, each accepted or declined by the client. Accepting targets saves the old ones as a template first, with Undo.
+- **Messages.** One conversation per coach and client, with photos, read receipts and notifications. Trace never reads it.
+- **Sharing.** A Share button in the food, meal and recipe editors, and Send to Client for a coach's own meals and recipes.
+- **Not planned:** billing and multi-tenant client management.
+
+---
+
 ## Wellness: Reporting & Insights
 
 ### ~~Phase 1: Trends tab~~ *(done, sparklines on each metric card)*
@@ -282,10 +295,7 @@ Two tiers, cut Tier 1 first if any of this happens at all:
 - UI: plan editor calendar grid + assignment manager.
 - ~1 week of work. Bigger surface.
 
-**Skipped tiers:**
-
-- Coach / dietitian mode (multi-tenant client management, billing,
-  notes per client, etc.) is its own product. Not in NT's scope.
+**Coach / dietitian mode** moved into the 1.5 plan (Coaching, above).
 
 **Open design questions for when this gets built:**
 
