@@ -18,12 +18,15 @@
   import { formatDay } from '../../lib/coaching-view.js';
   import AttachImageButton from '../ai/AttachImageButton.svelte';
   import CoachPhoto from './CoachPhoto.svelte';
+  import TargetsCard from './TargetsCard.svelte';
 
   /** { pairingId, side: 'client' | 'coach', clientId } */
   export let conv;
   export let otherName = '';
   /** Ended coaching: the client still reads it, nobody writes. */
   export let readOnly = false;
+  /** Recommendations of this pairing: one in the conversation shows as its card. */
+  export let recommendations = [];
 
   const POLL_MS = 10_000;
   const me = Number(localStorage.getItem('wl:userId')) || null;
@@ -147,6 +150,17 @@
     {/if}
     {#each rows as { m, day, newDay } (m.uuid)}
       {#if newDay}<div class="chat-day">{formatDay(day, $dateFormat)}</div>{/if}
+      {#if m.recommendation_id}
+        {@const rec = recommendations.find(r => r.id === m.recommendation_id)}
+        <div class="msg msg-rec" class:mine={m.sender_id === me}>
+          {#if rec}
+            <TargetsCard {rec} compact coachView={conv.side === 'coach'} coachName={otherName} on:answered />
+          {:else}
+            <div class="bubble"><span class="deleted-text">{$_('coaching.targets.card_title_coach')}</span></div>
+          {/if}
+          <div class="msg-meta"><span>{timeOf(m.created_at)}</span></div>
+        </div>
+      {:else}
       <div class="msg" class:mine={m.sender_id === me}>
         <div class="bubble" class:deleted={!!m.deleted_at}>
           {#if m.deleted_at}
@@ -168,6 +182,7 @@
           {/if}
         </div>
       </div>
+      {/if}
     {/each}
   </div>
 
@@ -211,6 +226,8 @@
   .chat-day { align-self: center; font-size: 11px; color: var(--text-3); background: var(--surface-2); padding: 2px 10px; border-radius: var(--radius-full); margin: 6px 0; }
   .msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 85%; }
   .msg.mine { align-self: flex-end; align-items: flex-end; }
+  .msg-rec { max-width: min(100%, 520px); width: 100%; }
+  .msg-rec :global(.tc) { margin-top: 0; width: 100%; }
   .bubble {
     background: var(--surface-2); color: var(--text-1); padding: 8px 12px; border-radius: 14px 14px 14px 4px;
     display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%;

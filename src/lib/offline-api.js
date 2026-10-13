@@ -627,7 +627,7 @@ const _KEEP_READS = [
   // answer (a copy here would be older than an Accept made since). Answering,
   // asking and ending need the server.
   /^\/api\/coaching\/clients(\?|$)/,
-  /^\/api\/coaching\/clients\/\d+\/(overview|diary\/\d{4}-\d{2}-\d{2})(\?|$)/,
+  /^\/api\/coaching\/clients\/\d+\/(overview|targets|recommendations|diary\/\d{4}-\d{2}-\d{2})(\?|$)/,
 ];
 const _keepsRead = (path) => _KEEP_READS.some(re => re.test(String(path)));
 // The copy is kept under the path without the app's `today`, so a coach who

@@ -49,3 +49,21 @@ export function coachingErrorText(e, t) {
   if (e?.offline) return t('coaching.needs_connection');
   return e?.message || t('coaching.something_failed');
 }
+
+/** The coach's name for a pairing, from where this person stands in coaching. */
+export function coachNameFor(state, pairingId) {
+  if (!state) return '';
+  if (state.as_client?.id === pairingId) return state.as_client.coach?.name || '';
+  return (state.past || []).find(p => p.id === pairingId)?.coach?.name || '';
+}
+
+/** The targets recommendation the Goals page shows: waiting for an answer,
+ *  else one accepted in the last week (Applied, with Undo). */
+export function goalsCardRecommendation(recs, now = Date.now()) {
+  const targets = (recs || []).filter(r => r.kind === 'targets');
+  const pending = targets.find(r => r.status === 'pending');
+  if (pending) return pending;
+  const week = 7 * 86400000;
+  return targets.find(r => r.status === 'accepted' && r.responded_at
+    && now - new Date(String(r.responded_at).replace(' ', 'T') + (/[zZ]$/.test(r.responded_at) ? '' : 'Z')).getTime() < week) || null;
+}

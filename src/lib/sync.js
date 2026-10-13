@@ -26,6 +26,7 @@ import {
   dbLinkDiaryItems, dbApplyServerDeletions, dbGetCompletionOps, dbDeleteCompletionOp,
   dbApplyServerWinner, dbSetClockOffset, dbInstallId, createKeyOf,
   dbPendingCoachMessages, dbUpsertCoachMessages, dbFailCoachMessage, dbForgetCoachMessage,
+  dbPendingCoachAnswers, dbUpsertCoachRecommendations,
 } from './db-native.js';
 import { localDataIsThisAccount, serverKeepsNotes, accountGeneration } from './local-account.js';
 import { get, writable } from 'svelte/store';
@@ -324,7 +325,9 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
       coachMsgs.push(m); bytes += size;
     }
   }
-  const hasPending = pending.foods.length || pending.meals.length || pending.diary.length || activity.length || fasts.length || wellness.length || workouts.length || pendingSettings.length || coachMsgs.length;
+  // Answers to a coach's recommendations made here (Accept works offline).
+  const coachAnswers = await dbPendingCoachAnswers().catch(() => []);
+  const hasPending = pending.foods.length || pending.meals.length || pending.diary.length || activity.length || fasts.length || wellness.length || workouts.length || pendingSettings.length || coachMsgs.length || coachAnswers.length;
   // Option C: pending per-uuid deletions must ride along with the diary
   // rows in the same push so the server's merge treats them as explicit
   // tombstones. Load once, index by date, consume below.
@@ -510,6 +513,7 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
       ? { uuid: m.uuid, deleted_at: m.deleted_at || new Date().toISOString() }
       : { uuid: m.uuid, pairing_id: m.pairing_id, body: m.body, image: m.image_local || undefined }));
   }
+  if (coachAnswers.length) payload.coach_answers = coachAnswers.map(a => ({ id: a.id, status: a.status, response_note: a.response_note || undefined }));
   if (!live()) return false;
   const sentAt = Date.now();
   const res = await fetch(apiUrl('/api/sync/push'), {
@@ -644,6 +648,15 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
         else if (r.status === 404 && mine?.sync_status === 'pending_delete') await dbForgetCoachMessage(r.uuid);
         else if (r.status && r.status < 500) await dbFailCoachMessage(r.uuid, r.error);
       } catch (e) { console.warn('[sync] coaching message result:', e?.message || e); }
+    }
+  }
+
+  // Answers: the server's row back (answered, or what it is now: replaced,
+  // withdrawn). An older server leaves them waiting.
+  if (Array.isArray(result.coach_answers) && live()) {
+    for (const r of result.coach_answers) {
+      try { if (r.row) await dbUpsertCoachRecommendations([r.row]); }
+      catch (e) { console.warn('[sync] coaching answer result:', e?.message || e); }
     }
   }
 
@@ -830,6 +843,12 @@ async function pullChanges({ signal = null, gen = accountGeneration() } = {}) {
       await cm.storeSyncedMessages(data.coach_messages);
       if (Array.isArray(data.coaching?.pairings)) await cm.keepConversations(data.coaching.pairings);
       coachChanged = data.coach_messages.length;
+      if (Array.isArray(data.coach_recommendations) && data.coach_recommendations.length) {
+        const cr = await import('./coach-recommendations.js');
+        await cr.storeSyncedRecommendations(data.coach_recommendations);
+        coachChanged += data.coach_recommendations.length;
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
+      }
       if (coachChanged && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('nt:coach-messages'));
         import('../stores/coaching.js').then(c => c.refreshCoaching()).catch(() => {});

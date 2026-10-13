@@ -1805,6 +1805,7 @@ export async function dbCountUnsynced() {
     + (await n(`SELECT COUNT(*) AS n FROM diary_tombstones WHERE sync_status = 'pending'`))
     + (await n(`SELECT COUNT(*) AS n FROM diary_completion_ops`))
     + (await n(`SELECT COUNT(*) AS n FROM coach_messages WHERE sync_status IN ('pending', 'pending_delete')`))
+    + (await n(`SELECT COUNT(*) AS n FROM coach_recommendations WHERE sync_status = 'pending'`))
     + (await n(`SELECT COUNT(*) AS n FROM user_settings WHERE sync_status = 'pending' AND user_id = ${LOCAL_USER_ID}`));
 }
 
@@ -2610,4 +2611,58 @@ export async function dbKeepCoachConversations(pairingIds = []) {
   const photos = _rows(await db.query(`SELECT image FROM coach_messages WHERE ${where} AND image IS NOT NULL`, keep)).map(r => r.image);
   await db.run(`DELETE FROM coach_messages WHERE ${where}`, keep);
   return photos;
+}
+
+// ── Coaching recommendations (server mode) ────────────────────────────────
+// The phone's copy of what was recommended to this account, keyed by the
+// server's id. An answer made here (Accept works offline: the goals change
+// on the phone) waits as sync_status 'pending' with the answer in status
+// and response_note, and goes up with the next push.
+
+function _parseRec(r) {
+  if (!r) return null;
+  return { ...r, id: r.server_id, local_id: r.id, payload: _parseJson(r.payload, {}) };
+}
+
+export async function dbCoachRecommendations() {
+  const db = await getDb();
+  return _rows(await db.query(`SELECT * FROM coach_recommendations WHERE deleted_at IS NULL ORDER BY created_at DESC, server_id DESC`, [])).map(_parseRec);
+}
+
+/** Rows from the server. An answer still waiting here stays, unless the
+ *  server's row is no longer pending (replaced, withdrawn, answered). */
+export async function dbUpsertCoachRecommendations(rows = []) {
+  const db = await getDb();
+  for (const r of rows) {
+    if (r?.id == null) continue;
+    const local = _row(await db.query(`SELECT sync_status FROM coach_recommendations WHERE server_id = ?`, [r.id]));
+    if (local?.sync_status === 'pending' && r.status === 'pending') continue;
+    await db.run(`DELETE FROM coach_recommendations WHERE server_id = ?`, [r.id]);
+    await db.run(
+      `INSERT INTO coach_recommendations (server_id, pairing_id, kind, date, payload, note, status, response_note, created_at, responded_at, updated_at, deleted_at, sync_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+      [r.id, r.pairing_id, r.kind, r.date ?? null, JSON.stringify(r.payload ?? {}), r.note ?? null, r.status, r.response_note ?? null,
+        r.created_at ?? null, r.responded_at ?? null, r.updated_at ?? null, r.deleted_at ?? null]
+    );
+  }
+}
+
+/** Keep only these (the server's full list for this account). */
+export async function dbKeepCoachRecommendations(ids = []) {
+  const db = await getDb();
+  const keep = (ids || []).map(Number).filter(Number.isFinite);
+  const where = keep.length ? `server_id NOT IN (${keep.map(() => '?').join(',')})` : '1 = 1';
+  await db.run(`DELETE FROM coach_recommendations WHERE ${where} AND sync_status != 'pending'`, keep);
+}
+
+/** The answer, made here: waits for the server. */
+export async function dbAnswerCoachRecommendation(serverId, status, responseNote) {
+  const db = await getDb();
+  await db.run(`UPDATE coach_recommendations SET status = ?, response_note = ?, responded_at = ?, sync_status = 'pending' WHERE server_id = ?`,
+    [status, responseNote ?? null, _now(), serverId]);
+}
+
+export async function dbPendingCoachAnswers() {
+  const db = await getDb();
+  return _rows(await db.query(`SELECT server_id AS id, status, response_note FROM coach_recommendations WHERE sync_status = 'pending'`, []));
 }

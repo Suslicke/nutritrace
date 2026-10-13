@@ -91,6 +91,7 @@ export function setCoachingFromServer({ supported, state, userId }) {
   // Someone in coaching opening the app: anything written offline goes now.
   if (state && (showsCoachTab(true, state) || showsClientsTab(true, state))) {
     import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
+    import('../lib/coach-recommendations.js').then(m => m.flushAnswers()).catch(() => {});
   }
 }
 
@@ -123,6 +124,10 @@ export async function refreshCoaching() {
     coachingState.set(state || null);
     _save(localStorage.getItem('wl:userId'));
     await _forgetFormerClients(before, state);
+    // A recommendation arrived or was answered elsewhere: fetch them.
+    if (showsCoachTab(true, state) && (Number(before?.recommendations) || 0) !== (Number(state?.recommendations) || 0)) {
+      loadCoachRecommendations({ refresh: true }).catch(() => {});
+    }
   } catch { /* offline: keep what is known */ }
   return get(coachingState);
 }
@@ -174,7 +179,32 @@ if (isNative) {
 // Messages written in the browser with no connection go when it comes back,
 // or when the app is opened again. Only waiting messages make a request.
 if (typeof window !== 'undefined' && !isNative) {
-  const flush = () => import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
+  const flush = () => {
+    import('../lib/coach-messages.js').then(m => m.flushCoachMessages()).catch(() => {});
+    import('../lib/coach-recommendations.js').then(m => m.flushAnswers()).catch(() => {});
+  };
   window.addEventListener('online', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); });
+}
+
+// ── Recommendations, the client's side ──────────────────────────────────────
+/** What a coach recommended to this person, newest first (kept on the device). */
+export const coachRecommendations = writable([]);
+
+/**
+ * Read what this device holds, then (with `refresh`) ask the server. Only
+ * for someone with a coach or a past coach: nobody else ever asks.
+ */
+export async function loadCoachRecommendations({ refresh = false } = {}) {
+  const s = get(coachingState);
+  if (!get(coachingSupported) || !showsCoachTab(true, s)) { coachRecommendations.set([]); return []; }
+  const m = await import('../lib/coach-recommendations.js');
+  coachRecommendations.set(await m.loadRecommendations().catch(() => []));
+  if (refresh && !coachingNeedsServer()) {
+    try { coachRecommendations.set(await m.refreshRecommendations()); } catch { /* offline: what is kept */ }
+  }
+  return get(coachRecommendations);
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('nt:coach-recommendations', () => { loadCoachRecommendations().catch(() => {}); });
 }

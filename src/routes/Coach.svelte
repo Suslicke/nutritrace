@@ -10,10 +10,12 @@
   import { coachingState, coachingNeedsServer, refreshCoaching, setCoachingFromServer, coachTab } from '../stores/coaching.js';
   import { confirmDialog } from '../stores/confirmDialog.js';
   import { showSuccess, showError } from '../stores/toast.js';
-  import { formatDay, localDay, coachingErrorText } from '../lib/coaching-view.js';
+  import { formatDay, localDay, coachingErrorText, coachNameFor } from '../lib/coaching-view.js';
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
   import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
   import Conversation from '../components/coaching/Conversation.svelte';
+  import TargetsCard from '../components/coaching/TargetsCard.svelte';
+  import { coachRecommendations, loadCoachRecommendations } from '../stores/coaching.js';
 
   const needsServer = coachingNeedsServer();
   let loaded = false;
@@ -32,7 +34,12 @@
   onMount(async () => {
     if (!needsServer) await refreshCoaching();
     loaded = true;
+    if (!needsServer) loadCoachRecommendations({ refresh: true }).catch(() => {});
   });
+  // Waiting for an answer: pinned on top. Answered: history, below.
+  $: pendingRecs = $coachRecommendations.filter(r => r.status === 'pending' && r.pairing_id === pairing?.id);
+  $: pastRecs = $coachRecommendations.filter(r => !(r.status === 'pending' && r.pairing_id === pairing?.id));
+  const recsOf = (pid, recs) => recs.filter(r => r.pairing_id === pid);
 
   // Nothing to show here any more (left, declined, or ended by the coach):
   // back to Goals rather than an empty page.
@@ -110,6 +117,11 @@
         </section>
       {/if}
 
+      <!-- Recommendations waiting for an answer, pinned on top. -->
+      {#each pendingRecs as rec (rec.id)}
+        <TargetsCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
+      {/each}
+
       <!-- Requests waiting for an answer, pinned on top. -->
       {#each requests as req (req.id)}
         <section class="card consent-card" aria-labelledby="consent-title-{req.id}">
@@ -136,7 +148,8 @@
 
       {#if pairing}
         <p class="coach-sees">{$_('coaching.client.coach_sees', { values: { name: coachName } })}</p>
-        <Conversation conv={{ pairingId: pairing.id, side: 'client' }} otherName={coachName} />
+        <Conversation conv={{ pairingId: pairing.id, side: 'client' }} otherName={coachName}
+          recommendations={recsOf(pairing.id, $coachRecommendations)} on:answered={() => loadCoachRecommendations()} />
       {/if}
       {#if shownPast}
         <section class="past">
@@ -151,10 +164,19 @@
             </div>
           {/if}
           <p class="coach-sees">{$_('coaching.client.past_body', { values: { name: shownPast.coach.name, date: formatDay(localDay(shownPast.ended_at), $dateFormat) } })}</p>
-          <Conversation conv={{ pairingId: shownPast.id, side: 'client' }} otherName={shownPast.coach.name} readOnly />
+          <Conversation conv={{ pairingId: shownPast.id, side: 'client' }} otherName={shownPast.coach.name} readOnly
+            recommendations={recsOf(shownPast.id, $coachRecommendations)} />
         </section>
       {:else if loaded && !requests.length && !pairing}
         <p class="coach-empty">{$_('coaching.client.none')}</p>
+      {/if}
+      {#if pastRecs.length}
+        <section class="past">
+          <h2 class="past-title">{$_('coaching.targets.past_title')}</h2>
+          {#each pastRecs as rec (rec.id)}
+            <TargetsCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
+          {/each}
+        </section>
       {/if}
     {/if}
   </div>

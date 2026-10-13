@@ -18,6 +18,14 @@
   import { foldText } from '../lib/search-text.js';
   import { fold } from '../lib/fold.js';
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
+  import TargetsCard from '../components/coaching/TargetsCard.svelte';
+  import { coachTab, coachingState, coachRecommendations, loadCoachRecommendations } from '../stores/coaching.js';
+  import { coachNameFor, goalsCardRecommendation } from '../lib/coaching-view.js';
+
+  // A coach's recommended targets: only for someone with a coach (nobody
+  // else asks for anything, and Goals looks as it always did for them).
+  $: if ($coachTab) loadCoachRecommendations({ refresh: true }).catch(() => {});
+  $: _coachRec = $coachTab ? goalsCardRecommendation($coachRecommendations) : null;
 
 
   // Mirror settings/Goals.svelte: any wearable that reports calorie burn
@@ -154,6 +162,8 @@
   function applyTemplate(tpl) {
     goals.set(_migrateKilojoulesGoal({ ...tpl.goals }));
     if (tpl.waterGoalMl != null) waterGoalMl.set(tpl.waterGoalMl);
+    // A template saved before a coach's change also holds the calorie mode.
+    if (tpl.calorieGoalMode) calorieGoalMode.set(tpl.calorieGoalMode);
     showApplyConfirm = null;
     activeTab = 'yours';
     showSuccess($_('goals.toast.template_applied', { values: { name: tpl.name } }));
@@ -792,6 +802,10 @@
 
     <!-- ─── CENTER PANE ─────────────────────────────────────────────────── -->
     <div class="goals-main">
+
+    {#if _coachRec && activeTab === 'yours'}
+      <TargetsCard rec={_coachRec} coachName={coachNameFor($coachingState, _coachRec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
+    {/if}
 
     <!-- ── Adaptive TDEE readiness card (shown only when adaptive mode is on) ── -->
     {#if activeTab === 'yours' && $calorieGoalMode === 'adaptive' && _adaptiveLoaded}

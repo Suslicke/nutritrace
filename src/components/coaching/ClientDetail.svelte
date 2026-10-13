@@ -10,6 +10,7 @@
   import { formatDay, localDay, shiftDay, todayLocal, weekday, weightIn, coachingErrorText } from '../../lib/coaching-view.js';
   import WeightTrend from './WeightTrend.svelte';
   import Conversation from './Conversation.svelte';
+  import TargetsEditor from './TargetsEditor.svelte';
 
   export let row;            // the list row: { id, status, client: { id, name }, ... }
   export let showBack = true;
@@ -24,7 +25,16 @@
   let loadedFor = null;
 
   $: clientId = row?.client?.id;
-  $: if (clientId && clientId !== loadedFor) { loadedFor = clientId; tab = 'overview'; dayDate = todayLocal(); day = null; loadOverview(); }
+  $: if (clientId && clientId !== loadedFor) { loadedFor = clientId; tab = 'overview'; dayDate = todayLocal(); day = null; loadOverview(); loadRecs(); }
+
+  // What this coach recommended to this client (the Targets tab and the
+  // cards in the conversation).
+  let recs = [];
+  async function loadRecs() {
+    const id = clientId;
+    try { const r = await NtApi.get(`/api/coaching/clients/${id}/recommendations`); if (id === clientId) recs = r || []; }
+    catch { /* offline: the kept copy, if any, came back already */ }
+  }
   $: if (tab === 'diary' && clientId && (!day || day.date !== dayDate || day._for !== clientId)) loadDay();
 
   async function loadOverview() {
@@ -94,13 +104,16 @@
   <div class="cd-tabs" role="tablist">
     <button class="cd-tab" class:active={tab === 'overview'} role="tab" aria-selected={tab === 'overview'} on:click={() => tab = 'overview'}>{$_('coaching.clients.tab_overview')}</button>
     <button class="cd-tab" class:active={tab === 'diary'} role="tab" aria-selected={tab === 'diary'} on:click={() => tab = 'diary'}>{$_('coaching.clients.tab_diary')}</button>
+    <button class="cd-tab" class:active={tab === 'targets'} role="tab" aria-selected={tab === 'targets'} on:click={() => tab = 'targets'}>{$_('coaching.clients.tab_targets')}</button>
     <button class="cd-tab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} on:click={() => tab = 'chat'}>
       {$_('coaching.clients.tab_conversation')}{#if row.unread && tab !== 'chat'} <span class="cd-unread" aria-label={$_('coaching.unread', { values: { n: row.unread } })}>{row.unread}</span>{/if}
     </button>
   </div>
 
   {#if tab === 'chat'}
-    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} />
+    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} />
+  {:else if tab === 'targets'}
+    <TargetsEditor {row} weights={overview?.weights || []} recommendations={recs} on:sent={loadRecs} />
   {:else if tab === 'overview'}
     {#if overviewErr}
       <p class="cd-msg">{overviewErr}</p>

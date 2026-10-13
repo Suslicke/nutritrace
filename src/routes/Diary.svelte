@@ -60,6 +60,8 @@
            forceMobileLayout } from '../stores/settings.js';
   import { dayActivity, activitySummary, loadActivity, deleteActivity } from '../stores/activity.js';
   import WaterBanner  from '../components/banners/WaterBanner.svelte';
+  import DiaryCoachCard from '../components/coaching/DiaryCoachCard.svelte';
+  import { coachTab } from '../stores/coaching.js';
   import { editorState } from '../stores/editorState.js';
   import { NtApi } from '../lib/api.js';
   import { DB, localDateStr } from '../lib/db.js';
@@ -2102,6 +2104,8 @@
       </div>
     {/if}
     <!-- Intermittent fasting widget — opt-in via Settings → Diary -->
+    <!-- A coach's new targets, once (only for someone with a coach). -->
+    {#if $coachTab}<DiaryCoachCard />{/if}
     {#if $fastingEnabled}
       <FastingWidget />
     {/if}

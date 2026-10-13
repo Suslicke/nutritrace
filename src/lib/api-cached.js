@@ -422,7 +422,7 @@ export const NtApiCached = {
 // server and say so. The server's own message comes through (this person
 // can't take a request, already answered), not just a status code.
 const _COACHING = /^\/api\/coaching\//;
-const _COACH_KEEP = /^\/api\/coaching\/clients(\?|$)|^\/api\/coaching\/clients\/\d+\/(overview|diary\/\d{4}-\d{2}-\d{2})(\?|$)/;
+const _COACH_KEEP = /^\/api\/coaching\/clients(\?|$)|^\/api\/coaching\/clients\/\d+\/(overview|targets|recommendations|diary\/\d{4}-\d{2}-\d{2})(\?|$)/;
 const _COACH_PREFIX = 'nt:coach-read:';
 const _COACH_MAX = 60;
 const _coachKey = (path) => `${_COACH_PREFIX}${localStorage.getItem('wl:userId') || ''}:${String(path).replace(/([?&])today=\d{4}-\d{2}-\d{2}(&|$)/, (_m, a, b) => (b ? a : '')).replace(/[?&]$/, '')}`;

@@ -127,6 +127,32 @@ test('the day\'s targets as the Diary resolves them (goal.achieved and the coach
   assert.deepEqual(dayTargets({ calories: 1800, fat: 60 }, '2026-10-13'), { calories: 1800, proteins: null, carbohydrates: null, fat: 60 }, 'plain numbers still read');
 });
 
+test('recommended targets: the comparison, the mode, a recommendation of a mode alone', async () => {
+  const t = await import('../src/lib/coach-targets.js');
+  const now = { calories: { sharedGoal: true, max: 2000, days: Array(7).fill(2000) }, proteins: { sharedGoal: true, isPercent: true, max: 30, days: Array(7).fill(30) } };
+  const rec = { goals: { calories: { sharedGoal: true, max: 1800, days: Array(7).fill(1800) }, proteins: { sharedGoal: false, days: [140, 150, 150, 150, 150, 150, 160], max: 160 } } };
+  const rows = t.comparisonRows(now, rec, 2); // a Tuesday
+  assert.deepEqual(rows.map((r) => [r.key, r.current, r.proposed, r.diff]), [['calories', 2000, 1800, -200], ['proteins', 150, 150, 0]]);
+  assert.equal(rows[1].currentPercent, 30, 'the percent shows beside its grams');
+  assert.equal(rows[1].byWeekday, true);
+  assert.deepEqual(rows[1].proposedDays, [140, 150, 150, 150, 150, 150, 160]);
+  assert.equal(t.acceptSwitchesToFixed('adaptive', rec), true);
+  assert.equal(t.acceptSwitchesToFixed('fixed', rec), false);
+  assert.equal(t.acceptSwitchesToFixed('adaptive', { mode: 'adaptive', goals: rec.goals }), false, 'a recommended mode is used as it is');
+  const modeOnly = t.cleanTargetsPayload({ mode: 'adaptive' });
+  assert.deepEqual(modeOnly.payload, { goals: {}, mode: 'adaptive' });
+  assert.deepEqual(t.applyTargets(now, 'fixed', modeOnly.payload), { goals: now, mode: 'adaptive', modeChanged: true });
+  assert.ok(t.cleanTargetsPayload({ goals: { calories: { max: 0 } } }).error, 'zero is not a target');
+});
+
+test('Goals and the Diary add nothing for people not in coaching', () => {
+  const goalsPage = read('../src/routes/Goals.svelte');
+  assert.match(goalsPage, /\$: if \(\$coachTab\) loadCoachRecommendations\(\{ refresh: true \}\)/);
+  assert.match(goalsPage, /\$: _coachRec = \$coachTab \? goalsCardRecommendation\(\$coachRecommendations\) : null;/);
+  assert.match(read('../src/routes/Diary.svelte'), /\{#if \$coachTab\}<DiaryCoachCard \/>\{\/if\}/);
+  assert.match(store, /if \(!get\(coachingSupported\) \|\| !showsCoachTab\(true, s\)\) \{ coachRecommendations\.set\(\[\]\); return \[\]; \}/);
+});
+
 test('no request or timer for people not in coaching', () => {
   // The state comes with /me, the fingerprint with the settings refresh the
   // app already makes; the store asks again only when the fingerprint moved.
