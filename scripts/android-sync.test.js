@@ -1641,5 +1641,5 @@ test('a sent recipe accepted offline on the phone: the copy is made on the serve
   assert.deepEqual(r.before, [], 'no copy while offline');
   assert.deepEqual(r.recipes, ['Sent Bowl'], 'the copy came down');
   assert.deepEqual(r.foods, [['coach', `food:${oats.id}`]], 'with its ingredient\'s food');
-  assert.deepEqual(q(`SELECT name, source_id FROM meals WHERE user_id = ?`, CL.id), [{ name: 'Sent Bowl', source_id: bowl.id }]);
+  assert.deepEqual(q(`SELECT name, source_app, source_external_id FROM meals WHERE user_id = ?`, CL.id), [{ name: 'Sent Bowl', source_app: 'coach', source_external_id: `meal:${bowl.id}:${rec.id}` }]);
 });

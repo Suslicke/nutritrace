@@ -884,7 +884,9 @@
           );
         }
       }
-      if (meal.id) await NtApi.updateMeal(meal.id, item);
+      // Sharing is set by Share (or Bulk Share), never by saving: an older
+      // copy here (a draft, an older load) must not undo it.
+      if (meal.id) { const { visibility: _v, _specific_users: _s, ...changes } = item; await NtApi.updateMeal(meal.id, changes); }
       else await NtApi.createMeal(item);
       clearMealEditorState();
       // #157: draft persistence — clear the localStorage draft now
@@ -1050,7 +1052,7 @@
           <span class="material-symbols-rounded ct-source-icon">restaurant_menu</span>
           <div class="ct-source-text">
             <span class="ct-source-label">
-              {meal.source_app === 'cooktrace' ? 'From CookTrace' : `From ${meal.source_app}`}
+              {meal.source_app === 'cooktrace' ? 'From CookTrace' : meal.source_app === 'coach' ? $_('coaching.send.from_coach') : `From ${meal.source_app}`}
             </span>
             {#if meal.source_url}
               <a class="ct-source-link" href={meal.source_url} target="_blank" rel="noopener noreferrer">

@@ -202,6 +202,9 @@ test('the editors: Share only when an admin has sharing on, Send to Client only 
   const meal = read('../src/routes/MealEditor.svelte').replace(/\r/g, '');
   assert.match(meal, /\$: _canSend = \$clientsTab && \(Number\(\$coachingState\?\.as_coach\?\.active\) \|\| 0\) > 0 && !\(isNative && !getServerUrl\(\)\);/);
   assert.match(meal, /\{#if meal\.id && !_readOnly && _canSend\}/);
+  // Saving never sends sharing: an older copy in the editor can't undo it.
+  assert.match(read('../src/routes/FoodEditor.svelte'), /const \{ visibility: _v, _specific_users: _s, \.\.\.changes \} = item;[\s\S]*?NtApi\.updateFood\(food\.id, changes\)/);
+  assert.match(read('../src/routes/MealEditor.svelte'), /if \(meal\.id\) \{ const \{ visibility: _v, _specific_users: _s, \.\.\.changes \} = item; await NtApi\.updateMeal\(meal\.id, changes\); \}/);
   // Whether sharing is on comes from what the Foods page and the meal editor
   // already ask: the food editor makes no request of its own for it.
   assert.doesNotMatch(read('../src/routes/FoodEditor.svelte'), /getSharingStatus/);
@@ -209,6 +212,8 @@ test('the editors: Share only when an admin has sharing on, Send to Client only 
   const share = read('../src/lib/share-item.js');
   assert.match(share, /NtApi\.patch\(`\/api\/\$\{kind\}\/\$\{sid\}\/share`/);
   assert.match(share, /serverIdOf\(item\)/);
+  assert.match(share, /row\.sync_status === 'pending'/, 'on Android, an item with changes not sent waits');
+  assert.match(share, /isTempId\(sid\)/, 'in the browser, one made offline waits');
 });
 
 test('Goals and the Diary add nothing for people not in coaching', () => {

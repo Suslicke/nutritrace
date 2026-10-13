@@ -88,11 +88,11 @@
         <button class="btn btn-primary" disabled={busy} on:click={() => answer('accepted')}>{$_('coaching.targets.accept')}</button>
       </div>
     {/if}
+  {:else if rec.sync_status === 'pending'}
+    <!-- Answered with no connection: it goes (and an accepted copy comes) once back online. -->
+    <p class="mc-status">{rec.status === 'accepted' ? $_('coaching.send.copy_waiting', { values: { name: coachName } }) : $_('coaching.targets.answer_waiting', { values: { name: coachName } })}</p>
   {:else}
     <p class="mc-status">{$_(`coaching.send.client_status_${rec.status}`)}</p>
-  {/if}
-  {#if !coachView && rec.sync_status === 'pending'}
-    <p class="mc-status">{$_('coaching.send.copy_waiting', { values: { name: coachName } })}</p>
   {/if}
 </section>
 

@@ -86,18 +86,24 @@ const recipeOf = (who) => ok(who, 'GET', '/api/meals?recipes=1');
 
 test('a coach sends their own recipe or meal, with sharing off; only their own, of the kind it is', { skip: !ready }, async () => {
   assert.equal((await ok('client', 'GET', '/api/app-config/sharing')).sharing_enabled, false, 'sharing is off');
-  const oats = await ok('coach', 'POST', '/api/foods', { name: 'Coach Oats', portion: 50, unit: 'g', nutrition: { calories: 190, proteins: 6.5 } });
+  const oats = await ok('coach', 'POST', '/api/foods', { name: 'Coach Oats', portion: 50, unit: 'g', nutrition: { calories: 190, proteins: 6.5 }, notes: 'buy at the market on Fridays' });
+  // A food of the client's own, in the coach's meal (shared with the coach once).
+  const honey = await ok('client', 'POST', '/api/foods', { name: 'Cleo Honey', portion: 20, unit: 'g', nutrition: { calories: 60 } });
+  ids.honey = honey.id;
   const skyr = await ok('coach', 'POST', '/api/foods', { name: 'Skyr', portion: 150, unit: 'g', nutrition: { calories: 95, proteins: 16 }, barcode: '5701234567893' });
   // The client already has the same Skyr (same barcode).
   ids.clientSkyr = (await ok('client', 'POST', '/api/foods', { name: 'My Skyr', portion: 150, unit: 'g', nutrition: { calories: 95 }, barcode: '5701234567893' })).id;
   const bowl = await ok('coach', 'POST', '/api/meals', { name: 'Protein Bowl', is_recipe: true, portion: 300, unit: 'g', servings: 2, nutrition: { calories: 285, proteins: 22.5 },
     items: [{ ...oats, quantity: 1, visibility: 'private', user_id: ids.coach }, { ...skyr, quantity: 1 }], notes: 'Mix the night before', img_url: '/uploads/bowl.jpg' });
-  const breakfast = await ok('coach', 'POST', '/api/meals', { name: 'Quick Breakfast', items: [{ ...oats, quantity: 2 }], nutrition: { calories: 380 } });
+  const breakfast = await ok('coach', 'POST', '/api/meals', { name: 'Quick Breakfast', items: [{ ...oats, quantity: 2 }, { ...honey, quantity: 1 }], nutrition: { calories: 440 } });
   const theirs = await ok('coach2', 'POST', '/api/meals', { name: 'Not Mine', is_recipe: true, items: [], nutrition: {} });
   Object.assign(ids, { oats: oats.id, skyr: skyr.id, bowl: bowl.id, breakfast: breakfast.id });
 
   assert.equal((await call('coach', 'POST', recPath(), { kind: 'recipe', meal_id: theirs.id })).status, 404, 'another coach\'s');
-  assert.equal((await call('coach', 'POST', recPath(), { kind: 'meal', meal_id: bowl.id })).status, 400, 'a recipe sent as a meal');
+  // Its kind is the saved one's, whatever the editor said.
+  const asMeal = await ok('coach', 'POST', recPath(), { kind: 'meal', meal_id: bowl.id });
+  assert.equal(asMeal.kind, 'recipe');
+  await ok('client', 'POST', `/api/coaching/recommendations/${asMeal.id}/answer`, { status: 'declined' });
   assert.equal((await call('other', 'POST', recPath(), { kind: 'recipe', meal_id: bowl.id })).status >= 400, true, 'not their coach');
   received.length = 0;
   const sent = await ok('coach', 'POST', recPath(), { kind: 'recipe', meal_id: bowl.id, note: 'Try this' });
@@ -107,6 +113,7 @@ test('a coach sends their own recipe or meal, with sharing off; only their own, 
   assert.deepEqual([m.name, m.portion, m.unit, m.servings, m.notes, m.img_url], ['Protein Bowl', 300, 'g', 2, 'Mix the night before', '/uploads/bowl.jpg']);
   assert.deepEqual(m.items.map((i) => [i.name, i.quantity, i.source?.id]), [['Coach Oats', 1, oats.id], ['Skyr', 1, skyr.id]]);
   assert.ok(!('user_id' in m.items[0]) && !('visibility' in m.items[0]), 'what each is, never whose');
+  assert.ok(!('notes' in m.items[0]), 'never the coach\'s own notes on their food');
   assert.ok(await waitFor(() => received.some((p) => p.path === '/push-client' && p.body === 'Sam Coach sent you a recommendation.')));
   const conv = await ok('client', 'GET', `/api/coaching/pairings/${ids.pairing}/messages`);
   assert.ok(conv.messages.some((x) => x.recommendation_id === sent.id), 'in the conversation');
@@ -123,11 +130,14 @@ test('Accept: the client\'s own copy, with its source and its ingredients\' food
   const copies = (await recipeOf('client')).filter((r) => r.name === 'Protein Bowl');
   assert.equal(copies.length, 1);
   const c = copies[0];
-  assert.deepEqual([c.source_id, c.visibility, c.portion, c.servings, c.notes, c.img_url], [ids.bowl, 'private', 300, 2, 'Mix the night before', '/uploads/bowl.jpg']);
+  assert.deepEqual([c.source_app, c.source_external_id, c.source_id ?? null, c.visibility, c.portion, c.servings, c.notes, c.img_url],
+    ['coach', `meal:${ids.bowl}:${ids.sent}`, null, 'private', 300, 2, 'Mix the night before', '/uploads/bowl.jpg'], 'remembers it came from the coach\'s recipe');
+  ids.copy = c.id;
   const foods = await ok('client', 'GET', '/api/foods');
   const oatsCopy = foods.find((f) => f.name === 'Coach Oats');
   assert.equal(oatsCopy.source_app, 'coach');
   assert.equal(oatsCopy.source_external_id, `food:${ids.oats}`);
+  assert.equal(oatsCopy.notes ?? null, null);
   assert.deepEqual(c.items.map((i) => [i.name, i.id, i.food_server_id]), [['Coach Oats', oatsCopy.id, oatsCopy.id], ['Skyr', ids.clientSkyr, ids.clientSkyr]], 'their own Skyr, by barcode; a copy of the oats');
   assert.equal(foods.filter((f) => f.barcode === '5701234567893').length, 1, 'no second Skyr');
   assert.equal((await call('client', 'POST', `/api/coaching/recommendations/${ids.sent}/answer`, { status: 'accepted' })).status, 409);
@@ -150,9 +160,18 @@ test('an answer sent offline makes the copy; the pull brings it; backup keeps it
   const pull = await ok('client', 'GET', `/api/sync/pull?since=${encodeURIComponent(t0)}`);
   const pulledMeal = pull.meals.find((x) => x.name === 'Quick Breakfast');
   assert.ok(pulledMeal, 'the copy comes down');
-  assert.equal(pulledMeal.source_id, ids.breakfast);
+  assert.equal(pulledMeal.source_external_id, `meal:${ids.breakfast}:${meal.id}`);
   const oatsCopy = (await ok('client', 'GET', '/api/foods')).find((f) => f.name === 'Coach Oats');
-  assert.deepEqual(pulledMeal.items.map((i) => [i.id, i.quantity]), [[oatsCopy.id, 2]], 'the oats copied before, used again');
+  assert.deepEqual(pulledMeal.items.map((i) => [i.id, i.quantity]), [[oatsCopy.id, 2], [ids.honey, 1]], 'the oats copied before, used again; their own honey, not a copy');
+  assert.equal((await ok('client', 'GET', '/api/foods')).filter((f) => f.name === 'Cleo Honey').length, 1);
+  // Save a Copy of the coach's shared original (From Others) works as before:
+  // a copy of it, not the one the coach sent.
+  await ok('client', 'PUT', '/api/app-config', { key: 'sharing_enabled', value: 'true' });
+  await ok('coach', 'PATCH', `/api/meals/${ids.bowl}/share`, { visibility: 'group' });
+  const saved = await ok('client', 'POST', `/api/meals/${ids.bowl}/copy`);
+  assert.notEqual(saved.id, ids.copy);
+  assert.equal(saved.source_id, ids.bowl);
+  await ok('client', 'PUT', '/api/app-config', { key: 'sharing_enabled', value: 'false' });
   // Backup holds the copies; the coach's account going takes the
   // recommendations, never the client's own copies.
   const AdmZip = serverRequire('adm-zip');
@@ -162,6 +181,6 @@ test('an answer sent offline makes the copy; the pull brings it; backup keeps it
   assert.ok(data.coach_recommendations.some((r) => r.kind === 'recipe'));
   await ok('client', 'DELETE', `/api/auth/users/${ids.coach}`);
   assert.deepEqual(await ok('client', 'GET', '/api/coaching/recommendations'), []);
-  assert.deepEqual((await ok('client', 'GET', '/api/meals?recipes=1')).map((r) => r.name), ['Protein Bowl']);
+  assert.deepEqual((await ok('client', 'GET', '/api/meals?recipes=1')).map((r) => r.name), ['Protein Bowl v2', 'Protein Bowl'].sort(), 'their copies stay');
   assert.ok((await ok('client', 'GET', '/api/foods')).some((f) => f.name === 'Coach Oats'));
 });

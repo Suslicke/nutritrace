@@ -744,8 +744,11 @@
         if (Object.keys(flags).length) _nutrition._derived = flags;
       }
       const item = { ...food, nutrition: _nutrition };
+      // Sharing is set by Share (or Bulk Share), never by saving: an older
+      // copy here (a draft, an older load) must not undo it.
+      const { visibility: _v, _specific_users: _s, ...changes } = item;
       const saved = food.id
-        ? await NtApi.updateFood(food.id, item)
+        ? await NtApi.updateFood(food.id, changes)
         : await NtApi.createFood(item);
       item.id = saved.id;
       // If called from diary pick mode, also add to diary

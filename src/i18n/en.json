@@ -2386,7 +2386,10 @@
     "failed": "Couldn't update sharing. Try again.",
     "loading": "Loading…",
     "needs_connection": "Sharing needs a connection to your server. Try again once you're back online.",
-    "not_synced": "This item hasn't reached your server yet. Try again after it syncs."
+    "not_synced": "This item hasn't reached your server yet, or has changes that haven't. Try again after it syncs.",
+    "off": "Sharing is turned off on this server.",
+    "people": "Members Who Can See It",
+    "no_people": "No other members on this server yet."
   },
   "coaching": {
     "loading": "Loading…",
@@ -2473,7 +2476,9 @@
       "note_placeholder": "Why this one",
       "send": "Send",
       "sent": "Sent to {name}",
-      "not_synced": "This hasn't reached your server yet. Try again after it syncs.",
+      "not_synced": "This hasn't reached your server yet, or has changes that haven't. Try again after it syncs.",
+      "saved_version": "The version saved on your server is sent: save your changes first.",
+      "from_coach": "From Your Coach",
       "card_meal": "Meal from {name}",
       "card_recipe": "Recipe from {name}",
       "kind_meal": "Meal you sent",
@@ -2484,7 +2489,7 @@
       "accepted_recipe": "Added to your recipes",
       "accepted_offline": "Accepted. Your copy arrives when you're back online, and {name} sees your answer then.",
       "declined": "Declined",
-      "refused": "This was withdrawn when coaching ended.",
+      "refused": "This was already answered or withdrawn.",
       "status_pending": "Waiting for an answer",
       "status_accepted": "Accepted",
       "status_declined": "Declined",

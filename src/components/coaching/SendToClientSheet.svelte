@@ -5,7 +5,7 @@
   import { _ } from 'svelte-i18n';
   import Sheet from '../ui/Sheet.svelte';
   import { NtApi } from '../../lib/api.js';
-  import { serverIdOf } from '../../lib/coach-plans.js';
+  import { serverIdFor } from '../../lib/share-item.js';
   import { coachingErrorText } from '../../lib/coaching-view.js';
   import { showSuccess, showError } from '../../stores/toast.js';
 
@@ -13,7 +13,7 @@
   export let meal = null;
   export let isRecipe = false;
 
-  let clients = null, err = '', pick = null, note = '', busy = false;
+  let clients = null, err = '', pick = null, note = '', busy = false, sid = null;
 
   $: if (open && clients === null && !err) load();
   $: if (!open) { clients = null; err = ''; note = ''; }
@@ -21,10 +21,11 @@
   async function load() {
     try {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) throw Object.assign(new Error('offline'), { offline: true });
-      if (serverIdOf(meal) == null) throw Object.assign(new Error('not synced'), { code: 'not_synced' });
+      sid = await serverIdFor('meals', meal);
       const rows = await NtApi.get('/api/coaching/clients');
       clients = (rows || []).filter(r => r.status === 'active');
-      pick = clients[0]?.client?.id ?? null;
+      // With several clients, nobody is chosen for you.
+      pick = clients.length === 1 ? clients[0].client.id : null;
     } catch (e) {
       err = e?.code === 'not_synced' ? $_('coaching.send.not_synced') : coachingErrorText(e, $_);
       clients = [];
@@ -34,7 +35,7 @@
     if (busy || pick == null) return;
     busy = true;
     try {
-      await NtApi.post(`/api/coaching/clients/${pick}/recommendations`, { kind: isRecipe ? 'recipe' : 'meal', meal_id: serverIdOf(meal), note: note.trim() || undefined });
+      await NtApi.post(`/api/coaching/clients/${pick}/recommendations`, { kind: isRecipe ? 'recipe' : 'meal', meal_id: sid, note: note.trim() || undefined });
       const name = clients.find(c => c.client.id === pick)?.client?.name || '';
       showSuccess($_('coaching.send.sent', { values: { name } }));
       open = false;
@@ -53,6 +54,7 @@
       <p class="sc-msg">{$_('coaching.send.no_clients')}</p>
     {:else}
       <p class="sc-msg">{$_(isRecipe ? 'coaching.send.intro_recipe' : 'coaching.send.intro_meal', { values: { name: meal?.name || '' } })}</p>
+      <p class="sc-hint">{$_('coaching.send.saved_version')}</p>
       <fieldset class="sc-clients">
         <legend class="sc-label">{$_('coaching.send.to')}</legend>
         {#each clients as c (c.id)}
@@ -71,6 +73,7 @@
   .sc-msg { margin: 0; font-size: 14px; color: var(--text-2); }
   .sc-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
   .sc-clients { border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .sc-client { display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 36px; }
+  .sc-client { display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 44px; }
+  .sc-hint { margin: 0; font-size: 12px; color: var(--text-3); }
   .sc textarea { font: inherit; resize: vertical; }
 </style>
