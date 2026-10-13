@@ -1259,6 +1259,10 @@
     }
   }
 
+  // Set while the add sheet holds a coach's day plan item (see onMount).
+  let _planSource = null;
+  $: if (!showQtyPrompt) _planSource = null;
+
   async function _addFoodToDiaryNoNav(food, qty) {
     const { addDiaryItem } = await import('../stores/diary.js');
     let savedFood = food;
@@ -1273,6 +1277,7 @@
       quantity: qty,
       nutrition: savedFood.nutrition
     };
+    if (_planSource) item.source = _planSource;
     await addDiaryItem(item, Number(pickMeal) || 0, pickDate || undefined);
   }
 
@@ -1842,6 +1847,20 @@
         }
       };
       document.addEventListener('keydown', _onKeyGlobal);
+    }
+    // A coach's day plan item, tapped on the Diary: the usual add sheet,
+    // filled in with the plan's amount; what it adds is marked with the plan.
+    if (editorState.planLog) {
+      const plan = editorState.planLog;
+      editorState.planLog = null;
+      if (pickMode) {
+        promptFood = plan.food;
+        promptServings = plan.quantity || 1;
+        promptPortion = plan.food.portion || 100;
+        promptUnit = plan.food.unit || 'g';
+        showQtyPrompt = true;
+        _planSource = plan.source;
+      }
     }
     // Restore tab before load so the right list is fetched
     if (editorState.foodsActiveTab != null) {

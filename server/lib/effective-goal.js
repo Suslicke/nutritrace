@@ -9,7 +9,7 @@ import { computeAdaptiveTdee } from './adaptive-tdee.js';
 import { dayTargets } from '../../src/lib/goal-resolver.js';
 
 function _setting(userId, key, fallback) {
-  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
+  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ? AND deleted_at IS NULL').get(userId, key);
   if (!row || row.value == null) return fallback;
   try { return JSON.parse(row.value); } catch { return row.value; }
 }

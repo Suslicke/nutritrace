@@ -6,7 +6,8 @@
  * and syncs it like any other change, so it also works offline). The server
  * keeps the recommendation and its answer: the history both sides see.
  *
- * Kinds: 'targets' now; day plans, meals and recipes reuse this table.
+ * Kinds: 'targets' and 'day_plan' (one per date); meals and recipes reuse
+ * this table later.
  */
 import crypto from 'crypto';
 import db from '../db.js';
@@ -14,6 +15,7 @@ import { logger } from '../logger.js';
 import { personName } from './coaching.js';
 import { pushNotifyDefaultOn } from './push-notify.js';
 import { cleanTargetsPayload } from '../../src/lib/coach-targets.js';
+import { cleanPlanPayload, cleanPlanDates, loggedMeals } from '../../src/lib/coach-plans.js';
 
 export const NOTE_MAX = 500;
 const _json = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
@@ -64,6 +66,37 @@ export function recommendTargets(pairing, coachId, body) {
 }
 
 /**
+ * The coach sends a day plan for one date, or the same plan for several
+ * (Copy to Other Days). One plan per date: a plan still waiting for an
+ * answer on that date is replaced. Each appears in the conversation; the
+ * client gets one notification.
+ */
+export function recommendDayPlan(pairing, coachId, body) {
+  const { payload, error } = cleanPlanPayload(body?.payload);
+  if (error) throw _bad(error);
+  const { dates, error: dateError } = cleanPlanDates(body);
+  if (dateError) throw _bad(dateError);
+  const note = _note(body?.note);
+  const ids = db.transaction(() => dates.map(date => {
+    db.prepare(`
+      UPDATE coach_recommendations SET status = 'replaced', updated_at = datetime('now')
+       WHERE pairing_id = ? AND kind = 'day_plan' AND date = ? AND status = 'pending'
+    `).run(pairing.id, date);
+    const rid = db.prepare(`
+      INSERT INTO coach_recommendations (pairing_id, coach_id, client_id, kind, date, payload, note)
+      VALUES (?, ?, ?, 'day_plan', ?, ?, ?)
+    `).run(pairing.id, coachId, pairing.client_id, date, JSON.stringify(payload), note).lastInsertRowid;
+    db.prepare(`
+      INSERT INTO coach_messages (uuid, pairing_id, sender_id, body, recommendation_id)
+      VALUES (?, ?, ?, NULL, ?)
+    `).run(crypto.randomUUID(), pairing.id, coachId, rid);
+    return rid;
+  }))();
+  _notifyClient(pairing, coachId);
+  return ids.map(id => recommendationOut(_row(id)));
+}
+
+/**
  * The client's answer: accepted or declined, with an optional note. Only a
  * pending recommendation of an active pairing can be answered; otherwise a
  * 409 carries its status now (replaced, withdrawn, already answered).
@@ -88,8 +121,19 @@ export function answerRecommendation(id, clientId, { status, response_note } = {
   return recommendationOut(out);
 }
 
+/**
+ * What a coach recommended in this pairing. Accepted day plans say which of
+ * their meals the client logged (from that day's diary, as the client's
+ * card works it out).
+ */
 export function listForPairing(pairingId) {
-  return db.prepare('SELECT * FROM coach_recommendations WHERE pairing_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC').all(pairingId).map(recommendationOut);
+  const rows = db.prepare('SELECT * FROM coach_recommendations WHERE pairing_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC').all(pairingId).map(recommendationOut);
+  const dayItems = db.prepare('SELECT items FROM diary WHERE user_id = ? AND date = ? AND deleted_at IS NULL');
+  for (const r of rows) {
+    if (r.kind !== 'day_plan' || r.status !== 'accepted') continue;
+    r.logged_meals = [...loggedMeals(_json(dayItems.get(r.client_id, r.date)?.items, []), r.id)].sort((a, b) => a - b);
+  }
+  return rows;
 }
 
 /** Everything recommended to this client, in any of their pairings. */
@@ -110,6 +154,7 @@ async function _notifyClient(pairing, coachId) {
 async function _notifyCoach(r) {
   try {
     const who = _name(r.client_id);
-    await pushNotifyDefaultOn(r.coach_id, 'notifClientAnswer', 'Coaching', `${who} ${r.status === 'accepted' ? 'accepted' : 'declined'} your recommended targets.`, 5);
+    const what = r.kind === 'day_plan' ? `your day plan for ${r.date}` : 'your recommended targets';
+    await pushNotifyDefaultOn(r.coach_id, 'notifClientAnswer', 'Coaching', `${who} ${r.status === 'accepted' ? 'accepted' : 'declined'} ${what}.`, 5);
   } catch (e) { logger.warn(`[coaching] answer notification failed: ${e?.message || e}`); }
 }

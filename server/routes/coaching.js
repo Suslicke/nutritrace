@@ -26,7 +26,7 @@ import {
   notifyMessage, notifyClientAnswer, notifyRequest, pairingById, photoPath, PHOTO_TYPES,
 } from '../lib/coaching-messages.js';
 import { UPLOAD_RESPONSE_HEADERS } from '../lib/upload-paths.js';
-import { recommendTargets, answerRecommendation, listForPairing, listForClient } from '../lib/coaching-recommendations.js';
+import { recommendTargets, recommendDayPlan, answerRecommendation, listForPairing, listForClient } from '../lib/coaching-recommendations.js';
 import { computeAdaptiveTdee } from '../lib/adaptive-tdee.js';
 import { TARGET_KEYS } from '../../src/lib/coach-targets.js';
 
@@ -349,9 +349,27 @@ router.get('/clients/:clientId/recommendations', wrap((req, res) => {
   res.json(listForPairing(req.pairing.id));
 }));
 router.post('/clients/:clientId/recommendations', wrap((req, res) => {
-  if ((req.body?.kind || 'targets') !== 'targets') return res.status(400).json({ error: 'Only targets can be recommended for now.' });
-  try { res.json(recommendTargets(req.pairing, req.user.id, req.body || {})); }
-  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  const kind = req.body?.kind || 'targets';
+  if (!['targets', 'day_plan'].includes(kind)) return res.status(400).json({ error: 'Only targets and day plans can be recommended for now.' });
+  try {
+    // A day plan answers with every plan made (one per date).
+    res.json(kind === 'day_plan' ? recommendDayPlan(req.pairing, req.user.id, req.body || {}) : recommendTargets(req.pairing, req.user.id, req.body || {}));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}));
+
+// The client's foods, meals and recipes, for the day plan builder: what each
+// is, never who else can see it. Their meal names come with the diary day.
+router.get('/clients/:clientId/catalog', wrap((req, res) => {
+  const clientId = req.pairing.client_id;
+  const food = (f) => ({ id: f.id, name: f.name, brand: f.brand || null, portion: f.portion, unit: f.unit, nutrition: _json(f.nutrition, {}) || {}, barcode: f.barcode || null });
+  const foods = db.prepare(`SELECT id, name, brand, portion, unit, nutrition, barcode FROM foods WHERE user_id = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE`).all(clientId).map(food);
+  const meals = db.prepare(`SELECT id, name, portion, unit, nutrition, items, is_recipe FROM meals WHERE user_id = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE`).all(clientId);
+  const ingredient = (it) => ({ id: it?.food_server_id ?? it?.id ?? null, name: it?.name || '', brand: it?.brand || null, portion: it?.portion ?? null, unit: it?.unit || null, quantity: it?.quantity ?? 1, nutrition: it?.nutrition || {}, barcode: it?.barcode || null });
+  res.json({
+    foods,
+    meals: meals.filter(m => !m.is_recipe).map(m => ({ id: m.id, name: m.name, items: (_json(m.items, []) || []).map(ingredient) })),
+    recipes: meals.filter(m => m.is_recipe).map(m => ({ id: m.id, name: m.name, brand: null, portion: m.portion, unit: m.unit, nutrition: _json(m.nutrition, {}) || {} })),
+  });
 }));
 
 router.get('/clients/:clientId/overview', wrap((req, res) => {
@@ -371,6 +389,7 @@ router.get('/clients/:clientId/overview', wrap((req, res) => {
     since: req.pairing.responded_at,
     today,
     calorie_mode: _setting(clientId, 'calorieGoalMode', 'fixed') || 'fixed',
+    meal_names: _setting(clientId, 'mealNames', null),
     last_logged: _lastLogged(clientId),
     days,
     week: _summary(days),

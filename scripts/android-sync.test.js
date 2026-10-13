@@ -1532,3 +1532,72 @@ test('targets accepted offline but replaced meanwhile: the phone puts the goals 
   assert.equal(q(`SELECT status FROM coach_recommendations WHERE id = ?`, rec.id)[0].status, 'replaced');
   assert.deepEqual(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'goals'`, CL.id)[0].value), START);
 });
+
+// Coaching day plans (1.5): a plan comes down with the sync; accepted and
+// logged with no connection, its items are what a manual add makes on the
+// phone, the coach's food is copied into the client's catalog once (with
+// its source), and all of it reaches the server; the coach sees the meal
+// logged.
+test('a day plan accepted and logged offline on the phone: the same items as a manual add, the coach\'s food copied once, all of it on the server', async (t) => {
+  if (skip(t)) return;
+  const coach = await account('dp-coach', A), client = await account('dp-client', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+  const TODAY = day(0), OTHER = day(-1);
+  const oats = await http(client, 'POST', '/api/foods', { name: 'Oats', brand: 'Mill', portion: 50, unit: 'g', nutrition: { calories: 190, proteins: 6.5, carbohydrates: 33, fat: 3.5 } });
+  const granola = await http(coach, 'POST', '/api/foods', { name: 'Coach Granola', portion: 60, unit: 'g', nutrition: { calories: 270, proteins: 7, carbohydrates: 38, fat: 10 } });
+  const { planItemFrom } = await import('../src/lib/coach-plans.js');
+  const [plan] = await http(coach, 'POST', `/api/coaching/clients/${CL.id}/recommendations`, { kind: 'day_plan', date: TODAY, payload: { meals: [
+    { meal: 0, items: [planItemFrom(oats, 'client_food'), { ...planItemFrom(granola, 'coach_food'), quantity: 1.5 }] },
+    { meal: 2, items: [planItemFrom(oats, 'client_food')] },
+  ] } });
+  const r = phone('dayplan', client, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+    const s = await import(p.src + 'stores/settings.js');
+    await s.loadServerSettings();
+    await p.sync();
+    const cr = await import(p.src + 'lib/coach-recommendations.js');
+    const plan = (await cr.loadRecommendations()).find(x => x.id === ${plan.id});
+    const log = await import(p.src + 'lib/coach-plan-log.js');
+    const d = await import(p.src + 'stores/diary.js');
+    const { NtApi } = await import(p.src + 'lib/api.js');
+    const { loggedMeals } = await import(p.src + 'lib/coach-plans.js');
+    let answered;
+    await p.offline(async () => {
+      answered = await cr.answerPlan(plan, 'accepted');
+      await log.logPlanMeal(plan, 0);
+      // The same foods added by hand the Foods page's way, on another day.
+      const foods = await NtApi.getFoods();
+      const m = (f, q) => ({ ...f, portion: f.portion || 100, unit: f.unit || 'g', quantity: q, nutrition: f.nutrition });
+      await d.addDiaryItem(m(foods.find(f => f.name === 'Oats'), 1), 0, '${OTHER}');
+      await d.addDiaryItem(m(foods.find(f => f.name === 'Coach Granola'), 1.5), 0, '${OTHER}');
+    });
+    const local = (await NtApi.getDiaryDate('${TODAY}')).items;
+    const copies = (await NtApi.getFoods()).filter(f => f.name === 'Coach Granola').length;
+    await p.sleep(1200);
+    await p.sync();
+    await p.sleep(1200);
+    await p.sync();
+    p.done({ offline: answered.offline, localLogged: [...loggedMeals(local, ${plan.id})], copies,
+      status: (await cr.loadRecommendations()).find(x => x.id === ${plan.id}).status });`);
+  assert.equal(r.offline, true, 'the answer waited');
+  assert.deepEqual(r.localLogged, [0], 'Log This turned to Logged on the phone');
+  assert.equal(r.copies, 1);
+  assert.equal(r.status, 'accepted');
+  assert.equal(q(`SELECT status FROM coach_recommendations WHERE id = ?`, plan.id)[0].status, 'accepted');
+  const items = (date) => JSON.parse(q(`SELECT items FROM diary WHERE user_id = ? AND date = ?`, CL.id, date)[0].items);
+  const strip = (it) => { const { uuid: _u, addedAt: _a, source: _s, updatedAt: _t, ...rest } = it; return rest; };
+  assert.equal(items(TODAY).length, 2);
+  assert.deepEqual(items(TODAY).map(strip), items(OTHER).map(strip), 'the same items as a manual add');
+  assert.ok(items(TODAY).every(i => i.source === `coach:plan:${plan.id}` && typeof i.food_server_id === 'number'));
+  const copies = q(`SELECT id, source_app, source_external_id FROM foods WHERE user_id = ? AND name = 'Coach Granola' AND deleted_at IS NULL`, CL.id);
+  assert.deepEqual(copies.map(c => [c.source_app, c.source_external_id]), [['coach', `food:${granola.id}`]], 'copied once, with its source');
+  const coachView = (await http(coach, 'GET', `/api/coaching/clients/${CL.id}/recommendations`)).find(x => x.id === plan.id);
+  assert.deepEqual(coachView.logged_meals, [0]);
+});

@@ -178,6 +178,13 @@ router.post('/', wrap(async (req, res) => {
     ? (img_url.startsWith('http') || img_url.startsWith('data:'))
     : isExternalUrl(img_url));
   const localImg = _shouldLocalizeNew ? await localizeImage(img_url, { trustedOrigins: trustedNew, allowPrivate: ownerOrOptIn(req, 'ALLOW_PRIVATE_IMAGE_URLS') }) : (img_url || null);
+  // A deleted food from the same source still holds its place in the
+  // unique (source_app, source_external_id) index: it lets go, so the new
+  // one can be made (a CookTrace item, or a coach's food, deleted and added again).
+  if (cleanSourceApp && cleanSourceExtId) {
+    db.prepare(`UPDATE foods SET source_app = NULL, source_external_id = NULL WHERE user_id IS ? AND source_app = ? AND source_external_id = ? AND deleted_at IS NOT NULL`)
+      .run(u ?? null, cleanSourceApp, cleanSourceExtId);
+  }
   const result = db.prepare(
     `INSERT INTO foods (user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, visibility, source_id, nutrition_basis, alt_units, density_g_ml, source_app, source_external_id, source_url, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`

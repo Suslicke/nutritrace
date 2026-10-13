@@ -352,6 +352,14 @@ router.post('/push', wrap(async (req, res) => {
         const fKey = cleanCreateKey(f.client_key);
         const fMade = findByCreateKey('foods', u, fKey);
         if (fMade) { result.foods.push({ client_id: f.client_id, server_id: fMade.id }); continue; }
+        // The same source's food is already here (made on another device,
+        // say a coach's food copied on the web): this is that food. A
+        // deleted one lets go of its place in the unique source index.
+        if (f.source_app && f.source_external_id) {
+          const same = db.prepare(`SELECT id, deleted_at FROM foods WHERE user_id IS ? AND source_app = ? AND source_external_id = ?`).get(u ?? null, f.source_app, f.source_external_id);
+          if (same && !same.deleted_at) { result.foods.push({ client_id: f.client_id, server_id: same.id }); continue; }
+          if (same) db.prepare(`UPDATE foods SET source_app = NULL, source_external_id = NULL WHERE id = ?`).run(same.id);
+        }
         const vis = resolveNewItemVisibility(u);
         const r = db.prepare(
           `INSERT INTO foods (user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, favorite, usage_count, last_used_at, nutrition_basis, alt_units, density_g_ml, source_app, source_external_id, source_url, visibility, updated_at)

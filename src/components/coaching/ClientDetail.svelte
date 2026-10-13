@@ -1,7 +1,7 @@
 <script>
   // One client, as their coach sees them: Overview (the last 7 days against
-  // their targets, and their weight) and Diary (their days, read-only).
-  // Plans, Targets and the conversation join these tabs in later releases.
+  // their targets, and their weight), Diary (their days, read-only), Plans
+  // (day plans), Targets and the conversation.
   import { createEventDispatcher } from 'svelte';
   import { _ } from 'svelte-i18n';
   import { NtApi } from '../../lib/api.js';
@@ -11,6 +11,7 @@
   import WeightTrend from './WeightTrend.svelte';
   import Conversation from './Conversation.svelte';
   import TargetsEditor from './TargetsEditor.svelte';
+  import PlanBuilder from './PlanBuilder.svelte';
 
   export let row;            // the list row: { id, status, client: { id, name }, ... }
   export let showBack = true;
@@ -37,8 +38,8 @@
   }
   // Answers arrive on the client's side: look again when these tabs open.
   let _recTab = null;
-  $: if ((tab === 'targets' || tab === 'chat') && tab !== _recTab) { _recTab = tab; loadRecs(); }
-  $: if (tab !== 'targets' && tab !== 'chat') _recTab = null;
+  $: if ((tab === 'targets' || tab === 'chat' || tab === 'plans') && tab !== _recTab) { _recTab = tab; loadRecs(); }
+  $: if (tab !== 'targets' && tab !== 'chat' && tab !== 'plans') _recTab = null;
   $: if (tab === 'diary' && clientId && (!day || day.date !== dayDate || day._for !== clientId)) loadDay();
 
   async function loadOverview() {
@@ -108,6 +109,7 @@
   <div class="cd-tabs" role="tablist">
     <button class="cd-tab" class:active={tab === 'overview'} role="tab" aria-selected={tab === 'overview'} on:click={() => tab = 'overview'}>{$_('coaching.clients.tab_overview')}</button>
     <button class="cd-tab" class:active={tab === 'diary'} role="tab" aria-selected={tab === 'diary'} on:click={() => tab = 'diary'}>{$_('coaching.clients.tab_diary')}</button>
+    <button class="cd-tab" class:active={tab === 'plans'} role="tab" aria-selected={tab === 'plans'} on:click={() => tab = 'plans'}>{$_('coaching.clients.tab_plans')}</button>
     <button class="cd-tab" class:active={tab === 'targets'} role="tab" aria-selected={tab === 'targets'} on:click={() => tab = 'targets'}>{$_('coaching.clients.tab_targets')}</button>
     <button class="cd-tab" class:active={tab === 'chat'} role="tab" aria-selected={tab === 'chat'} on:click={() => tab = 'chat'}>
       {$_('coaching.clients.tab_conversation')}{#if row.unread && tab !== 'chat'} <span class="cd-unread" aria-label={$_('coaching.unread', { values: { n: row.unread } })}>{row.unread}</span>{/if}
@@ -115,7 +117,9 @@
   </div>
 
   {#if tab === 'chat'}
-    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} />
+    <Conversation conv={{ pairingId: row.id, side: 'coach', clientId: row.client.id }} otherName={row.client.name} recommendations={recs} mealNames={overview?.meal_names} />
+  {:else if tab === 'plans'}
+    <PlanBuilder {row} recommendations={recs} on:sent={loadRecs} />
   {:else if tab === 'targets'}
     <TargetsEditor {row} weights={overview?.weights || []} recommendations={recs} on:sent={loadRecs} />
   {:else if tab === 'overview'}
@@ -245,9 +249,10 @@
   .cd-title h2 { font-size: 19px; margin: 0; overflow-wrap: anywhere; }
   .cd-since { font-size: 13px; color: var(--text-3); }
   .cd-end { color: var(--danger); flex-shrink: 0; }
-  .cd-tabs { display: flex; border-bottom: 1px solid var(--border); margin-top: 12px; }
+  .cd-tabs { display: flex; border-bottom: 1px solid var(--border); margin-top: 12px; overflow-x: auto; scrollbar-width: none; }
+  .cd-tabs::-webkit-scrollbar { display: none; }
   .cd-tab {
-    flex: 1; padding: 10px 0; font: inherit; font-size: 14px; font-weight: 600;
+    flex: 1 0 auto; padding: 10px 8px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap;
     background: none; border: none; cursor: pointer; color: var(--text-3);
     border-bottom: 2px solid transparent;
   }

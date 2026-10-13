@@ -10,11 +10,13 @@
   import { coachingState, coachingNeedsServer, refreshCoaching, setCoachingFromServer, coachTab } from '../stores/coaching.js';
   import { confirmDialog } from '../stores/confirmDialog.js';
   import { showSuccess, showError } from '../stores/toast.js';
-  import { formatDay, localDay, coachingErrorText, coachNameFor } from '../lib/coaching-view.js';
+  import { formatDay, localDay, coachingErrorText, coachNameFor, todayLocal } from '../lib/coaching-view.js';
   import CoachingTabs from '../components/coaching/CoachingTabs.svelte';
   import CoachingNeedsServer from '../components/coaching/CoachingNeedsServer.svelte';
   import Conversation from '../components/coaching/Conversation.svelte';
   import TargetsCard from '../components/coaching/TargetsCard.svelte';
+  import PlanCard from '../components/coaching/PlanCard.svelte';
+  import { shownStatus } from '../lib/coach-plans.js';
   import { coachRecommendations, loadCoachRecommendations } from '../stores/coaching.js';
 
   const needsServer = coachingNeedsServer();
@@ -37,8 +39,10 @@
     if (!needsServer) loadCoachRecommendations({ refresh: true }).catch(() => {});
   });
   // Waiting for an answer: pinned on top. Answered: history, below.
-  $: pendingRecs = $coachRecommendations.filter(r => r.status === 'pending' && r.pairing_id === pairing?.id);
-  $: pastRecs = $coachRecommendations.filter(r => !(r.status === 'pending' && r.pairing_id === pairing?.id));
+  // A day plan past its date is Expired: history.
+  const waiting = (r, pid) => r.pairing_id === pid && shownStatus(r, todayLocal()) === 'pending';
+  $: pendingRecs = $coachRecommendations.filter(r => waiting(r, pairing?.id));
+  $: pastRecs = $coachRecommendations.filter(r => !waiting(r, pairing?.id));
   const recsOf = (pid, recs) => recs.filter(r => r.pairing_id === pid);
 
   // Nothing to show here any more (left, declined, or ended by the coach):
@@ -119,7 +123,11 @@
 
       <!-- Recommendations waiting for an answer, pinned on top. -->
       {#each pendingRecs as rec (rec.id)}
-        <TargetsCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
+        {#if rec.kind === 'day_plan'}
+          <PlanCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
+        {:else}
+          <TargetsCard {rec} coachName={coachName} on:answered={() => loadCoachRecommendations()} />
+        {/if}
       {/each}
 
       <!-- Requests waiting for an answer, pinned on top. -->
@@ -174,7 +182,11 @@
         <section class="past">
           <h2 class="past-title">{$_('coaching.targets.past_title')}</h2>
           {#each pastRecs as rec (rec.id)}
-            <TargetsCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
+            {#if rec.kind === 'day_plan'}
+              <PlanCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
+            {:else}
+              <TargetsCard {rec} compact coachName={coachNameFor($coachingState, rec.pairing_id)} on:answered={() => loadCoachRecommendations()} />
+            {/if}
           {/each}
         </section>
       {/if}

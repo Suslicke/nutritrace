@@ -155,11 +155,40 @@ test('recommended targets: the comparison, the mode, a recommendation of a mode 
   assert.ok(t.cleanTargetsPayload({ goals: { proteins: { isPercent: true, max: 60 }, fat: { isPercent: true, max: 50 } } }).error, 'percents over 100 in total');
 });
 
+test('day plans: Expired from the date, Logged from the day\'s items, the client\'s own food first', async () => {
+  const p = await import('../src/lib/coach-plans.js');
+  const rec = { id: 7, kind: 'day_plan', status: 'pending', date: '2026-10-12' };
+  assert.equal(p.shownStatus(rec, '2026-10-13'), 'expired');
+  assert.equal(p.shownStatus(rec, '2026-10-12'), 'pending');
+  assert.equal(p.shownStatus({ ...rec, status: 'accepted' }, '2026-10-13'), 'accepted', 'answered is never Expired');
+  assert.equal(p.shownStatus({ ...rec, kind: 'targets' }, '2026-10-13'), 'pending');
+  const items = [{ meal: 0, source: 'coach:plan:7' }, { meal: 2, source: 'coach:plan:7' }, { meal: 1, source: 'coach:plan:8' }, { meal: 3 }];
+  assert.deepEqual([...p.loggedMeals(items, 7)].sort(), [0, 2]);
+  // On Android a food's own id is the phone's; the server's is server_id.
+  const foods = [{ id: 3, server_id: 41, name: 'Oats' }, { id: 4, server_id: null, name: 'Granola', source_app: 'coach', source_external_id: 'food:9' }, { id: 5, server_id: 50, name: 'Shake', barcode: '4006381333931' }];
+  assert.equal(p.findOwn({ source: { kind: 'client_food', id: 41 } }, { foods }).name, 'Oats');
+  assert.equal(p.findOwn({ source: { kind: 'client_food', id: 3 } }, { foods }), null, 'never by the phone\'s own id');
+  assert.equal(p.findOwn({ source: { kind: 'coach_food', id: 9 } }, { foods }).name, 'Granola');
+  assert.equal(p.findOwn({ source: { kind: 'off' }, barcode: '4006381333931' }, { foods }).name, 'Shake');
+  assert.equal(p.findOwn({ source: { kind: 'coach_food', id: 10 } }, { foods }), null);
+  assert.deepEqual(p.foodFromPlanItem({ name: 'G', portion: 60, unit: 'g', nutrition: { calories: 270 }, barcode: null, source: { kind: 'coach_recipe', id: 4 } }),
+    { name: 'G', brand: null, portion: 60, unit: 'g', nutrition: { calories: 270 }, barcode: null, source_app: 'coach', source_external_id: 'recipe:4' });
+});
+
+test('day plans add nothing for people not in coaching: the Diary card is only theirs, the Foods page changes only for a plan item', () => {
+  const foods = read('../src/routes/Foods.svelte');
+  assert.match(foods, /if \(editorState\.planLog\) \{/);
+  assert.match(foods, /if \(_planSource\) item\.source = _planSource;/);
+  assert.match(read('../src/stores/editorState.js'), /planLog: +null,/);
+  // The card reads what Goals and the Diary already load: no request of its own.
+  assert.doesNotMatch(read('../src/components/coaching/DiaryPlanCard.svelte'), /NtApi|fetch\(|loadCoachRecommendations/);
+});
+
 test('Goals and the Diary add nothing for people not in coaching', () => {
   const goalsPage = read('../src/routes/Goals.svelte');
   assert.match(goalsPage, /\$: if \(\$coachTab\) loadCoachRecommendations\(\{ refresh: true \}\)/);
   assert.match(goalsPage, /\$: _coachRec = \$coachTab \? goalsCardRecommendation\(\$coachRecommendations\) : null;/);
-  assert.match(read('../src/routes/Diary.svelte'), /\{#if \$coachTab\}<DiaryCoachCard \/>\{\/if\}/);
+  assert.match(read('../src/routes/Diary.svelte'), /\{#if \$coachTab\}<DiaryCoachCard \/><DiaryPlanCard \/>\{\/if\}/);
   assert.match(store, /if \(!get\(coachingSupported\) \|\| !showsCoachTab\(true, s\)\) \{ coachRecommendations\.set\(\[\]\); return \[\]; \}/);
 });
 
@@ -183,10 +212,14 @@ test('coaching strings live in en.json; Users search finds coaching', () => {
   const files = ['../src/routes/Coach.svelte', '../src/routes/Clients.svelte', '../src/components/coaching/CoachingTabs.svelte',
     '../src/components/coaching/ClientDetail.svelte', '../src/components/coaching/RequestSheet.svelte',
     '../src/components/coaching/CoachingNeedsServer.svelte', '../src/components/coaching/WeightTrend.svelte',
-    '../src/lib/coaching-view.js', '../src/components/settings/SettingsUserManagement.svelte'];
+    '../src/lib/coaching-view.js', '../src/components/settings/SettingsUserManagement.svelte',
+    '../src/components/coaching/PlanCard.svelte', '../src/components/coaching/PlanBuilder.svelte',
+    '../src/components/coaching/PlanItemPicker.svelte', '../src/components/coaching/DiaryPlanCard.svelte'];
   for (const f of files) {
     for (const [, key] of read(f).matchAll(/\$?_\(\s*'([a-z_]+(?:\.[a-z0-9_]+)+)'/g)) assert.equal(typeof get(key), 'string', `${f}: ${key}`);
   }
+  for (const st of ['pending', 'accepted', 'declined', 'expired', 'replaced', 'withdrawn']) assert.equal(typeof get(`coaching.plans.status_${st}`), 'string', st);
+  for (const k of ['foods', 'meals', 'recipes']) assert.equal(typeof get(`coaching.plans.kind_${k}`), 'string', k);
   assert.equal(get('coaching.client.request_body'), '{name} will see your diary, your targets, your weight and your foods, meals and recipes.');
   const kw = read('../src/routes/Settings.svelte').match(/users: +\[([^\]]+)\]/)[1];
   for (const w of ['coach', 'coaching', 'client', 'pairing']) assert.match(kw, new RegExp(`'${w}'`));

@@ -758,8 +758,8 @@ function _serializeAltUnits(v) {
 export async function dbCreateFood(data) {
   const db = await getDb();
   const r = await db.run(
-    `INSERT INTO foods (user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, nutrition_basis, alt_units, density_g_ml, updated_at, sync_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    `INSERT INTO foods (user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, nutrition_basis, alt_units, density_g_ml, source_app, source_external_id, source_url, updated_at, sync_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       LOCAL_USER_ID,
       data.name,
@@ -776,6 +776,10 @@ export async function dbCreateFood(data) {
       data.density_g_ml != null && Number.isFinite(Number(data.density_g_ml))
         ? Number(data.density_g_ml)
         : null,
+      // Where it came from (a coach's food copied from a day plan).
+      data.source_app || null,
+      data.source_external_id || null,
+      data.source_url || null,
       _editNow(),
     ]
   );

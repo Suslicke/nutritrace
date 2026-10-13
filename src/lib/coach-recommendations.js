@@ -192,17 +192,34 @@ export async function acceptTargets(rec, { note = '', t, date = new Date().toLoc
   } finally { _accepting.delete(rec.id); }
 }
 
-/** Decline (with an optional note). Nothing else changes. */
-export async function declineTargets(rec, { note = '' } = {}) {
+/**
+ * An answer that changes nothing else on the device: it is kept here and
+ * sent when it can (one the server refuses shows what it is now).
+ */
+async function _answer(rec, status, note) {
   const store = await _store();
   if (!(await store.available())) {
-    await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status: 'declined', response_note: note || undefined });
+    await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status, response_note: note || undefined });
     _refreshCounts();
     return { offline: false };
   }
-  await store.answer(rec.id, 'declined', note);
+  await store.answer(rec.id, status, note);
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
   const r = await flushAnswers().catch(() => ({ offline: true }));
   return { offline: !!r?.offline };
+}
+
+/** Decline (with an optional note). Nothing else changes. */
+export function declineTargets(rec, { note = '' } = {}) {
+  return _answer(rec, 'declined', note);
+}
+
+/**
+ * Accept or decline a day plan. Accepting changes nothing by itself: the
+ * plan's card then offers Log This and Log All, with or without a connection.
+ */
+export function answerPlan(rec, status, { note = '' } = {}) {
+  return _answer(rec, status, note);
 }
 
 /** The template Accept saved for this recommendation, if it's still there. */

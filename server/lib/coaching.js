@@ -120,10 +120,13 @@ export function coachingState(userId) {
   counts.unread = coachActive.reduce((n, id) => n + unread(id), 0);
   const asClientUnread = row ? unread(row.id) : 0;
   const requests = rows.filter(r => r.status === 'pending');
-  // Recommendations waiting for this person's answer (from their coach).
+  // Recommendations waiting for this person's answer (from their coach). A
+  // day plan past its date is Expired, not waiting (the server can't know
+  // the person's date, so it counts until the day after, in any time zone).
   const pendingRecs = db.prepare(`
     SELECT COUNT(*) AS c FROM coach_recommendations r JOIN coach_clients cc ON cc.id = r.pairing_id
      WHERE r.client_id = ? AND r.status = 'pending' AND cc.status = 'active' AND r.deleted_at IS NULL
+       AND (r.kind != 'day_plan' OR r.date >= date('now', '-1 day'))
   `).get(userId).c;
   return {
     role,

@@ -19,6 +19,7 @@
   import AttachImageButton from '../ai/AttachImageButton.svelte';
   import CoachPhoto from './CoachPhoto.svelte';
   import TargetsCard from './TargetsCard.svelte';
+  import PlanCard from './PlanCard.svelte';
 
   /** { pairingId, side: 'client' | 'coach', clientId } */
   export let conv;
@@ -27,6 +28,8 @@
   export let readOnly = false;
   /** Recommendations of this pairing: one in the conversation shows as its card. */
   export let recommendations = [];
+  /** The client's meal names, for a day plan on the coach's side. */
+  export let mealNames = null;
 
   const POLL_MS = 10_000;
   const me = Number(localStorage.getItem('wl:userId')) || null;
@@ -154,7 +157,11 @@
         {@const rec = recommendations.find(r => r.id === m.recommendation_id)}
         <div class="msg msg-rec" class:mine={m.sender_id === me}>
           {#if rec}
-            <TargetsCard {rec} compact coachView={conv.side === 'coach'} coachName={otherName} on:answered />
+            {#if rec.kind === 'day_plan'}
+              <PlanCard {rec} compact coachView={conv.side === 'coach'} coachName={otherName} {mealNames} on:answered />
+            {:else}
+              <TargetsCard {rec} compact coachView={conv.side === 'coach'} coachName={otherName} on:answered />
+            {/if}
           {:else}
             <div class="bubble"><span class="deleted-text">{$_('coaching.targets.card_title_coach')}</span></div>
           {/if}

@@ -61,6 +61,7 @@
   import { dayActivity, activitySummary, loadActivity, deleteActivity } from '../stores/activity.js';
   import WaterBanner  from '../components/banners/WaterBanner.svelte';
   import DiaryCoachCard from '../components/coaching/DiaryCoachCard.svelte';
+  import DiaryPlanCard from '../components/coaching/DiaryPlanCard.svelte';
   import { coachTab } from '../stores/coaching.js';
   import { editorState } from '../stores/editorState.js';
   import { NtApi } from '../lib/api.js';
@@ -2103,8 +2104,9 @@
         <span>{$_('diary.server_error.unreachable')} <button class="server-error-retry" on:click={() => loadEntry($currentDate)}>{$_('diary.server_error.retry')}</button></span>
       </div>
     {/if}
-    <!-- A coach's new targets, once (only for someone with a coach). -->
-    {#if $coachTab}<DiaryCoachCard />{/if}
+    <!-- A coach's new targets, once, and the coach's plan for this day
+         (only for someone with a coach). -->
+    {#if $coachTab}<DiaryCoachCard /><DiaryPlanCard />{/if}
     <!-- Intermittent fasting widget — opt-in via Settings → Diary -->
     {#if $fastingEnabled}
       <FastingWidget />
