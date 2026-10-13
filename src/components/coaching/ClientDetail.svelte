@@ -105,11 +105,11 @@
         <h3>{$_('coaching.overview.last_7')}</h3>
         <p class="cd-summary">
           {#if overview.week.judged > 0}
-            {$_('coaching.overview.on_target', { values: { on: overview.week.on_target, days: overview.week.judged } })}
-          {:else}
-            {$_('coaching.overview.no_target_days')}
+            {$_('coaching.overview.on_target', { values: { on: overview.week.on_target, days: overview.week.judged } })} ·
+          {:else if overview.week.logged > 0}
+            {$_('coaching.overview.no_target_days')} ·
           {/if}
-          · {$_('coaching.overview.logged', { values: { logged: overview.week.logged } })}
+          {$_('coaching.overview.logged', { values: { logged: overview.week.logged } })}
         </p>
         {#if overview.calorie_mode && overview.calorie_mode !== 'fixed'}
           <p class="cd-mode">{$_(overview.calorie_mode === 'adaptive' ? 'coaching.overview.mode_adaptive' : 'coaching.overview.mode_dynamic')}</p>
