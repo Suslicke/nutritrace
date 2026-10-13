@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Garmin sync is no longer marked Experimental** in Settings > Wellness.
+
 ### Fixed
 
 - **The Android app says when a server isn't set up yet.** Connecting to a fresh install said the server couldn't be reached (or that only HTTPS works). Now it says to open the server in a browser and create the first account first; Android apps from before this get the same answer when they sign in. `/api/health` answers before setup too, with `setup_required: true`, so a container healthcheck passes from the first start.

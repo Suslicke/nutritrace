@@ -1449,22 +1449,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   :global(.spin) { animation: spin 1s linear infinite; display: inline-block; }
 
-  /* Legacy: labs badge is no longer used anywhere in the settings tree
-     but the class name may still appear in translation strings; kept as
-     a defensive style. */
-  :global(.labs-badge) {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: linear-gradient(135deg, #f59e0b, #ef4444);
-    color: #fff;
-    padding: 2px 6px;
-    border-radius: 99px;
-    margin-left: 6px;
-    vertical-align: middle;
-  }
-
   /* ───────────────────────────────────────────────────────────────
      Phase A: Two-pane desktop shell (≥1024px).
 

@@ -847,10 +847,9 @@
       {/if}
     </div>
 
-    <!-- ── Garmin (Experimental) ── -->
+    <!-- ── Garmin ── -->
     <p class="sub-label" style="padding-top:16px">
       {$_('settings_wellness.garmin.title')}
-      <span class="labs-badge" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">{$_('settings_wellness.common.experimental')}</span>
     </p>
     <div class="card settings-card">
       {#if !isNativeLocal && garminEnabledVal && garminConnectionStatus?.connected}
@@ -1456,18 +1455,5 @@
     background: var(--accent-dim);
     color: var(--accent);
     font-weight: 600;
-  }
-
-  .labs-badge {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: linear-gradient(135deg, #f59e0b, #ef4444);
-    color: #fff;
-    padding: 2px 6px;
-    border-radius: 99px;
-    margin-left: 6px;
-    vertical-align: middle;
   }
 </style>
