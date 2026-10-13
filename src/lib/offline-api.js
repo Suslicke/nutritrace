@@ -95,7 +95,13 @@ function _db() {
       if (!db.objectStoreNames.contains('coach_messages')) db.createObjectStore('coach_messages', { keyPath: 'uuid' });
       if (!db.objectStoreNames.contains('coach_recommendations')) db.createObjectStore('coach_recommendations', { keyPath: 'id' });
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // A newer version opening in another tab (an app update) waits for
+      // this one to let go; let go, and open again on the next use.
+      db.onversionchange = () => { try { db.close(); } catch { /* closed */ } if (_dbPromise === p) _dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = () => resolve(null);
     req.onblocked = () => resolve(null);
   });
@@ -576,6 +582,8 @@ export async function clearOffline() {
  * database so they share its sign-out and account rules.
  */
 export const coachStore = {
+  /** False when the database can't be opened (blocked, private mode). */
+  available: async () => !!(await _db()),
   all: (store) => _all(store),
   put: (store, rows) => _tx(store, 'readwrite', s => { for (const r of rows) s.put(r); }),
   del: (store, keys) => _tx(store, 'readwrite', s => { for (const k of keys) s.delete(k); }),

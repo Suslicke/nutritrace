@@ -19,6 +19,7 @@ import { resolveGoalFor, percentGoalToGrams } from '../../src/lib/goal-resolver.
 import { Nutrition } from '../../src/lib/nutrition.js';
 import { _bodyStatsWeightKg } from '../lib/adaptive-tdee.js';
 import fs from 'fs';
+import path from 'path';
 import { linkBase } from '../lib/public-url.js';
 import {
   canRead, canWrite, createMessage, deleteMessage, markRead, listMessages, messageOut,
@@ -208,14 +209,15 @@ function _answer(status) {
     if (status === 'active' && db.prepare(`SELECT 1 FROM coach_clients WHERE client_id = ? AND status = 'active'`).get(req.user.id)) {
       return res.status(409).json({ error: LEAVE_FIRST, code: 'leave_first' });
     }
+    let changed = 0;
     try {
-      db.prepare(`UPDATE coach_clients SET status = ?, responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'`)
-        .run(status, row.id);
+      changed = db.prepare(`UPDATE coach_clients SET status = ?, responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'`)
+        .run(status, row.id).changes;
     } catch (e) {
       if (/UNIQUE/i.test(String(e?.message))) return res.status(409).json({ error: LEAVE_FIRST, code: 'leave_first' });
       throw e;
     }
-    notifyClientAnswer(row, status === 'active' ? 'accepted' : 'declined');
+    if (changed) notifyClientAnswer(row, status === 'active' ? 'accepted' : 'declined');
     res.json(coachingState(req.user.id));
   });
 }
@@ -284,10 +286,12 @@ router.get('/photos/:name', requireAccount, wrap((req, res) => {
   const file = photoPath(req.params.name);
   const m = file && db.prepare('SELECT pairing_id FROM coach_messages WHERE image_url = ? AND deleted_at IS NULL').get(req.params.name);
   if (!m || !canRead(pairingById(m.pairing_id), req.user.id) || !fs.existsSync(file)) return res.status(404).json({ error: 'Not found' });
-  res.set(UPLOAD_RESPONSE_HEADERS);
-  res.set('Cache-Control', 'private, no-store');
-  res.type(PHOTO_TYPES[req.params.name.split('.').pop()] || 'application/octet-stream');
-  fs.createReadStream(file).pipe(res);
+  // sendFile, not a bare stream: a file deleted between the check and the
+  // read (its message deleted at that moment) answers 404 instead of an
+  // unhandled stream error taking the server down.
+  res.sendFile(path.resolve(file), {
+    headers: { ...UPLOAD_RESPONSE_HEADERS, 'Cache-Control': 'private, no-store', 'Content-Type': PHOTO_TYPES[req.params.name.split('.').pop()] || 'application/octet-stream' },
+  }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Not found' }); });
 }));
 
 // ── Admin: see and end pairings ─────────────────────────────────────────────

@@ -25,7 +25,7 @@ import {
   dbGetPendingDiaryTombstones, dbMarkTombstonesSynced, dbApplyServerTombstones,
   dbLinkDiaryItems, dbApplyServerDeletions, dbGetCompletionOps, dbDeleteCompletionOp,
   dbApplyServerWinner, dbSetClockOffset, dbInstallId, createKeyOf,
-  dbPendingCoachMessages, dbUpsertCoachMessages, dbFailCoachMessage,
+  dbPendingCoachMessages, dbUpsertCoachMessages, dbFailCoachMessage, dbForgetCoachMessage,
 } from './db-native.js';
 import { localDataIsThisAccount, serverKeepsNotes, accountGeneration } from './local-account.js';
 import { get, writable } from 'svelte/store';
@@ -312,7 +312,18 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
   const workouts = await dbGetPendingWorkouts();
   // Coaching messages written here (and deletes of your own), each with the
   // uuid it was made with: the server stores one uuid once.
-  const coachMsgs = await dbPendingCoachMessages().catch(() => []);
+  // Photos ride inside the push, so a backlog of them is sent a few at a
+  // time (about 8 MB a push): the rest wait for the next sync, and a large
+  // backlog never holds up the diary behind a refused request.
+  const coachMsgs = [];
+  {
+    let bytes = 0;
+    for (const m of await dbPendingCoachMessages().catch(() => [])) {
+      const size = (m.image_local?.length || 0) + (m.body?.length || 0);
+      if (coachMsgs.length && bytes + size > 8_000_000) break;
+      coachMsgs.push(m); bytes += size;
+    }
+  }
   const hasPending = pending.foods.length || pending.meals.length || pending.diary.length || activity.length || fasts.length || wellness.length || workouts.length || pendingSettings.length || coachMsgs.length;
   // Option C: pending per-uuid deletions must ride along with the diary
   // rows in the same push so the server's merge treats them as explicit
@@ -625,13 +636,13 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
   // One it refused (the conversation closed) stays here, marked; an older
   // server (no coach_messages in its answer) leaves them waiting.
   if (Array.isArray(result.coach_messages) && live()) {
-    const n = { dbUpsertCoachMessages, dbFailCoachMessage };
     for (const r of result.coach_messages) {
       try {
         const mine = coachMsgs.find(m => m.uuid === r.uuid);
-        if (r.row) await n.dbUpsertCoachMessages([r.row]);
-        else if (r.status === 404 && mine?.sync_status === 'pending_delete') await n.dbUpsertCoachMessages([{ ...mine, deleted_at: new Date().toISOString() }]);
-        else if (r.status && r.status < 500) await n.dbFailCoachMessage(r.uuid, r.error);
+        if (r.row) await dbUpsertCoachMessages([r.row]);
+        // A delete of a message the server never had: nothing left to do.
+        else if (r.status === 404 && mine?.sync_status === 'pending_delete') await dbForgetCoachMessage(r.uuid);
+        else if (r.status && r.status < 500) await dbFailCoachMessage(r.uuid, r.error);
       } catch (e) { console.warn('[sync] coaching message result:', e?.message || e); }
     }
   }

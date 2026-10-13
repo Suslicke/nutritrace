@@ -24,9 +24,9 @@ import { sendCoachMessage, isEmailConfigured } from '../email.js';
 export const MESSAGE_MAX = 4000;
 export const PHOTO_MAX_BYTES = 3 * 1024 * 1024;
 export const UUID_RE = /^[A-Za-z0-9-]{8,64}$/;
-const PHOTO_NAME_RE = /^[a-f0-9]{32}\.(jpg|png|gif|webp)$/;
-const EXT = { jpeg: 'jpg', png: 'png', gif: 'gif', webp: 'webp' };
-export const PHOTO_TYPES = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+const PHOTO_NAME_RE = /^[a-f0-9]{32}\.(jpg|png|gif|webp|avif)$/;
+const EXT = { jpeg: 'jpg', png: 'png', gif: 'gif', webp: 'webp', avif: 'avif' };
+export const PHOTO_TYPES = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' };
 const EMAIL_EVERY_MS = 30 * 60 * 1000;
 
 export const photoDir = () => path.join(process.env.UPLOADS_PATH || './uploads', 'coaching');
@@ -82,7 +82,7 @@ export function savePhoto(dataUrl) {
   if (buf.length > PHOTO_MAX_BYTES) throw _bad('That photo is too large.');
   const kind = detectImageTypeFromBuffer(buf);
   const ext = EXT[kind];
-  if (!ext) throw _bad('Only JPEG, PNG, GIF and WebP photos can be sent.');
+  if (!ext) throw _bad('Only JPEG, PNG, GIF, WebP and AVIF photos can be sent.');
   fs.mkdirSync(photoDir(), { recursive: true });
   const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
   fs.writeFileSync(path.join(photoDir(), name), buf, { mode: 0o600 });
@@ -106,7 +106,7 @@ export function createMessage(p, userId, { uuid, body, image } = {}) {
   const existing = db.prepare('SELECT * FROM coach_messages WHERE uuid = ?').get(uuid);
   if (existing) {
     if (existing.sender_id === userId && existing.pairing_id === p.id) return { row: existing, created: false };
-    throw _bad('Missing message id.', 409);
+    throw _bad('That message id is already used.', 409);
   }
   const text = typeof body === 'string' ? body.replace(/\s+$/, '') : '';
   if (text.length > MESSAGE_MAX) throw _bad(`A message can be up to ${MESSAGE_MAX.toLocaleString('en-US')} characters.`);
@@ -122,7 +122,7 @@ export function createMessage(p, userId, { uuid, body, image } = {}) {
     if (photo) removePhoto(photo);
     // Two copies of the same message racing: the other one won.
     const won = db.prepare('SELECT * FROM coach_messages WHERE uuid = ?').get(uuid);
-    if (won && won.sender_id === userId) return { row: won, created: false };
+    if (won && won.sender_id === userId && won.pairing_id === p.id) return { row: won, created: false };
     throw e;
   }
 }
@@ -174,6 +174,9 @@ export function deletePhotosForUser(userId) {
      WHERE (cc.coach_id = ? OR cc.client_id = ?) AND m.image_url IS NOT NULL
   `).all(userId, userId);
   for (const r of rows) removePhoto(r.image_url);
+  // The email throttle's notes for this person's conversations go too.
+  const pairs = db.prepare('SELECT id FROM coach_clients WHERE coach_id = ? OR client_id = ?').all(userId, userId);
+  for (const p of pairs) db.prepare(`DELETE FROM app_config WHERE key LIKE ?`).run(`_coachmail_${p.id}_%`);
   return rows.length;
 }
 

@@ -137,7 +137,8 @@
       {#if pairing}
         <p class="coach-sees">{$_('coaching.client.coach_sees', { values: { name: coachName } })}</p>
         <Conversation conv={{ pairingId: pairing.id, side: 'client' }} otherName={coachName} />
-      {:else if shownPast}
+      {/if}
+      {#if shownPast}
         <section class="past">
           <h2 class="past-title">{$_('coaching.client.past_title')}</h2>
           {#if past.length > 1}
@@ -152,7 +153,7 @@
           <p class="coach-sees">{$_('coaching.client.past_body', { values: { name: shownPast.coach.name, date: formatDay(localDay(shownPast.ended_at), $dateFormat) } })}</p>
           <Conversation conv={{ pairingId: shownPast.id, side: 'client' }} otherName={shownPast.coach.name} readOnly />
         </section>
-      {:else if loaded && !requests.length}
+      {:else if loaded && !requests.length && !pairing}
         <p class="coach-empty">{$_('coaching.client.none')}</p>
       {/if}
     {/if}

@@ -99,6 +99,21 @@ test('offline on Android: the same list, and the server\'s message comes through
   assert.match(read('../src/lib/api-native.js'), /async forgetCoachingReads\(\) \{ return 0; \}/);
 });
 
+test('the message queue: a server hiccup waits, a refusal is marked, a delete follows a message still sending', () => {
+  const cm = read('../src/lib/coach-messages.js');
+  // 5xx (a restart behind a proxy) or no answer: waits and goes later.
+  assert.match(cm, /if \(e\?\.offline \|\| status >= 500 \|\| !status \|\|/);
+  // Deleting a message still sending marks it, so its answer can't bring it back.
+  assert.match(cm, /if \(m\.sync_status === 'failed'\) return s\.del\('coach_messages', \[uuid\]\);/);
+  assert.match(read('../src/lib/db-native.js'), /if \(r\.sync_status === 'failed'\) \{/);
+  // The cursor only counts while the device holds the conversation.
+  assert.match(cm, /if \(since && \(!usable \|\| !\(await store\.list\(conv\.pairingId\)\)\.length\)\) since = null;/);
+  // Nowhere to keep it: sent straight away, or the send fails visibly.
+  assert.match(cm, /if \(!\(await store\.available\(\)\)\) \{/);
+  // Sign-out clears the cursors with the rest.
+  assert.match(store, /k\.startsWith\('nt:coach-cursor:'\)/);
+});
+
 test('no request or timer for people not in coaching', () => {
   // The state comes with /me, the fingerprint with the settings refresh the
   // app already makes; the store asks again only when the fingerprint moved.

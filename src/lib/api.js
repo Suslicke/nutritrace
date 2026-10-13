@@ -884,7 +884,7 @@ const _NtApiHttp = {
       cache: 'no-store',
       body: isUpload ? body : body != null ? JSON.stringify(body) : undefined,
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `API error ${res.status}`); }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); const err = new Error(e.error || `API error ${res.status}`); err.status = res.status; throw err; }
     return res.json();
   },
 

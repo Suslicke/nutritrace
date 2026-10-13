@@ -33,6 +33,8 @@ async function _store() {
   if (isNative) {
     const n = await import('./db-native.js');
     return {
+      available: async () => true,
+      forget: (uuid) => n.dbForgetCoachMessage(uuid),
       list: (pid) => n.dbCoachMessages(pid),
       upsert: (rows) => n.dbUpsertCoachMessages(rows),
       queue: (row) => n.dbQueueCoachMessage(row),
@@ -46,6 +48,8 @@ async function _store() {
   const all = async () => (await s.all('coach_messages')) || [];
   const byTime = (a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.uuid).localeCompare(String(b.uuid));
   return {
+    available: () => s.available(),
+    forget: (uuid) => s.del('coach_messages', [uuid]),
     list: async (pid) => (await all()).filter(m => m.pairing_id === Number(pid)).sort(byTime),
     upsert: async (rows) => {
       const mine = new Map((await all()).map(m => [m.uuid, m]));
@@ -62,7 +66,9 @@ async function _store() {
     remove: async (uuid) => {
       const m = (await all()).find(x => x.uuid === uuid);
       if (!m) return;
-      if (m.sync_status === 'pending' || m.sync_status === 'failed') return s.del('coach_messages', [uuid]);
+      // Never could go: gone. Still going (perhaps already arrived): the delete
+      // follows it, so an answer coming back can't bring it back.
+      if (m.sync_status === 'failed') return s.del('coach_messages', [uuid]);
       await s.put('coach_messages', [{ ...m, body: null, image: null, image_local: null, deleted_at: _sqlNow(), sync_status: 'pending_delete' }]);
     },
     keep: async (pids) => {
@@ -82,18 +88,36 @@ export async function loadConversation(conv) {
 
 const _cursorKey = (conv) => `nt:coach-cursor:${_me() || ''}:${conv.pairingId}`;
 
+/** Photos of messages deleted on the other side: their copies here go too. */
+async function _forgetDeletedPhotos(store, rows) {
+  const gone = rows.filter(r => r?.deleted_at);
+  if (!gone.length) return;
+  const byPairing = new Map();
+  for (const r of gone) byPairing.set(r.pairing_id, null);
+  const paths = [];
+  for (const pid of byPairing.keys()) {
+    for (const m of await store.list(pid)) if (m.image && gone.some(g => g.uuid === m.uuid)) paths.push(m.image);
+  }
+  if (paths.length) await forgetCoachPhotos(paths);
+}
+
 /**
  * Ask the server what changed since the last look, and keep it.
  * Returns { can_send, status } (or null when it can't be reached).
  */
 export async function refreshConversation(conv) {
+  const store = await _store();
+  const usable = await store.available();
+  // The cursor only counts while this device holds the conversation it
+  // followed (signed out and back in, the copy is empty: start over).
   let since = null;
   try { since = localStorage.getItem(_cursorKey(conv)); } catch { /* private mode */ }
+  if (since && (!usable || !(await store.list(conv.pairingId)).length)) since = null;
   const path = conversationPath(conv) + (since ? `?since=${encodeURIComponent(since)}` : '');
   const r = await NtApi.get(path);
-  const store = await _store();
+  await _forgetDeletedPhotos(store, r.messages || []);
   await store.upsert(r.messages || []);
-  try { if (r.server_time) localStorage.setItem(_cursorKey(conv), r.server_time); } catch { /* private mode */ }
+  try { if (r.server_time && usable) localStorage.setItem(_cursorKey(conv), r.server_time); } catch { /* private mode */ }
   return { can_send: !!r.can_send, status: r.status };
 }
 
@@ -123,7 +147,14 @@ export async function sendMessage(conv, { body = '', image = null } = {}) {
     error: null,
     sync_status: 'pending',
   };
-  await (await _store()).queue(row);
+  const store = await _store();
+  // Nowhere to keep it (the browser's database blocked by another tab, or
+  // private mode): send it straight away, and say so if that fails.
+  if (!(await store.available())) {
+    const sent = await NtApi.post(row.post_path, { uuid: row.uuid, body: row.body, image: row.image_local || undefined });
+    return { ...sent, offline: false };
+  }
+  await store.queue(row);
   const r = await flushCoachMessages().catch(() => ({ offline: true }));
   return { ...row, offline: !!r?.offline };
 }
@@ -147,7 +178,13 @@ export function flushCoachMessages() {
     for (const m of await store.pending()) {
       try {
         if (m.sync_status === 'pending_delete') {
-          const row = await NtApi.del(`/api/coaching/messages/${encodeURIComponent(m.uuid)}`);
+          let row = null;
+          try { row = await NtApi.del(`/api/coaching/messages/${encodeURIComponent(m.uuid)}`); }
+          catch (e) {
+            // Never reached the server (deleted while waiting): nothing to undo there.
+            if (e?.status === 404 || /not found/i.test(String(e?.message))) { await store.forget(m.uuid); sent++; continue; }
+            throw e;
+          }
           await store.upsert([row]);
         } else {
           const row = await NtApi.post(m.post_path, { uuid: m.uuid, body: m.body, image: m.image_local || undefined });
@@ -155,9 +192,14 @@ export function flushCoachMessages() {
         }
         sent++;
       } catch (e) {
-        if (e?.offline || !e?.message || /fetch|network|timeout|abort/i.test(e.message)) { offline = true; break; }
-        // Already gone on the server: nothing left to delete.
-        if (m.sync_status === 'pending_delete' && /not found/i.test(e.message)) { await store.upsert([{ ...m, deleted_at: m.deleted_at || _sqlNow() }]); continue; }
+        // No connection, or the server is having a moment (5xx, a restart
+        // behind a proxy): it waits and goes later.
+        const status = Number(e?.status) || 0;
+        if (e?.offline || status >= 500 || !status || /fetch|network|timeout|abort/i.test(String(e?.message))) {
+          if (status >= 400 && status < 500) { await store.fail(m.uuid, e.message); continue; }
+          offline = true; break;
+        }
+        // Refused for good (the conversation closed): kept here, marked.
         await store.fail(m.uuid, e.message);
       }
     }
@@ -181,5 +223,8 @@ export async function keepConversations(pairingIds) {
 
 /** Messages that came with the Android sync. */
 export async function storeSyncedMessages(rows) {
-  if (rows?.length) await (await _store()).upsert(rows);
+  if (!rows?.length) return;
+  const store = await _store();
+  await _forgetDeletedPhotos(store, rows);
+  await store.upsert(rows);
 }

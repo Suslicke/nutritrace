@@ -109,7 +109,7 @@ export function clearCoaching() {
   try {
     localStorage.removeItem(KEY);
     // The Android app's copies of a coach's views (lib/api-cached.js).
-    for (const k of Object.keys(localStorage)) if (k.startsWith('nt:coach-read:')) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (k.startsWith('nt:coach-read:') || k.startsWith('nt:coach-cursor:')) localStorage.removeItem(k);
   } catch { /* private mode */ }
 }
 

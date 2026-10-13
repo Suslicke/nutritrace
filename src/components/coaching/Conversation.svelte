@@ -40,7 +40,7 @@
   $: if (mounted && key !== loadedFor) { loadedFor = key; start(); }
 
   const _utc = (ts) => new Date(String(ts || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z'));
-  const timeOf = (ts) => _utc(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: $timeFormat !== '24h' });
+  $: timeOf = (ts) => _utc(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: $timeFormat !== '24h' });
   const dayOf = (ts) => _utc(ts).toLocaleDateString('sv-SE');
 
   async function reload({ scroll = false } = {}) {

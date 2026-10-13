@@ -335,10 +335,14 @@ export async function logout() {
     try {
       const { flushOutbox, clearOffline, pendingCount } = await import('../lib/offline-api.js');
       const sent = await flushOutbox().catch(() => false);
+      // Coaching messages written offline wait in their own queue: sent too.
+      const cm = await import('../lib/coach-messages.js');
+      await cm.flushCoachMessages().catch(() => {});
+      const coachWaiting = (await cm.pendingCoachMessages().catch(() => [])).length;
       // If it couldn't go up (signing out in a dead zone), ask first: clearing
       // it would destroy work the user never saw fail.
-      if (!sent && (await pendingCount()) > 0) {
-        const waiting = await pendingCount();
+      if ((!sent && (await pendingCount()) > 0) || coachWaiting > 0) {
+        const waiting = (await pendingCount()) + coachWaiting;
         const { confirmDialog } = await import('./confirmDialog.js');
         const { get: getStore } = await import('svelte/store');
         const { _: t } = await import('svelte-i18n');

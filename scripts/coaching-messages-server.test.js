@@ -202,6 +202,17 @@ test('photos are private to the two people and go with their message', { skip: !
   assert.equal(gone.body, null); assert.equal(gone.image, null); assert.ok(gone.deleted_at);
   assert.equal((await call('client', 'GET', m.image)).status, 404);
   assert.ok(!existsSync(join(uploads, 'coaching', name)));
+  // A photo whose file went missing answers 404 and the server carries on
+  // (it used to stream without an error handler and could crash).
+  const lost = await ok('client', 'POST', clientPath(), { uuid: uuid('lost'), image: PNG });
+  rmSync(join(uploads, 'coaching', lost.image.split('/').pop()));
+  assert.equal((await call('coach', 'GET', lost.image)).status, 404);
+  assert.equal((await call('coach', 'GET', '/api/coaching/state')).status, 200, 'still up');
+  // AVIF, which the app sends as it is when it is small enough.
+  const avif = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from('ftypavif'), Buffer.alloc(24)]).toString('base64');
+  const a = await call('client', 'POST', clientPath(), { uuid: uuid('avif'), image: `data:image/avif;base64,${avif}` });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  assert.match(a.data.image, /\.avif$/);
   const shown = (await ok('coach', 'GET', coachPath())).messages.find((x) => x.uuid === m.uuid);
   assert.ok(shown.deleted_at, 'the coach sees "Message deleted"');
 });
@@ -296,7 +307,7 @@ test('after coaching ends: the client still reads it, the coach does not, nobody
 test('backup and restore carry messages and photos; deleting an account removes them', { skip: !ready }, async () => {
   const AdmZip = serverRequire('adm-zip');
   const before = (await ok('client', 'GET', clientPath())).messages;
-  const photoMsg = before.find((m) => m.image);
+  const photoMsg = before.filter((m) => m.image).at(-1); // one whose file is there
   const made = await ok('admin', 'POST', '/api/full-backup');
   const zip = new AdmZip(join(dir, 'backups', made.filename));
   const data = JSON.parse(zip.readAsText('database.json'));

@@ -2575,19 +2575,26 @@ export async function dbPendingCoachMessages() {
   return _rows(await db.query(`SELECT * FROM coach_messages WHERE sync_status IN ('pending', 'pending_delete') ORDER BY created_at, id`, []));
 }
 
+/** Gone from this phone (a delete the server never needed: it never had it). */
+export async function dbForgetCoachMessage(uuid) {
+  const db = await getDb();
+  await db.run(`DELETE FROM coach_messages WHERE uuid = ?`, [uuid]);
+}
+
 /** A message that could not go (the conversation closed): kept, marked. */
 export async function dbFailCoachMessage(uuid, error) {
   const db = await getDb();
   await db.run(`UPDATE coach_messages SET sync_status = 'failed', error = ? WHERE uuid = ?`, [String(error || ''), uuid]);
 }
 
-/** Your own message deleted here: gone at once if it never went up, else
- *  shown as deleted and the delete waits for the server. */
+/** Your own message deleted here: gone at once if it never could go (failed),
+ *  else shown as deleted and the delete waits for the server. A message still
+ *  being sent is deleted there too, once it arrives. */
 export async function dbDeleteCoachMessage(uuid) {
   const db = await getDb();
   const r = _row(await db.query(`SELECT sync_status FROM coach_messages WHERE uuid = ?`, [uuid]));
   if (!r) return;
-  if (r.sync_status === 'pending' || r.sync_status === 'failed') {
+  if (r.sync_status === 'failed') {
     await db.run(`DELETE FROM coach_messages WHERE uuid = ?`, [uuid]);
     return;
   }

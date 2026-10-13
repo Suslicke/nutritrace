@@ -68,7 +68,9 @@ test('signing out in a dead zone asks before discarding what is waiting', () => 
   // Clearing the queue on a sign-out that could not send it would destroy work
   // the user never saw fail.
   assert.match(auth, /const sent = await flushOutbox\(\)\.catch\(\(\) => false\)/);
-  assert.match(auth, /if \(!sent && \(await pendingCount\(\)\) > 0\)/);
+  assert.match(auth, /if \(\(!sent && \(await pendingCount\(\)\) > 0\) \|\| coachWaiting > 0\)/);
+  // Coaching messages written offline count too (lib/coach-messages.js).
+  assert.match(auth, /await cm\.flushCoachMessages\(\)\.catch\(\(\) => \{\}\);/);
   assert.match(auth, /if \(!ok\) return;/);
   assert.ok(en.sync.sign_out_waiting && en.sync.sign_out_anyway, 'the copy exists');
 });
