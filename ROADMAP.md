@@ -16,7 +16,7 @@ Items marked ~~strikethrough~~ have been implemented.
 
 ---
 
-## Planned for 1.5: Coaching
+## Planned for 1.5: Coaching *(built on dev; LiftTrace's coaching follows the same rules next)*
 
 A coach recommends calorie and macro targets and day plans, the client accepts or declines each one, and the two talk in one conversation. The coach only suggests: nothing in the client's targets, diary or catalog changes until the client accepts.
 

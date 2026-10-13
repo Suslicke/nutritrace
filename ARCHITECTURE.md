@@ -85,6 +85,39 @@ runs up to 5 rounds. System prompt instructs the AI to always use
 tools to fetch real data rather than relying on context. See
 `src/lib/aiChat.js`.
 
+### Coaching
+
+A coach and a client are a row in `coach_clients` (pending, active,
+declined, ended; one active row per client). Every route under
+`/api/coaching/clients/:clientId` goes through one guard
+(`requireCoachOf`, `server/lib/coaching.js`): an active pairing between
+this coach and this client, and the Coach role (or admin). The privacy
+test reads those routes from the source, so a new one can't be missed.
+
+Recommendations (`coach_recommendations`: targets, day plans, meals,
+recipes) carry a copy of what they recommend in `payload`; only the
+client's answer changes anything. Targets are applied on the client's
+device (their goals are their settings), saving the old ones as a
+template first for Undo. A day plan is logged through `addDiaryItem`, so
+logged items are ordinary diary items marked `source:
+coach:plan:<id>:<meal>.<n>`; a meal or recipe sent with Send to Client is
+copied into the client's catalog by the server at Accept. The shared
+rules live in `src/lib/coach-targets.js` and `src/lib/coach-plans.js`,
+which the server's Docker image copies.
+
+Messages (`coach_messages`) carry a uuid made on the device, so a
+message sent offline goes once. Photos live under `uploads/coaching`,
+served only to the two people. Coaching state rides on `/api/auth/me`
+and a fingerprint header on the settings refresh, so people not in
+coaching make no extra request and run no timer. Android keeps messages
+and recommendations in its own tables and syncs them with
+`/api/sync/pull?coaching=1` and `/api/sync/push`.
+
+Trace's coaching tools (`src/lib/coach-trace.js`) are offered only to
+people in coaching: a coach's Trace reads a client's summary and catalog
+and prepares drafts the coach opens and sends; a client's Trace reads
+their recommendations. None reads the conversation.
+
 ### Notifications: two delivery channels
 
 Device notifications (`src/lib/notifications.js`) using Capacitor

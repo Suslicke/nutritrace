@@ -163,6 +163,7 @@ services:
 1. **Open the app** — you'll be prompted with a setup wizard on first visit.
 2. **Create your account** — the first account created is automatically admin.
 3. **Single-user mode** — if you never create a second user account, the app runs without authentication (no login required). Add users in Settings → User Management to enable multi-user mode.
+4. **Coaching (optional).** In multi-user mode, an admin can give an account the Coach role in Settings → Users. Coaching uses the server you already run: no extra setup, environment variable or port. Notifications go through each person's ntfy, Gotify or Apprise (Settings → Notifications); the optional email copy uses your SMTP settings. Message photos are kept under `UPLOADS_PATH/coaching` and never served publicly, so keep backing up `UPLOADS_PATH` as usual.
 
 Opening the app from another device at a plain `http://` address (a LAN IP, an Unraid WebUI link)? Signing in only sticks over HTTPS, or with `INSECURE_COOKIES=1` on a trusted LAN; the sign-in and setup screens say so. `http://localhost` on the server itself works in Chrome and Firefox either way. See [Plain-HTTP LAN](https://traceapps.github.io/docs/getting-started/lan-http/).
 
