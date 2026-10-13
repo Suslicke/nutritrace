@@ -139,7 +139,7 @@ test('a recommendation: pending, in the conversation, replaced by a newer one, a
   assert.equal(st.awaiting, 1, 'one waiting for an answer: the dot');
   const conv = await ok('client', 'GET', `/api/coaching/pairings/${ids.pairing}/messages`);
   assert.deepEqual(conv.messages.filter((m) => m.recommendation_id).map((m) => m.recommendation_id), [first.id, second.id]);
-  assert.ok(await waitFor(() => received.some((p) => p.path === '/push-client' && p.body === 'Sam Coach recommended new targets.')));
+  assert.ok(await waitFor(() => received.some((p) => p.path === '/push-client' && p.body === 'Sam Coach sent you a recommendation.')));
   assert.doesNotMatch(JSON.stringify(received), /Then these/, 'never the note');
 
   // The replaced one can't be accepted, and says why.
@@ -215,6 +215,7 @@ test('ending coaching withdraws what is pending; answers made offline arrive by 
   const again = await ok('client', 'POST', '/api/sync/push', { coach_answers: [{ id: a.id, status: 'declined' }] });
   assert.equal(again.coach_answers[0].status, 409, 'once');
   const pulled = await ok('client', 'GET', '/api/sync/pull?coaching=1');
+  assert.equal((await ok('coach', 'GET', '/api/sync/pull?coaching=1')).coach_recommendations.length, 0, 'a coach never pulls their own as theirs to answer');
   assert.ok(pulled.coach_recommendations.some((r) => r.id === a.id && r.status === 'declined'));
   assert.ok(!('coach_recommendations' in (await ok('client', 'GET', '/api/sync/pull'))), 'a 1.4 app sees nothing new');
 

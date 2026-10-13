@@ -57,8 +57,8 @@ test('Goals tabs: Coach for a client, Clients for coaches', () => {
 });
 
 test('the fingerprint has the server\'s shape', () => {
-  assert.equal(signature({ role: 'user', as_client: null, requests: [], past: [], as_coach: none, unread: 0, awaiting: 0 }), 'user;-;-;0.0;-;0;0');
-  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], past: [{ id: 3 }], as_coach: { pending: 2, active: 3 }, unread: 4, awaiting: 3 }), 'coach;12;15,14;2.3;3;4;3');
+  assert.equal(signature({ role: 'user', as_client: null, requests: [], past: [], as_coach: none, unread: 0, awaiting: 0, latest_recommendation: 0 }), 'user;-;-;0.0;-;0;0;0');
+  assert.equal(signature({ role: 'coach', as_client: { id: 12 }, requests: [{ id: 15 }, { id: 14 }], past: [{ id: 3 }], as_coach: { pending: 2, active: 3 }, unread: 4, awaiting: 3, latest_recommendation: 9 }), 'coach;12;15,14;2.3;3;4;3;9');
   // The real server's header is compared with this in coaching-server.test.js.
 });
 
@@ -143,6 +143,9 @@ test('recommended targets: the comparison, the mode, a recommendation of a mode 
   assert.deepEqual(modeOnly.payload, { goals: {}, mode: 'adaptive' });
   assert.deepEqual(t.applyTargets(now, 'fixed', modeOnly.payload), { goals: now, mode: 'adaptive', modeChanged: true });
   assert.ok(t.cleanTargetsPayload({ goals: { calories: { max: 0 } } }).error, 'zero is not a target');
+  for (const odd of [true, '0x10', [1500], 'abc']) assert.ok(t.cleanTargetsPayload({ goals: { calories: { max: odd } } }).error, `not a number: ${JSON.stringify(odd)}`);
+  assert.equal(t.cleanTargetsPayload({ goals: { calories: { max: '1800' } } }).payload.goals.calories.max, 1800, 'a plain number in text is fine');
+  assert.ok(t.cleanTargetsPayload({ goals: { proteins: { isPercent: true, max: 60 }, fat: { isPercent: true, max: 50 } } }).error, 'percents over 100 in total');
 });
 
 test('Goals and the Diary add nothing for people not in coaching', () => {

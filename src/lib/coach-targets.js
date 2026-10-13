@@ -25,7 +25,10 @@ const LIMIT = { calories: 20000, grams: 2000, percent: 100 };
 // The fields a recommendation decides; everything else on an entry stays.
 const VALUE_FIELDS = ['sharedGoal', 'isMin', 'isPercent', 'days', 'max', 'min'];
 
-const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+// A number, or a plain decimal string; anything else (true, '0x10', [1500]) is no number.
+const num = (v) => (v === null || v === undefined || v === '' ? null
+  : typeof v === 'number' ? v
+  : typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
 const okNum = (v, max) => v === null || (Number.isFinite(v) && v > 0 && v <= max);
 
 /**
@@ -58,6 +61,11 @@ export function cleanTargetsPayload(input) {
     const entry = { sharedGoal: shared, isMin, isPercent, days };
     if (isMin) entry.min = value; else entry.max = value;
     out.goals[key] = entry;
+  }
+  // Percent macros can't add up to more than all the calories.
+  for (let d = 0; d < 7; d++) {
+    const pct = ['proteins', 'carbohydrates', 'fat'].reduce((n, k) => n + (out.goals[k]?.isPercent ? (out.goals[k].days[d] || 0) : 0), 0);
+    if (pct > 100) return { error: 'Protein, carbs and fat in percent add up to more than 100%.' };
   }
   if (src.mode != null && src.mode !== '') {
     if (!CALORIE_MODES.includes(src.mode)) return { error: 'Unknown calorie goal mode.' };

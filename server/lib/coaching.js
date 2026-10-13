@@ -153,6 +153,9 @@ export function coachingState(userId) {
     unread: asClientUnread + past.reduce((n, x) => n + x.unread, 0) + counts.unread,
     awaiting: requests.length + pendingRecs,
     recommendations: pendingRecs,
+    // The newest recommendation made to this person: a replacement keeps the
+    // count the same, so this is what tells the app to look again.
+    latest_recommendation: db.prepare(`SELECT MAX(id) AS m FROM coach_recommendations WHERE client_id = ?`).get(userId).m || 0,
   };
 }
 
@@ -166,7 +169,7 @@ export function coachingSignature(userId) {
   const c = s.as_client ? String(s.as_client.id) : '-';
   const r = s.requests.map(x => x.id).join(',') || '-';
   const p = s.past.map(x => x.id).join(',') || '-';
-  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active};${p};${s.unread};${s.awaiting}`;
+  return `${s.role || '-'};${c};${r};${s.as_coach.pending}.${s.as_coach.active};${p};${s.unread};${s.awaiting};${s.latest_recommendation}`;
 }
 
 /** End a pairing (pending or active). What the coach recommended and the

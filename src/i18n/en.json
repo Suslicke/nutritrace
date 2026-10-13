@@ -2415,6 +2415,8 @@
       "undo": "Undo",
       "undone": "Undone: your previous targets are back.",
       "undone_label": "Undone",
+      "refused": "This recommendation was replaced or withdrawn. Your targets didn't change.",
+      "still_applied": "Your targets still have these values.",
       "status_pending": "Waiting for an answer",
       "status_accepted": "Accepted",
       "status_declined": "Declined",

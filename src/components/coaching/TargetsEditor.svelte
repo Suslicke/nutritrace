@@ -59,6 +59,30 @@
   }
   onMount(load);
 
+  // Grams and percent of calories, converted at the calorie target being
+  // recommended (else the client's), the way the Goals page converts.
+  const DENSITY = { proteins: 4, carbohydrates: 4, fat: 9 };
+  function _calFor(day) {
+    const c = ed.calories;
+    const v = c?.include ? toKcal('calories', c.shared ? c.value : c.days[day]) : null;
+    if (v) return v;
+    const g = current?.goals?.calories;
+    return g ? (g.sharedGoal === false && Array.isArray(g.days) ? g.days[day] : g.max ?? g.min) : null;
+  }
+  function switchUnit(key, toPercent) {
+    const e = ed[key];
+    if (e.isPercent === toPercent) return;
+    const conv = (v, day) => {
+      const n = parseFloat(String(v).replace(',', '.')); const cal = _calFor(day);
+      if (!Number.isFinite(n) || !cal) return v;
+      return toPercent ? String(Math.round(n * DENSITY[key] / cal * 1000) / 10) : String(Math.round(cal * n / 100 / DENSITY[key]));
+    };
+    ed[key].value = conv(e.value, new Date().getDay());
+    ed[key].days = e.days.map((v, d) => conv(v, d));
+    ed[key].isPercent = toPercent;
+    touch(key);
+  }
+
   // Touching a target's value includes it.
   function touch(key) { ed[key].include = true; ed = ed; }
 
@@ -118,8 +142,8 @@
           <div class="te-controls">
             {#if key !== 'calories'}
               <div class="seg-control te-seg" role="group" aria-label={$_('coaching.targets.unit_toggle')} style="--seg-count:2;--seg-active:{e.isPercent ? 1 : 0}">
-                <button class="seg-opt" class:seg-active={!e.isPercent} on:click={() => { ed[key].isPercent = false; touch(key); }}>{$_('coaching.targets.grams')}</button>
-                <button class="seg-opt" class:seg-active={e.isPercent} on:click={() => { ed[key].isPercent = true; touch(key); }}>{$_('coaching.targets.percent')}</button>
+                <button class="seg-opt" class:seg-active={!e.isPercent} on:click={() => switchUnit(key, false)}>{$_('coaching.targets.grams')}</button>
+                <button class="seg-opt" class:seg-active={e.isPercent} on:click={() => switchUnit(key, true)}>{$_('coaching.targets.percent')}</button>
               </div>
             {/if}
             <label class="te-weekday"><input type="checkbox" checked={!e.shared} on:change={(ev) => { ed[key].shared = !ev.target.checked; touch(key); }} /> {$_('coaching.targets.by_weekday')}</label>

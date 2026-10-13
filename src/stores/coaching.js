@@ -58,7 +58,7 @@ export function coachingSignature(s) {
   const c = s.as_client ? String(s.as_client.id) : '-';
   const r = (s.requests || []).map(x => x.id).join(',') || '-';
   const p = (s.past || []).map(x => x.id).join(',') || '-';
-  return `${s.role || '-'};${c};${r};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0};${p};${Number(s.unread) || 0};${Number(s.awaiting) || 0}`;
+  return `${s.role || '-'};${c};${r};${Number(s.as_coach?.pending) || 0}.${Number(s.as_coach?.active) || 0};${p};${Number(s.unread) || 0};${Number(s.awaiting) || 0};${Number(s.latest_recommendation) || 0}`;
 }
 
 function _save(userId) {
@@ -106,6 +106,7 @@ function _lastSaved(userId) {
 export function clearCoaching() {
   coachingSupported.set(false);
   coachingState.set(null);
+  try { coachRecommendations.set([]); } catch { /* declared below */ }
   import('../lib/coach-photos.js').then(m => m.clearCoachPhotos()).catch(() => {});
   try {
     localStorage.removeItem(KEY);
@@ -125,7 +126,8 @@ export async function refreshCoaching() {
     _save(localStorage.getItem('wl:userId'));
     await _forgetFormerClients(before, state);
     // A recommendation arrived or was answered elsewhere: fetch them.
-    if (showsCoachTab(true, state) && (Number(before?.recommendations) || 0) !== (Number(state?.recommendations) || 0)) {
+    if (showsCoachTab(true, state) && ((Number(before?.recommendations) || 0) !== (Number(state?.recommendations) || 0)
+      || (Number(before?.latest_recommendation) || 0) !== (Number(state?.latest_recommendation) || 0))) {
       loadCoachRecommendations({ refresh: true }).catch(() => {});
     }
   } catch { /* offline: keep what is known */ }

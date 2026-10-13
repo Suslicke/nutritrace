@@ -2103,9 +2103,9 @@
         <span>{$_('diary.server_error.unreachable')} <button class="server-error-retry" on:click={() => loadEntry($currentDate)}>{$_('diary.server_error.retry')}</button></span>
       </div>
     {/if}
-    <!-- Intermittent fasting widget — opt-in via Settings → Diary -->
     <!-- A coach's new targets, once (only for someone with a coach). -->
     {#if $coachTab}<DiaryCoachCard />{/if}
+    <!-- Intermittent fasting widget — opt-in via Settings → Diary -->
     {#if $fastingEnabled}
       <FastingWidget />
     {/if}

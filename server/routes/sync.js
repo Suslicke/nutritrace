@@ -199,9 +199,14 @@ router.get('/pull', wrap((req, res) => {
       ? db.prepare(`SELECT * FROM coach_messages WHERE updated_at >= ? AND pairing_id IN (${pairings.map(() => '?').join(',')}) ORDER BY updated_at, id`).all(sinceSql, ...pairings)
       : [];
     coachingOut.coach_messages = msgs.map(messageOut);
-    const recs = pairings.length
-      ? db.prepare(`SELECT * FROM coach_recommendations WHERE updated_at >= ? AND pairing_id IN (${pairings.map(() => '?').join(',')}) ORDER BY updated_at, id`).all(sinceSql, ...pairings)
-      : [];
+    // Recommendations made to this person (a coach reads the ones they made
+    // online, from the client's page): someone who is both never sees their
+    // own as theirs to answer.
+    const recs = db.prepare(`
+      SELECT r.* FROM coach_recommendations r JOIN coach_clients cc ON cc.id = r.pairing_id
+       WHERE r.updated_at >= ? AND r.client_id = ? AND cc.status IN ('active', 'ended')
+       ORDER BY r.updated_at, r.id
+    `).all(sinceSql, u);
     coachingOut.coach_recommendations = recs.map(recommendationOut);
     coachingOut.coaching = { pairings };
   }

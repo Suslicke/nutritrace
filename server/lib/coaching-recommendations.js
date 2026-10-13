@@ -71,7 +71,7 @@ export function recommendTargets(pairing, coachId, body) {
 export function answerRecommendation(id, clientId, { status, response_note } = {}) {
   const r = _row(Number(id));
   if (!r || r.client_id !== clientId) throw _bad('Recommendation not found', 404);
-  if (!['accepted', 'declined'].includes(status)) throw _bad('Answer accepted or declined.');
+  if (!['accepted', 'declined'].includes(status)) throw _bad('The answer must be accepted or declined.');
   if (r.status !== 'pending') {
     const e = _bad(r.status === 'replaced' ? 'Replaced by a newer recommendation.' : r.status === 'withdrawn' ? 'This recommendation was withdrawn.' : 'This recommendation was already answered.', 409);
     e.row = recommendationOut(r);
@@ -84,14 +84,6 @@ export function answerRecommendation(id, clientId, { status, response_note } = {
   const out = _row(r.id);
   if (changed) _notifyCoach(out);
   return recommendationOut(out);
-}
-
-/** Ending a pairing withdraws what is still pending. */
-export function withdrawPending(pairingId) {
-  return db.prepare(`
-    UPDATE coach_recommendations SET status = 'withdrawn', updated_at = datetime('now')
-     WHERE pairing_id = ? AND status = 'pending'
-  `).run(pairingId).changes;
 }
 
 export function listForPairing(pairingId) {
@@ -107,13 +99,9 @@ export function listForClient(clientId) {
   `).all(clientId).map(recommendationOut);
 }
 
-export function pendingCountFor(clientId) {
-  return db.prepare(`SELECT COUNT(*) AS c FROM coach_recommendations WHERE client_id = ? AND status = 'pending' AND deleted_at IS NULL`).get(clientId).c;
-}
-
 async function _notifyClient(pairing, coachId) {
   try {
-    await pushNotifyDefaultOn(pairing.client_id, 'notifCoachRecommendation', 'Coaching', `${_name(coachId)} recommended new targets.`, 5);
+    await pushNotifyDefaultOn(pairing.client_id, 'notifCoachRecommendation', 'Coaching', `${_name(coachId)} sent you a recommendation.`, 5);
   } catch (e) { logger.warn(`[coaching] recommendation notification failed: ${e?.message || e}`); }
 }
 

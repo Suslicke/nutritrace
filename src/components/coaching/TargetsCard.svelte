@@ -9,8 +9,8 @@
   import { goals, calorieGoalMode, energyUnit, dateFormat, goalTemplates } from '../../stores/settings.js';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { Nutrition } from '../../lib/nutrition.js';
-  import { comparisonRows, acceptSwitchesToFixed, matchesTemplate } from '../../lib/coach-targets.js';
-  import { acceptTargets, declineTargets, undoTargets, templateFor } from '../../lib/coach-recommendations.js';
+  import { comparisonRows, acceptSwitchesToFixed } from '../../lib/coach-targets.js';
+  import { acceptTargets, declineTargets, undoTargets, templateFor, isUndone } from '../../lib/coach-recommendations.js';
   import { formatDay, localDay, todayLocal } from '../../lib/coaching-view.js';
 
   export let rec;
@@ -32,7 +32,9 @@
   $: base = coachView ? {} : rec.status === 'accepted' && tpl ? tpl.goals : $goals;
   $: rows = comparisonRows(base, rec.payload);
   $: switches = rec.status === 'pending' && !coachView && acceptSwitchesToFixed($calorieGoalMode, rec.payload);
-  $: undone = rec.status === 'accepted' && tpl && matchesTemplate(tpl, $goals, $calorieGoalMode);
+  // Undo is offered wherever Accept changed the goals (also when the server
+  // later refused it and they weren't put back automatically).
+  $: undone = !!tpl && isUndone(rec, $goals, $calorieGoalMode);
 
   const energy = (v) => { if (v == null) return null; const e = Nutrition.displayEnergy(Math.round(v), $energyUnit); return `${e.value.toLocaleString()} ${e.unit}`; };
   const fmt = (row, v) => (v == null ? $_('coaching.targets.not_set') : row.key === 'calories' ? energy(v) : `${Math.round(v)} g`);
@@ -49,7 +51,8 @@
     busy = true;
     try {
       const r = await acceptTargets(rec, { t: $_, date: formatDay(todayLocal(), $dateFormat) });
-      showSuccess(r.offline ? $_('coaching.targets.accepted_offline', { values: { name: coachName } }) : $_('coaching.targets.accepted'));
+      if (r.refused) showError($_('coaching.targets.refused'));
+      else if (r.applied) showSuccess(r.offline ? $_('coaching.targets.accepted_offline', { values: { name: coachName } }) : $_('coaching.targets.accepted'));
       dispatch('answered');
     } catch { showError($_('coaching.something_failed')); }
     busy = false;
@@ -141,9 +144,7 @@
   {#if coachView}
     <p class="tc-status">{$_(`coaching.targets.status_${rec.status}`)}{#if rec.response_note} · {$_('coaching.targets.response_note', { values: { note: rec.response_note } })}{/if}</p>
   {:else if rec.status === 'pending'}
-    {#if rec.sync_status === 'pending'}
-      <p class="tc-status">{$_('coaching.targets.answer_waiting', { values: { name: coachName } })}</p>
-    {:else if declining}
+    {#if declining}
       <div class="tc-decline" transition:slide={{ duration: 150 }}>
         <label class="tc-label" for="tc-note-{rec.id}">{$_('coaching.targets.decline_note')}</label>
         <textarea id="tc-note-{rec.id}" class="input" rows="2" maxlength="500" bind:value={declineNote}
@@ -167,9 +168,17 @@
       </span>
       {#if tpl && !undone}<button class="btn btn-ghost" on:click={undo}>{$_('coaching.targets.undo')}</button>{/if}
     </div>
-    {#if rec.sync_status === 'pending'}<p class="tc-status">{$_('coaching.targets.answer_waiting', { values: { name: coachName } })}</p>{/if}
   {:else}
     <p class="tc-status">{$_(`coaching.targets.status_${rec.status}`)}</p>
+    {#if tpl && !undone}
+      <div class="tc-applied">
+        <span class="tc-status">{$_('coaching.targets.still_applied')}</span>
+        <button class="btn btn-ghost" on:click={undo}>{$_('coaching.targets.undo')}</button>
+      </div>
+    {/if}
+  {/if}
+  {#if !coachView && rec.sync_status === 'pending'}
+    <p class="tc-status">{$_('coaching.targets.answer_waiting', { values: { name: coachName } })}</p>
   {/if}
 </section>
 

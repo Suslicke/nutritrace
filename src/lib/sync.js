@@ -655,8 +655,17 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
   // withdrawn). An older server leaves them waiting.
   if (Array.isArray(result.coach_answers) && live()) {
     for (const r of result.coach_answers) {
-      try { if (r.row) await dbUpsertCoachRecommendations([r.row]); }
-      catch (e) { console.warn('[sync] coaching answer result:', e?.message || e); }
+      try {
+        const mine = coachAnswers.find(a => a.id === r.id);
+        if (r.row && !r.error) { await dbUpsertCoachRecommendations([r.row]); continue; }
+        if (!r.status || r.status >= 500) continue; // waits for the next push
+        // Refused (replaced or withdrawn meanwhile, or gone with its coach):
+        // the server's word for it, and a refused Accept is put back.
+        const cr = await import('./coach-recommendations.js');
+        const row = r.row || { id: r.id, status: 'withdrawn' };
+        await cr.settleRecommendation(row);
+        if (mine?.status === 'accepted') cr.revertRefusedAccept({ ...(await cr.loadRecommendations()).find(x => x.id === r.id), ...row });
+      } catch (e) { console.warn('[sync] coaching answer result:', e?.message || e); }
     }
   }
 

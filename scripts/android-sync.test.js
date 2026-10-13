@@ -1489,3 +1489,46 @@ test('targets accepted offline on the phone: goals change there, the answer and 
   assert.deepEqual(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'goals'`, CL.id)[0].value), START);
   assert.equal(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'calorieGoalMode'`, CL.id)[0].value), 'adaptive');
 });
+
+// An Accept made offline that the server refuses (the coach replaced the
+// recommendation meanwhile): the goals go back to what they were, and the
+// card says it was replaced.
+test('targets accepted offline but replaced meanwhile: the phone puts the goals back', async (t) => {
+  if (skip(t)) return;
+  const coach = await account('uma', A), client = await account('vic', A);
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const CO = await me(coach), CL = await me(client);
+  await http(A, 'PUT', `/api/auth/users/${CO.id}/role`, { role: 'coach' });
+  const req = await http(coach, 'POST', '/api/coaching/requests', { client_id: CL.id });
+  await http(client, 'POST', `/api/coaching/pairings/${req.id}/accept`);
+  const START = { calories: { sharedGoal: true, isMin: false, isPercent: false, showInDiary: true, showInStats: true, days: Array(7).fill(2200), max: 2200 } };
+  await http(client, 'PUT', '/api/settings', { key: 'goals', value: START });
+  const rec = await http(coach, 'POST', `/api/coaching/clients/${CL.id}/recommendations`, { payload: { goals: { calories: { max: 1700 } } } });
+  // One phone run, as on a real phone: accepted with no connection, the
+  // coach replaces the recommendation meanwhile, then the phone syncs.
+  const r = phone('refused', client, `
+    const la = await import(p.src + 'lib/local-account.js');
+    localStorage.setItem('wl:userId', '${CL.id}');
+    await la.prepareLocalAccount(${JSON.stringify(CL)}, { confirm: async () => true });
+    const s = await import(p.src + 'stores/settings.js');
+    const { get } = await import('svelte/store');
+    await s.loadServerSettings();
+    await p.sync();
+    const cr = await import(p.src + 'lib/coach-recommendations.js');
+    const mine = (await cr.loadRecommendations()).find(x => x.id === ${rec.id});
+    await p.offline(async () => { await cr.acceptTargets(mine, { t: (k, o) => 'Before coach change, ' + o.values.date, date: 'today' }); });
+    const applied = get(s.goals).calories?.max;
+    await fetch(process.env.NT_SERVER + '/api/coaching/clients/${CL.id}/recommendations', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ${coach}' },
+      body: JSON.stringify({ payload: { goals: { calories: { max: 1800 } } } }) });
+    await p.sleep(1200);
+    await p.sync();
+    await p.sleep(1200);
+    await p.sync();
+    p.done({ applied, after: get(s.goals).calories?.max, status: (await cr.loadRecommendations()).find(x => x.id === ${rec.id}).status });`);
+  assert.equal(r.applied, 1700, 'applied while offline');
+  assert.equal(r.status, 'replaced');
+  assert.equal(r.after, 2200, 'the goals went back ' + JSON.stringify(r));
+  assert.equal(q(`SELECT status FROM coach_recommendations WHERE id = ?`, rec.id)[0].status, 'replaced');
+  assert.deepEqual(JSON.parse(q(`SELECT value FROM user_settings WHERE user_id = ? AND key = 'goals'`, CL.id)[0].value), START);
+});

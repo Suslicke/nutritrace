@@ -16,12 +16,14 @@ import { get } from 'svelte/store';
 import { isNative } from './platform.js';
 import { NtApi } from './api.js';
 import { goals as goalsStore, goalTemplates, calorieGoalMode, waterGoalMl } from '../stores/settings.js';
-import { applyTargets, beforeTemplate } from './coach-targets.js';
+import { applyTargets, beforeTemplate, matchesTemplate, TARGET_KEYS } from './coach-targets.js';
 
 async function _store() {
   if (isNative) {
     const n = await import('./db-native.js');
     return {
+      available: async () => true,
+      settle: (row) => n.dbSettleCoachRecommendation(row),
       list: () => n.dbCoachRecommendations(),
       upsert: (rows) => n.dbUpsertCoachRecommendations(rows),
       keep: (ids) => n.dbKeepCoachRecommendations(ids),
@@ -32,6 +34,8 @@ async function _store() {
   const { coachStore: s } = await import('./offline-api.js');
   const all = async () => (await s.all('coach_recommendations')) || [];
   return {
+    available: () => s.available(),
+    settle: (row) => s.put('coach_recommendations', [{ ...row, sync_status: 'synced' }]),
     list: async () => (await all()).filter(r => !r.deleted_at)
       .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id),
     upsert: async (rows) => {
@@ -62,9 +66,18 @@ export async function loadRecommendations() {
 export async function refreshRecommendations() {
   const rows = await NtApi.get('/api/coaching/recommendations');
   const store = await _store();
+  // Nowhere to keep them (the browser's database blocked): show the server's.
+  if (!(await store.available())) return rows || [];
   await store.upsert(rows || []);
   await store.keep((rows || []).map(r => r.id));
   return store.list();
+}
+
+/** The server's row for one, as it is (refused answers, ones gone). */
+export async function settleRecommendation(row) {
+  const store = await _store();
+  const local = (await store.list()).find(r => r.id === row.id) || {};
+  await store.settle({ ...local, ...row });
 }
 
 /** Recommendations that came with the Android sync. */
@@ -73,8 +86,12 @@ export async function storeSyncedRecommendations(rows) {
 }
 
 let _flushing = null;
-/** Send answers made on this device. One the server can no longer take
- *  (replaced, withdrawn) takes the server's word for its status. */
+/**
+ * Send answers made on this device. One the server can no longer take
+ * (replaced or withdrawn meanwhile, or gone with its coach) takes the
+ * server's word for its status, and an Accept it refused is put back
+ * (the goals return to the template) if nothing changed them since.
+ */
 export function flushAnswers() {
   if (_flushing) return _flushing;
   _flushing = (async () => {
@@ -88,12 +105,14 @@ export function flushAnswers() {
       } catch (e) {
         const status = Number(e?.status) || 0;
         if (e?.offline || !status || status >= 500) { offline = true; break; }
-        // Refused for good: the server says what it is now.
-        try {
-          const rows = await NtApi.get('/api/coaching/recommendations');
-          const now = (rows || []).find(r => r.id === a.id);
-          if (now) await store.upsert([{ ...now }]);
-        } catch { offline = true; break; }
+        // Refused for good: what it is now (or gone), and undo a refused Accept.
+        let now = null;
+        try { now = (await NtApi.get('/api/coaching/recommendations') || []).find(r => r.id === a.id) || null; }
+        catch { offline = true; break; }
+        const settled = now || { ...(await store.list()).find(r => r.id === a.id), status: 'withdrawn' };
+        await store.settle(settled);
+        if (a.status === 'accepted') revertRefusedAccept(settled);
+        sent++;
       }
     }
     if (sent && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
@@ -103,28 +122,76 @@ export function flushAnswers() {
 }
 
 const _templateName = (t, date) => t('coaching.targets.template_name', { values: { date } });
+const _accepting = new Set();
+
+/** The goals and mode Accept wrote for this recommendation (from its template). */
+function _applied(rec, tpl) {
+  return applyTargets(tpl.goals, tpl.calorieGoalMode, rec.payload);
+}
 
 /**
- * Accept targets: save goals as they are as a template, write the
- * recommended values, then record the answer (sent now, or later).
- * `t` is the i18n function, for the template's name.
+ * An Accept the server refused (replaced or withdrawn meanwhile): the
+ * goals go back, if they are still what Accept wrote. Returns true if so.
+ */
+export function revertRefusedAccept(rec) {
+  const tpl = templateFor(rec);
+  if (!tpl || rec?.status === 'accepted') return false;
+  const was = _applied(rec, tpl);
+  if (!matchesTemplate({ goals: was.goals, calorieGoalMode: was.mode }, get(goalsStore), get(calorieGoalMode))) return false;
+  return undoTargets(rec);
+}
+
+/**
+ * Accept targets. With a connection the answer goes first and the goals
+ * change only once the server took it (a recommendation replaced
+ * meanwhile changes nothing). With none, the goals change here and the
+ * answer waits. Either way, the goals as they were are saved first as a
+ * template ("Before coach change, <date>") for Undo.
+ * Returns { applied, offline, refused }.
  */
 export async function acceptTargets(rec, { note = '', t, date = new Date().toLocaleDateString() } = {}) {
-  const current = get(goalsStore) || {};
-  const mode = get(calorieGoalMode) || 'fixed';
-  const tpl = beforeTemplate({ goals: current, mode, waterGoalMl: get(waterGoalMl), name: _templateName(t, date), recommendationId: rec.id });
-  goalTemplates.update(list => [...(list || []).filter(x => x.coachRecommendationId !== rec.id), tpl]);
-  const next = applyTargets(current, mode, rec.payload);
-  goalsStore.set(next.goals);
-  if (next.mode !== mode) calorieGoalMode.set(next.mode);
-  await (await _store()).answer(rec.id, 'accepted', note);
-  const r = await flushAnswers().catch(() => ({ offline: true }));
-  return { template: tpl, offline: !!r?.offline };
+  if (_accepting.has(rec.id) || templateFor(rec)) return { applied: false, offline: false, refused: false };
+  _accepting.add(rec.id);
+  try {
+    const store = await _store();
+    let offline = false;
+    try {
+      const row = await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status: 'accepted', response_note: note || undefined });
+      await store.upsert([row]);
+    } catch (e) {
+      const status = Number(e?.status) || 0;
+      if (!(e?.offline || !status || status >= 500)) {
+        // Refused: nothing changes; the card shows what it is now.
+        try { const now = (await NtApi.get('/api/coaching/recommendations') || []).find(r => r.id === rec.id); if (now) await store.settle(now); } catch { /* shown on the next look */ }
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
+        return { applied: false, offline: false, refused: true };
+      }
+      offline = true;
+    }
+    const current = get(goalsStore) || {};
+    const mode = get(calorieGoalMode) || 'fixed';
+    const tpl = beforeTemplate({ goals: current, mode, waterGoalMl: get(waterGoalMl), name: _templateName(t, date), recommendationId: rec.id });
+    goalTemplates.update(list => [...(list || []), tpl]);
+    const next = applyTargets(current, mode, rec.payload);
+    goalsStore.set(next.goals);
+    if (next.mode !== mode) calorieGoalMode.set(next.mode);
+    if (offline) {
+      if (await store.available()) await store.answer(rec.id, 'accepted', note);
+      else throw new Error('no store');
+    }
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('nt:coach-recommendations'));
+    return { applied: true, offline, refused: false };
+  } finally { _accepting.delete(rec.id); }
 }
 
 /** Decline (with an optional note). Nothing else changes. */
 export async function declineTargets(rec, { note = '' } = {}) {
-  await (await _store()).answer(rec.id, 'declined', note);
+  const store = await _store();
+  if (!(await store.available())) {
+    await NtApi.post(`/api/coaching/recommendations/${rec.id}/answer`, { status: 'declined', response_note: note || undefined });
+    return { offline: false };
+  }
+  await store.answer(rec.id, 'declined', note);
   const r = await flushAnswers().catch(() => ({ offline: true }));
   return { offline: !!r?.offline };
 }
@@ -134,12 +201,29 @@ export function templateFor(rec) {
   return (get(goalTemplates) || []).find(x => x.coachRecommendationId === rec?.id) || null;
 }
 
-/** Undo: apply the template Accept saved (it stays in Goals, Templates). */
+/**
+ * Undo: the targets Accept changed (and the calorie mode) go back to the
+ * template it saved, exactly; any other goal changed since stays as it is.
+ * The template stays in Goals, Templates.
+ */
 export function undoTargets(rec) {
   const tpl = templateFor(rec);
   if (!tpl) return false;
-  goalsStore.set(JSON.parse(JSON.stringify(tpl.goals || {})));
-  if (tpl.waterGoalMl != null) waterGoalMl.set(tpl.waterGoalMl);
+  const before = JSON.parse(JSON.stringify(tpl.goals || {}));
+  const next = { ...(get(goalsStore) || {}) };
+  for (const key of TARGET_KEYS) {
+    if (!rec.payload?.goals?.[key]) continue;
+    if (before[key] === undefined) delete next[key]; else next[key] = before[key];
+  }
+  goalsStore.set(next);
   if (tpl.calorieGoalMode) calorieGoalMode.set(tpl.calorieGoalMode);
   return true;
+}
+
+/** Whether Undo has been done (the changed targets and mode are the template's). */
+export function isUndone(rec, goals, mode) {
+  const tpl = templateFor(rec);
+  if (!tpl) return false;
+  const pick = (g) => Object.fromEntries(TARGET_KEYS.filter(k => rec.payload?.goals?.[k] && g?.[k] !== undefined).map(k => [k, g[k]]));
+  return matchesTemplate({ goals: pick(tpl.goals), calorieGoalMode: tpl.calorieGoalMode }, pick(goals), mode);
 }

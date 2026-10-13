@@ -540,6 +540,16 @@ async function _applySchema(db) {
     console.debug('[db-native] diary items shrink skipped:', e?.message);
   }
 
+  // One row per recommendation on this phone: a refresh and a sync running
+  // together could otherwise write the same one twice. Duplicates from
+  // before go first (the newest local row stays).
+  try {
+    await db.run(`DELETE FROM coach_recommendations WHERE server_id IS NOT NULL AND id NOT IN (SELECT MAX(id) FROM coach_recommendations WHERE server_id IS NOT NULL GROUP BY server_id)`, []);
+    await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_recs_server ON coach_recommendations(server_id)`);
+  } catch (e) {
+    console.debug('[db-native] coach_recommendations index skipped:', e?.message);
+  }
+
   // The server's clock offset learned before (see _editNow).
   try {
     const v = (await db.query(`SELECT value FROM sync_meta WHERE key = 'clock_offset_ms'`))?.values?.[0]?.value;
@@ -2639,12 +2649,25 @@ export async function dbUpsertCoachRecommendations(rows = []) {
     if (local?.sync_status === 'pending' && r.status === 'pending') continue;
     await db.run(`DELETE FROM coach_recommendations WHERE server_id = ?`, [r.id]);
     await db.run(
-      `INSERT INTO coach_recommendations (server_id, pairing_id, kind, date, payload, note, status, response_note, created_at, responded_at, updated_at, deleted_at, sync_status)
+      `INSERT OR REPLACE INTO coach_recommendations (server_id, pairing_id, kind, date, payload, note, status, response_note, created_at, responded_at, updated_at, deleted_at, sync_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
       [r.id, r.pairing_id, r.kind, r.date ?? null, JSON.stringify(r.payload ?? {}), r.note ?? null, r.status, r.response_note ?? null,
         r.created_at ?? null, r.responded_at ?? null, r.updated_at ?? null, r.deleted_at ?? null]
     );
   }
+}
+
+/** The server's row, taken as it is (an answer it refused, or one gone). */
+export async function dbSettleCoachRecommendation(r) {
+  if (r?.id == null) return;
+  const db = await getDb();
+  await db.run(`DELETE FROM coach_recommendations WHERE server_id = ?`, [r.id]);
+  await db.run(
+    `INSERT OR REPLACE INTO coach_recommendations (server_id, pairing_id, kind, date, payload, note, status, response_note, created_at, responded_at, updated_at, deleted_at, sync_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+    [r.id, r.pairing_id, r.kind, r.date ?? null, JSON.stringify(r.payload ?? {}), r.note ?? null, r.status, r.response_note ?? null,
+      r.created_at ?? null, r.responded_at ?? null, r.updated_at ?? null, r.deleted_at ?? null]
+  );
 }
 
 /** Keep only these (the server's full list for this account). */

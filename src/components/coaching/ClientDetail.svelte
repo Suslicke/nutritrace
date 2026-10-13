@@ -35,6 +35,10 @@
     try { const r = await NtApi.get(`/api/coaching/clients/${id}/recommendations`); if (id === clientId) recs = r || []; }
     catch { /* offline: the kept copy, if any, came back already */ }
   }
+  // Answers arrive on the client's side: look again when these tabs open.
+  let _recTab = null;
+  $: if ((tab === 'targets' || tab === 'chat') && tab !== _recTab) { _recTab = tab; loadRecs(); }
+  $: if (tab !== 'targets' && tab !== 'chat') _recTab = null;
   $: if (tab === 'diary' && clientId && (!day || day.date !== dayDate || day._for !== clientId)) loadDay();
 
   async function loadOverview() {
