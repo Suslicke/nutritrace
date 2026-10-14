@@ -1071,6 +1071,55 @@
     "display_unit": "Enhet for visning",
     "show_in_diary": "Vis i dagbok",
     "show_in_statistics": "Vis i statistikk",
-    "containers_title": "Vannbeholdere"
+    "containers_title": "Vannbeholdere",
+    "no_containers": "Ingen beholdere enda",
+    "add_container": "Legg til beholder"
+  },
+  "settings_scanner": {
+    "recipes_sort": "Oppskriftssortering",
+    "beep_on_scan": "Lyd ved vellykket skanning",
+    "use_flashlight": "Bruk lommelykten mens du skanner",
+    "crop_photos": "Beskjær bilder når de lastes opp"
+  },
+  "settings_goals": {
+    "calorie_goal_mode": "Kalorimål modus",
+    "calorie_goal_mode_desc": "Hvordan det daglige kalorimålet beregnes",
+    "mode_fixed": "Fast",
+    "mode_dynamic": "Dynamisk",
+    "mode_adaptive": "Adaptiv",
+    "goal_factor": "Målfaktor",
+    "factor_maintain": "Oppretthold",
+    "adaptive_note": "Beregner din faktiske TDEE basert på 35 dagers vekt og dagbok, og justeres daglig. Går tilbake til det faste målet ditt inntil du har registrert nok data. Se kortet for status på Mål-siden.",
+    "how_it_works": "Hvordan det funker →",
+    "dynamic_needs_wearable": "Dynamisk modus krever en aktivitetsmåler som rapporterer forbrente kalorier (Fitbit, Garmin eller Google Helse).",
+    "dynamic_needs_wearable_setup": "Koble til en enhet under Velvære"
+  },
+  "settings_stats": {
+    "default_chart": "Standard diagramtype",
+    "show_average_line": "Vis gjennomsnittslinje",
+    "show_goal_line": "Vis mållinje",
+    "show_trend_line": "Vis trendlinje",
+    "include_today": "Inkluder i dag i trender",
+    "show_empty_days": "Vis tomme dager",
+    "custom_nutrients": "Egendefinerte næringsinnhold",
+    "no_custom_nutrients": "Ingen egendefinerte næringsstoffer",
+    "no_categories": "Ingen kategorier enda",
+    "label": "Etikett",
+    "custom_units": "Egendefinerte enheter",
+    "no_custom_units": "Ingen egendefinerte enheter enda",
+    "full_name": "Fult navn"
+  },
+  "settings_integrations": {
+    "group": "Integrasjoner",
+    "enable_usda": "Aktiver USDA FoodData",
+    "mealie_section": "Mealie",
+    "enable_mealie": "Aktiver Mealie",
+    "cooktrace_section": "CookTrace",
+    "enable_cooktrace": "Aktiver CookTrace",
+    "cooktrace_desc": "Importer oppskrifter fra din egendrevne CookTrace-instans",
+    "base_url": "Nettadresse (URL)",
+    "connected": "Tilkoblet",
+    "last_synced": "Sist Synkronisert",
+    "local_mode": "Lokal modus"
   }
 }
