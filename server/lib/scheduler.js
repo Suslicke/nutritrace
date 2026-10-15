@@ -73,8 +73,22 @@ function _getUserLocalTime(userId) {
     hour: now.getHours(), minute: now.getMinutes(),
     day: now.getDate(), weekday: now.toLocaleDateString('en-US', { weekday: 'short' }),
     dayOfWeek: now.getDay(),
-    dateStr: now.toISOString().slice(0, 10),
+    dateStr: now.toLocaleDateString('sv-SE'),   // the server's own day, like hour and dayOfWeek
   };
+}
+
+/** YYYY-MM-DD moved by n calendar days (in UTC on the bare date: no time zone moves it). */
+export function shiftDay(date, n) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Every calendar day from `from` to `to`, both included. */
+export function dayList(from, to) {
+  const out = [];
+  for (let d = from; d <= to && out.length < 4000; d = shiftDay(d, 1)) out.push(d);
+  return out;
 }
 
 function _isEnabled(userId, key) {
@@ -142,8 +156,7 @@ async function _syncWellness(userId) {
   /** Compute the sync "from" date using the user's configured sync range for a device */
   function _fromDate(deviceKey) {
     const range = _getUserSetting(userId, `${deviceKey}SyncRange`) ?? _getUserSetting(userId, 'wellnessSyncRange') ?? 7;
-    const d = new Date(); d.setDate(d.getDate() - (range - 1));
-    return d.toISOString().slice(0, 10);
+    return shiftDay(today, -(range - 1));
   }
 
   // Fitbit — prefer the new Google Health pipe if the user has those tokens.
@@ -160,11 +173,11 @@ async function _syncWellness(userId) {
     try {
       const { syncDate, syncWorkouts } = await import(fitbitModulePath);
       logger.info(`[scheduler] Fitbit sync for user ${userId}: ${from} → ${today}`);
-      const start = new Date(from + 'T12:00:00');
-      const end   = new Date(today + 'T12:00:00');
+      // Calendar days: read as the server's local noon, at UTC+13/+14 each
+      // came out a day early and today was never fetched.
+      const days = dayList(from, today);
       let totalMetrics = 0, totalErrors = 0;
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().slice(0, 10);
+      for (const dateStr of days) {
         try {
           const { metrics, errors } = await syncDate(userId, dateStr);
           totalMetrics += Object.keys(metrics || {}).length;
@@ -173,7 +186,7 @@ async function _syncWellness(userId) {
           if (e.message?.includes('429')) { logger.warn(`[scheduler] Fitbit rate limited at ${dateStr}`); break; }
           totalErrors++;
         }
-        if (d < end) await new Promise(r => setTimeout(r, 250));
+        if (dateStr < today) await new Promise(r => setTimeout(r, 250));
       }
       logger.info(`[scheduler] Fitbit sync done: ${totalMetrics} metrics across ${from}→${today}, ${totalErrors} errors`);
       if (_getUserSetting(userId, 'workoutsEnabled')) {
@@ -460,9 +473,11 @@ async function _pushReminders(userId) {
     let msg = `Aim for ${goalHours}h tonight — time to wind down.`;
     if (smart) {
       try {
+        // One calendar day back, in UTC on the bare date: read as the
+        // server's local noon, at UTC+13/+14 it was the night before last.
         const yesterday = (() => {
-          const d = new Date(local.dateStr + 'T12:00:00');
-          d.setDate(d.getDate() - 1);
+          const d = new Date(local.dateStr + 'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate() - 1);
           return d.toISOString().slice(0, 10);
         })();
         const row = db.prepare(
