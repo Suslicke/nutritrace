@@ -2173,7 +2173,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
 
       <!-- Messages -->
       <div class="ai-messages" bind:this={messagesEl}>
-        {#if !apiKey && !aiEnvLocked}
+        {#if !apiKey && !aiEnvLocked && !($aiProvider === 'oai-compat' && $aiBaseUrl?.trim())}
           <!-- Setup needed. Skipped when env-locked: the server proxy handles
                auth so no per-user API key is required. This was the rc.33
                #36 follow-up I missed — the chat send path correctly routed

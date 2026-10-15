@@ -1964,7 +1964,6 @@
       "provider": "Anbieter",
       "base_url": "Basis-URL",
       "base_url_ph": "http://localhost:11434 oder https://api.deepseek.com",
-      "base_url_desc": "Jeder OpenAI-kompatible Endpunkt (Ollama, LM Studio, DeepSeek, Groq etc.). Nur die Basis-Adresse ohne Pfad eingeben.",
       "model": "Modell",
       "custom_model_id": "Benutzerdefinierte Modell-ID",
       "custom_model_hint": "Trage die genaue Modell-ID des Anbieters ein. Nutze dies, falls das gewünschte Modell nicht im Dropdown-Menü aufgeführt ist.",

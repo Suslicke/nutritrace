@@ -16,6 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **The weekly summary push comes once a week, on your Delivery Day.** A Fitbit sync of several days that ran on a Sunday sent it again every time, whatever day was set in Settings > Notifications.
 - **Signing in with SSO finishes on phones with an older Android System WebView.** On older WebView versions (seen on 124), the app didn't recognize the sign-in return from the browser, so the sign-in page closed and the app stayed signed out.
+- **OpenAI Compatible works without an API key** (found with [notetrace#18](https://github.com/TraceApps/notetrace/issues/18)). Settings marks the key optional, but the connection test asked for one, the status stayed blank, and the chat panel said "API key required" over the conversation.
+- **OpenAI Compatible accepts a Base URL with or without `/v1`**, or the whole `/v1/chat/completions` address, in Settings and in `AI_BASE_URL`. Given with `/v1`, every request went to `/v1/v1/chat/completions`.
+- **Test Connection is always in Settings > AI Assistant.** It was only in the status line, which showed nothing until every setting was filled in, and never for OpenAI Compatible without a key. A setting filled in last tests on its own once everything it needs is there, and a test only counts for the settings it tested.
+- **When Trace gets no answer from your provider, it says what to check** instead of "Failed to fetch": the Base URL, or a server that has to allow this site on every answer, errors included, or an https:// address for a page on HTTPS. A reverse proxy that adds CORS headers only to successful answers hid the provider's real error, such as a model that can't use tools.
 
 ---
 

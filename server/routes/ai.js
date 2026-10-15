@@ -3,7 +3,7 @@ import { requireAuth, userMgmtActive } from '../middleware/auth.js';
 import { wrap } from '../logger.js';
 import { getAiConfig } from '../ai.js';
 import { makeRateLimiter } from '../middleware/rate-limit.js';
-import { getOpenAIChatParams } from '../lib/openai-chat-params.js';
+import { getOpenAIChatParams, openAIBase } from '../lib/openai-chat-params.js';
 import { toolMessagesForOpenAI, toolNameFor, rememberToolCalls } from '../lib/tool-messages.js';
 import { createToolSupportMemory, sendWithToolFallback } from '../lib/tool-support.js';
 import db from '../db.js';
@@ -199,7 +199,7 @@ router.post('/chat', requireAuth, aiChatLimit, wrap(async (req, res) => {
   const provider = cfg.ai_provider || 'claude';
   const model    = cfg.ai_model    || AI_DEFAULT_MODELS[provider] || '';
   const apiKey   = cfg.ai_api_key;
-  const baseUrl  = cfg.ai_base_url;
+  const baseUrl  = openAIBase(cfg.ai_base_url);
   const toolsArr = Array.isArray(tools) ? tools : [];
 
   // API key is required for cloud providers. `oai-compat` local endpoints

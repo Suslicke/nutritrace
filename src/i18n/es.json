@@ -1992,7 +1992,6 @@
       "provider": "Proveedor",
       "base_url": "URL base",
       "base_url_ph": "http://localhost:11434  o  https://api.deepseek.com",
-      "base_url_desc": "Cualquier endpoint /v1/chat/completions compatible con OpenAI: Ollama, LM Studio, LocalAI, vLLM, el servidor de llama.cpp, DeepSeek, Groq, Together AI, Mistral La Plateforme, etc. No incluyas la ruta, solo el origen.",
       "model": "Modelo",
       "custom_model_id": "ID de modelo personalizado",
       "custom_model_hint": "Ingresa el ID exacto del modelo según el proveedor. Úsalo si el modelo que quieres no está en la lista.",

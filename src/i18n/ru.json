@@ -2009,7 +2009,6 @@
       "goal_insights": "Анализ целей",
       "goal_insights_desc": "Ассистент анализирует тенденции вашего питания и предлагает скорректировать цели, когда закономерности устойчиво повторяются",
       "enable": "Включить ИИ-ассистента",
-      "base_url_desc": "Подойдёт любой совместимый с OpenAI endpoint /v1/chat/completions: Ollama, LM Studio, LocalAI, vLLM, сервер llama.cpp, DeepSeek, Groq, Together AI, Mistral La Plateforme и другие. Укажи только адрес сервера, без пути к endpoint.",
       "reliability_title": "Надёжность вызова инструментов зависит от модели.",
       "api_key_ph_local": "Оставь поле пустым для локальных сервисов (Ollama и пр.)",
       "key_hint_oai_compat": "Обычно локальным сервисам (Ollama, LM Studio и т. п.) ключ не нужен. Для облачных провайдеров, например DeepSeek или Groq, создайте ключ в личном кабинете провайдера.",

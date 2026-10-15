@@ -9,7 +9,9 @@
  * 3. Repeat until AI responds with text (max 5 tool rounds)
  */
 import { NUTRIMENTS } from './nutrition.js';
-import { getOpenAIChatParams } from './openai-chat-params.js';
+import { get } from 'svelte/store';
+import { _ } from 'svelte-i18n';
+import { getOpenAIChatParams, openAIBase } from './openai-chat-params.js';
 import { createToolSupportMemory, sendWithToolFallback } from './tool-support.js';
 
 // Nutrition schema for the propose_* tools — generated from the canonical
@@ -240,6 +242,45 @@ export const TOOLS = [
   },
 ];
 
+/**
+ * fetch() to a provider from this browser. Its "Failed to fetch" says
+ * nothing: the browser gives it when the address can't be reached, and when
+ * the answer doesn't allow this site to read it (CORS), which is what a proxy
+ * that adds CORS headers only to successful answers does to every error,
+ * such as a model refusing tools (TraceApps/notetrace#18). Say what to check.
+ */
+export async function fetchProvider(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    // Only a network failure is reworded (Chrome: "Failed to fetch", Firefox:
+    // "NetworkError when attempting to fetch resource.", Safari: "Load
+    // failed"). A cancelled request, or one fetch refused to send (a header
+    // it can't carry, say), stays as it was.
+    if (!(err instanceof TypeError) || !/failed to fetch|networkerror|load failed/i.test(err.message || '')) throw err;
+    let host = '';
+    try { host = new URL(url).host; } catch { /* not a URL */ }
+    host = host || String(url);
+    const page = typeof location !== 'undefined' ? location : null;
+    const official = /(^|\.)(openai\.com|anthropic\.com|googleapis\.com)$/i.test(host);
+    // An https page can't call a plain-http address (localhost aside). The
+    // Android app can (allowMixedContent), so there it's the usual advice.
+    const native = !!globalThis.Capacitor?.isNativePlatform?.();
+    const insecure = !native && page?.protocol === 'https:' && /^http:/i.test(String(url)) && !/^(localhost|127\.|\[::1\])/i.test(host);
+    const key = official ? 'unreachable_official' : insecure ? 'unreachable_insecure' : 'unreachable';
+    let message = `Couldn't get an answer from ${host}.`;
+    try {
+      const t = get(_);
+      if (typeof t === 'function') message = t(`trace.${key}`, { values: { host, origin: page?.origin || 'this site' } });
+    } catch { /* i18n not ready: the plain line above */ }
+    const e = new Error(message);
+    e.cause = err;
+    // Not "you're offline": this says what it is.
+    e.offline = false;
+    throw e;
+  }
+}
+
 // ── Main entry point ─────────────────────────────────────────────────────────
 
 // onToolsUnsupported runs when the model can't use tools and answered
@@ -257,9 +298,10 @@ export async function callAI({ provider, apiKey, model, messages, systemPrompt, 
     case 'openai':     return _callOpenAIWithTools(apiKey, renamedModel(model), messages, systemPrompt, tools, onToolCall, 'https://api.openai.com', onToolsUnsupported);
     case 'gemini':     return _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools, onToolCall);
     case 'oai-compat': {
-      if (!baseUrl) throw new Error('OpenAI Compatible provider needs a Base URL. Set one in Settings → AI Assistant.');
-      if (!model)   throw new Error('OpenAI Compatible provider needs a model name. Set one in Settings → AI Assistant.');
-      return _callOpenAIWithTools(apiKey || 'no-key', model, messages, systemPrompt, tools, onToolCall, baseUrl.replace(/\/+$/, ''), onToolsUnsupported);
+      const base = openAIBase(baseUrl);
+      if (!base)  throw new Error('OpenAI Compatible provider needs a Base URL. Set one in Settings → AI Assistant.');
+      if (!model) throw new Error('OpenAI Compatible provider needs a model name. Set one in Settings → AI Assistant.');
+      return _callOpenAIWithTools(apiKey || 'no-key', model, messages, systemPrompt, tools, onToolCall, base, onToolsUnsupported);
     }
     default: throw new Error(`Unknown AI provider: ${provider}`);
   }
@@ -424,7 +466,7 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
     };
     if (claudeTools.length) body.tools = claudeTools;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetchProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -497,7 +539,7 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
     if (apiKey && apiKey !== 'no-key') headers['Authorization'] = `Bearer ${apiKey}`;
 
     const send = async (b) => {
-      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      const res = await fetchProvider(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers,
         body: JSON.stringify(b),
@@ -581,7 +623,7 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     };
     if (geminiTools) body.tools = geminiTools;
 
-    const res = await fetch(url, {
+    const res = await fetchProvider(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

@@ -951,6 +951,9 @@
       "tap_chat_hold_voice": "Tap to chat · hold to log food by voice",
       "open_short": "AI Assistant"
     },
+    "unreachable": "Couldn't get an answer from {host}. Check the Base URL in Settings → AI Assistant. If it's right, that server has to allow requests from {origin} on every answer, errors included (with nginx, add_header … always), or Trace can be set up on the NutriTrace server instead.",
+    "unreachable_insecure": "This page is on HTTPS, so the browser won't call {host} over plain HTTP. Give your provider an https:// address, or set Trace up on the NutriTrace server instead.",
+    "unreachable_official": "{host} didn't answer. Check this device's connection.",
     "setup": {
       "api_key_required": "API key required",
       "api_key_desc": "Add your AI provider key in <strong>Settings → AI Assistant</strong> to start chatting.",
@@ -2023,6 +2026,8 @@
     "toast": {
       "connected": "Trace AI connected, assistant is ready",
       "test_failed": "Test failed",
+      "fill_fields": "Fill in the API key first",
+      "fill_fields_custom": "Fill in the Base URL and model first",
       "empty_response": "Empty response from AI"
     },
     "provider_env_locked": "Environment-locked",
@@ -2033,7 +2038,12 @@
       "provider": "Provider",
       "base_url": "Base URL",
       "base_url_ph": "http://localhost:11434  or  https://api.deepseek.com",
-      "base_url_desc": "Any OpenAI Compatible /v1/chat/completions endpoint, Ollama, LM Studio, LocalAI, vLLM, llama.cpp's server, DeepSeek, Groq, Together AI, Mistral La Plateforme, etc. Don't include the path, just the origin.",
+      "base_url_desc": "Any OpenAI Compatible /v1/chat/completions endpoint, Ollama, LM Studio, LocalAI, vLLM, llama.cpp's server, DeepSeek, Groq, Together AI, Mistral La Plateforme, etc. With or without /v1.",
+      "test_connection": "Test Connection",
+      "test_connection_desc": "Checks that Trace can reach your provider.",
+      "test_connection_desc_locked": "Checks that Trace can reach the server's AI provider.",
+      "test": "Test",
+      "testing": "Testing…",
       "model": "Model",
       "custom_model_id": "Custom Model ID",
       "custom_model_hint": "Enter the exact model ID from the vendor. Use this if the preset dropdown doesn't have the model you want.",
