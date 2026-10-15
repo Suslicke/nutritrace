@@ -167,8 +167,9 @@ router.get('/status', wrap((req, res) => {
 }));
 
 // ── Who am I? ─────────────────────────────────────────────────────────────
-// `features` is kept in the response shape for forward compatibility but is
-// currently empty. The federation API (Settings → API Tokens) used to be
+// `features` carries server facts a signed-in person's app needs: `email`,
+// whether this server sends email (the weekly summary can go by email). The
+// federation API (Settings → API Tokens) used to be
 // gated by NT_FEATURES_API=1; that gate was removed in rc.42 once the API
 // matured and sister apps (LiftTrace public, CookTrace in private beta)
 // started relying on it as a documented product feature. New feature flags
@@ -176,6 +177,10 @@ router.get('/status', wrap((req, res) => {
 router.get('/me', wrap((req, res) => {
   const features = {};
   if (!req.user) return res.json({ user: null, csrf: null, features });
+  // Whether this server sends email: signed-in people only (the weekly
+  // summary toggle shows for someone with no push service when it can go
+  // by email). Never told to anyone signed out.
+  features.email = isEmailConfigured();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   // Where this person stands in coaching, so the app knows whether to show
   // the Coach and Clients tabs without asking again.

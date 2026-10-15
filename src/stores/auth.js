@@ -32,7 +32,14 @@ export const signInProblem = writable(null);
  *  reintroducing the import surface. The apiTokens flag was retired in
  *  rc.42 once the federation API matured into a documented product
  *  feature; the Settings panel is now always visible to admins. */
-export const serverFeatures = writable({});
+// Kept between launches, so what depends on a flag (the weekly summary
+// toggle and email) still shows with no connection.
+const _cachedFeatures = (() => { try { return JSON.parse(localStorage.getItem('nt:serverFeatures') || '{}') || {}; } catch { return {}; } })();
+export const serverFeatures = writable(_cachedFeatures);
+function _setFeatures(f) {
+  serverFeatures.set(f);
+  try { localStorage.setItem('nt:serverFeatures', JSON.stringify(f)); } catch {}
+}
 
 // Synthetic local user for native standalone mode (no server configured).
 // full_name is overridden at load time from the localUserName setting (set
@@ -129,7 +136,7 @@ async function _fetchAuthFromServer() {
     const active     = !!statusData.active;
     userMgmtActive.set(active);
     setupRequired.set(!!statusData.setup_required);
-    if (meData.features) serverFeatures.set(meData.features);
+    if (meData.features) _setFeatures(meData.features);
 
     // PWA single-user mode (server reachable, user mgmt off): hydrate the
     // synthetic LOCAL_USER from local settings so $currentUser is never
@@ -218,7 +225,7 @@ async function _refreshAuthFromServer() {
       if (!meRes.ok) return; // actual server error — keep cached auth
       const meData     = await meRes.json();
       const user       = meData.user || null;
-      if (meData.features) serverFeatures.set(meData.features);
+      if (meData.features) _setFeatures(meData.features);
       if (!user) return; // don't clear auth on native — keep cached user
       currentUser.set(user);
       localStorage.setItem('wl:userId', String(user.id));

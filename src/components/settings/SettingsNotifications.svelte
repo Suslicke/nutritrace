@@ -9,6 +9,7 @@
   import { scheduleSave, weekStartDay } from '../../stores/settings.js';
   import { weekdayOrder } from '../../lib/week.js';
   import { coachingSupported, inCoaching, coachTab, clientsTab } from '../../stores/coaching.js';
+  import { serverFeatures, currentUser } from '../../stores/auth.js';
 
   function set(key, value) { DB.setSetting(key, value); scheduleSave(key, value); }
 
@@ -57,6 +58,14 @@
   let _pushTestResult = null; // null | 'ok' | 'fail'
 
   $: _anyNotifEnabled = _notifLocal || _notifPushService !== 'none';
+  // The weekly summary goes by push (a push service) and by email (the server
+  // sends mail and you have an address), so it shows when either is there.
+  $: _weeklyByPush  = _notifPushService !== 'none';
+  $: _weeklyByEmail = !!$serverFeatures?.email && !!$currentUser?.email;
+  $: _weeklyDescKey = _weeklyByPush && _weeklyByEmail ? 'weekly_desc'
+                    : _weeklyByPush ? 'weekly_desc_push'
+                    : _weeklyByEmail ? 'weekly_desc_email'
+                    : 'weekly_desc_none';
 
   // Push service status banner. Stays "Configured" as soon as required
   // fields are filled — push services (Gotify/ntfy/Apprise) are stateless
@@ -406,10 +415,13 @@
         {/if}
       </div>
     {/if}
+  {/if}
 
+  {#if _anyNotifEnabled || _weeklyByEmail}
     <p class="settings-group-heading">{$_('settings_notifications.sections.alerts_summaries')}</p>
     <p class="settings-group-sub">Milestone alerts and periodic summary reports.</p>
     <div class="card settings-card">
+      {#if _anyNotifEnabled}
       <div class="setting-row">
         <div>
           <span class="setting-label">{$_('settings_notifications.alerts.goals')}</span>
@@ -442,10 +454,11 @@
         <Toggle checked={_notifWorkouts} on:change={e => { _notifWorkouts = e.detail; set('notifWorkoutSummary', e.detail); }} />
       </div>
       <div class="setting-divider"></div>
+      {/if}
       <div class="setting-row">
         <div>
           <span class="setting-label">{$_('settings_notifications.alerts.weekly')}</span>
-          <div class="setting-desc">{$_('settings_notifications.alerts.weekly_desc')}</div>
+          <div class="setting-desc">{$_(`settings_notifications.alerts.${_weeklyDescKey}`)}</div>
         </div>
         <Toggle checked={_notifWeekly} on:change={e => { _notifWeekly = e.detail; set('notifWeeklySummary', e.detail); }} />
       </div>
@@ -470,6 +483,7 @@
           <TimePicker value={_weeklySummaryTime} on:change={e => { _weeklySummaryTime = e.detail; set('weeklySummaryTime', e.detail); }} />
         </div>
       {/if}
+      {#if _anyNotifEnabled}
       <div class="setting-divider"></div>
       <div class="setting-row">
         <div>
@@ -478,6 +492,7 @@
         </div>
         <Toggle checked={_notifSync} on:change={e => { _notifSync = e.detail; set('notifSyncFailures', e.detail); }} />
       </div>
+      {/if}
     </div>
   {/if}
 
