@@ -494,21 +494,37 @@ async function _pushReminders(userId) {
       }
     }
   }
+}
 
-  // Weekly summary — user-configurable day + time
+// Weekly summary: on the day and hour the person chose, once a week, to each
+// channel they have: a push where a push service is set, an email where the
+// server sends mail and they have an address. Its own step, so an email-only
+// person gets it too (it used to sit behind the push service check). With
+// neither, nothing is sent and nothing is marked as sent.
+async function _weeklySummary(userId) {
+  if (!_isEnabled(userId, 'notifWeeklySummary')) return;
+  const pushService = _getUserSetting(userId, 'notifPushService');
+  const canPush = !!pushService && pushService !== 'none';
+  let canEmail = false;
+  try {
+    const { isEmailConfigured } = await import('../email.js');
+    canEmail = isEmailConfigured() && !!db.prepare('SELECT email FROM users WHERE id = ?').get(userId)?.email;
+  } catch { /* no email */ }
+  if (!canPush && !canEmail) return;
+  const local = _getUserLocalTime(userId);
+  const summaryDay  = _getUserSetting(userId, 'weeklySummaryDay')  ?? 0;    // 0=Sun default
+  const summaryTime = _getUserSetting(userId, 'weeklySummaryTime') ?? '09:00';
+  const [targetHour] = summaryTime.split(':').map(Number);
+  logger.debug(`[scheduler] weekly check: user=${userId} dow=${local.dayOfWeek} target=${summaryDay} hour=${local.hour} targetHour=${targetHour}`);
   // Dedup check is AFTER the day/hour gate so the timestamp only burns when we actually send
-  if (_isEnabled(userId, 'notifWeeklySummary')) {
-    const summaryDay  = _getUserSetting(userId, 'weeklySummaryDay')  ?? 0;    // 0=Sun default
-    const summaryTime = _getUserSetting(userId, 'weeklySummaryTime') ?? '09:00';
-    const [targetHour] = summaryTime.split(':').map(Number);
-    logger.debug(`[scheduler] weekly check: user=${userId} dow=${local.dayOfWeek} target=${summaryDay} hour=${local.hour} targetHour=${targetHour}`);
-    if (local.dayOfWeek === summaryDay && local.hour >= targetHour && local.hour < targetHour + 1
-        && !_ranRecently(userId, 'weekly', 6 * 24 * 60 * 60 * 1000)) {
-      logger.info(`[scheduler] SENDING weekly summary for user ${userId}`);
-      // Push notification
+  if (local.dayOfWeek === summaryDay && local.hour >= targetHour && local.hour < targetHour + 1
+      && !_ranRecently(userId, 'weekly', 6 * 24 * 60 * 60 * 1000)) {
+    logger.info(`[scheduler] SENDING weekly summary for user ${userId} (push=${canPush} email=${canEmail})`);
+    if (canPush) {
       const { sendWeeklySummary } = await import('./push-notify.js');
-      await sendWeeklySummary(userId);
-      // Email digest (if SMTP configured + user has an email on file)
+      await sendWeeklySummary(userId).catch((e) => logger.debug(`[scheduler] weekly push failed for user ${userId}: ${e.message}`));
+    }
+    if (canEmail) {
       try {
         const { sendWeeklySummaryEmail } = await import('../email.js');
         const origin = linkBase(null) || 'http://localhost:3001';
@@ -531,6 +547,7 @@ async function _tick() {
     for (const userId of userIds) {
       try {
         await _pushReminders(userId);
+        await _weeklySummary(userId);
         await _syncWellness(userId);
         _checkFastingSchedule(userId);
       } catch (e) {

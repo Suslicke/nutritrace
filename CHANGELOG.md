@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **The weekly summary email reaches people with no push service.** With Weekly Summary on and an email address but no ntfy, Gotify or Apprise set up, the email never came. It now goes on your Delivery Day to each channel you have: email, push, or both.
 - **The weekly summary push comes once a week, on your Delivery Day.** A Fitbit sync of several days that ran on a Sunday sent it again every time, whatever day was set in Settings > Notifications.
 - **Signing in with SSO finishes on phones with an older Android System WebView.** On older WebView versions (seen on 124), the app didn't recognize the sign-in return from the browser, so the sign-in page closed and the app stayed signed out.
 - **OpenAI Compatible works without an API key** (found with [notetrace#18](https://github.com/TraceApps/notetrace/issues/18)). Settings marks the key optional, but the connection test asked for one, the status stayed blank, and the chat panel said "API key required" over the conversation.
