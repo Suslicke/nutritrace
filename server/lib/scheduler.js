@@ -51,12 +51,14 @@ function _getUserLocalTime(userId) {
   if (tz) {
     try {
       const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false,
+        // hourCycle h23, not hour12: false: with that, Node 20's ICU writes the
+        // hour after midnight as "24", and nothing set for 00:00 to 00:59 fired.
+        timeZone: tz, hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
         year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
       }).formatToParts(new Date());
       const get = (type) => parts.find(p => p.type === type)?.value;
       return {
-        hour: parseInt(get('hour')),
+        hour: parseInt(get('hour')) % 24,
         minute: parseInt(get('minute')),
         day: parseInt(get('day')),
         weekday: new Date().toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' }),
@@ -99,6 +101,17 @@ function _isEnabled(userId, key) {
 
 // ── Scheduled wellness sync (per-device) ────────────────────────────────────
 
+/** Minutes since the person's midnight, 0 to 1439. */
+function _localMinutes(local) {
+  return (local.hour % 24) * 60 + local.minute;
+}
+
+/** Whether `cur` is within `len` minutes from `target` (minutes since
+ *  midnight), across midnight too: a 23:55 reminder is due at 00:03. */
+export function inWindow(cur, target, len = 15) {
+  return ((cur - target) % 1440 + 1440) % 1440 < len;
+}
+
 /** Check if a device should sync now based on its per-device settings */
 function _shouldDeviceSync(userId, deviceKey, local) {
   const mode = _getUserSetting(userId, `${deviceKey}SyncMode`);
@@ -107,14 +120,13 @@ function _shouldDeviceSync(userId, deviceKey, local) {
   const winStart = _getUserSetting(userId, `${deviceKey}SyncWindowStart`);
   const winEnd   = _getUserSetting(userId, `${deviceKey}SyncWindowEnd`);
   const interval = _getUserSetting(userId, `${deviceKey}SyncInterval`) ?? 1440;
-  const curMin   = local.hour * 60 + local.minute;
+  const curMin   = _localMinutes(local);
 
   // Daily "Sync At" mode: windowStart set, windowEnd null → sync at a specific time
   if (interval >= 1440 && winStart && !winEnd) {
     const [sh, sm] = winStart.split(':').map(Number);
     const targetMin = sh * 60 + sm;
-    const diff = curMin - targetMin;
-    return diff >= 0 && diff < 15; // within 15-min window of target time
+    return inWindow(curMin, targetMin); // within 15-min window of target time
   }
 
   // Active window check — skip if outside the configured hours
@@ -303,8 +315,7 @@ function _checkFastingSchedule(userId) {
     if (!Array.isArray(days) || !days.includes(dow)) return;
     const time = _getUserSetting(userId, 'fastingScheduleTime') || '20:00';
     const [hh, mm] = String(time).split(':').map(n => parseInt(n) || 0);
-    // Node 20's ICU writes the hour after midnight as "24": that is 0 here.
-    const lateMin = ((local.hour % 24) * 60 + local.minute) - (hh * 60 + mm);
+    const lateMin = _localMinutes(local) - (hh * 60 + mm);
     if (lateMin < 0) return;
     // 4-hour grace window: if the person opens late we don't backdate a fast
     if (lateMin > 4 * 60) {
@@ -333,7 +344,7 @@ async function _pushReminders(userId) {
 
   const { pushNotify } = await import('./push-notify.js');
   const local = _getUserLocalTime(userId);
-  const currentMin = local.hour * 60 + local.minute;
+  const currentMin = _localMinutes(local);
 
   // Water reminders — skip if already hit water goal today
   if (_isEnabled(userId, 'notifWaterReminders')) {
@@ -395,7 +406,7 @@ async function _pushReminders(userId) {
     times.forEach((time, i) => {
       const [th, tm] = time.split(':').map(Number);
       const targetMin = th * 60 + tm;
-      if (currentMin >= targetMin && currentMin < targetMin + 15 && !_ranRecently(userId, `meal_${i}`)) {
+      if (inWindow(currentMin, targetMin) && !_ranRecently(userId, `meal_${i}`)) {
         // Skip if this meal slot already has items logged
         // Check both numeric meal index AND string (some clients may store as string)
         const mealHasItems = diaryItems.some(item => {
@@ -419,7 +430,7 @@ async function _pushReminders(userId) {
     const time = _getUserSetting(userId, 'notifWeighInTime') || '07:00';
     const [th, tm] = time.split(':').map(Number);
     const targetMin = th * 60 + tm;
-    if (currentMin >= targetMin && currentMin < targetMin + 15 && !_ranRecently(userId, 'weighin')) {
+    if (inWindow(currentMin, targetMin) && !_ranRecently(userId, 'weighin')) {
       // Check if weight already logged today (either manual diary entry or synced from scale)
       const today = local.dateStr;
       let alreadyWeighed = false;
@@ -501,14 +512,15 @@ async function _pushReminders(userId) {
     }
 
     // Main bedtime reminder
-    if (currentMin >= bedtimeMin && currentMin < bedtimeMin + 15 && !_ranRecently(userId, 'bedtime')) {
+    if (inWindow(currentMin, bedtimeMin) && !_ranRecently(userId, 'bedtime')) {
       await pushNotify(userId, 'notifBedtime', '🌙 Bedtime Reminder', msg, 4);
     }
 
     // Wind-down pre-reminder
     if (windDownEnabled) {
-      const windDownTarget = bedtimeMin - windDownMin;
-      if (windDownTarget >= 0 && currentMin >= windDownTarget && currentMin < windDownTarget + 15
+      // The evening before, for a bedtime just after midnight.
+      const windDownTarget = (bedtimeMin - windDownMin + 1440) % 1440;
+      if (inWindow(currentMin, windDownTarget)
           && !_ranRecently(userId, 'bedtime_winddown')) {
         await pushNotify(userId, 'notifBedtime', '🌙 Wind Down',
           `Bedtime in ${windDownMin} min — start winding down. ${msg}`, 4);

@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Reminders and the weekly summary set just after midnight fire.** The server read the hour after midnight as 24, so a bedtime, meal or weigh-in reminder, a daily device sync or a weekly summary set between 00:00 and 00:59 never came, and a device sync window starting at 00:00 skipped its first hour. The wind-down before a bedtime just after midnight now comes the evening before. Reminders set just before midnight still come when the check runs just after it.
 - **Trace's diary averages cover the days before today.** In the evening west of UTC the window took in today and left out its oldest day.
 - **Scheduled fasts start at your time and are marked on your day.** On a server in another time zone, a scheduled fast followed the server's clock (a New York 23:00 fast started at 19:00 on a UTC server), and the day it fired was marked with the UTC date, so after an evening start west of UTC the next day's fast was skipped. `POST /api/settings/force-sync` also fetches your today, not the UTC date's.
 - **Weekly Summary can be turned on with email alone.** Settings > Notifications showed it only with Device Notifications or a Push Service on. It now also shows when the server sends email and you have an address, and its description says whether it comes by push, email or both.

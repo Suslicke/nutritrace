@@ -123,5 +123,5 @@ test('the forced sync fetches the person\'s today', () => {
   const src = readFileSync(new URL('../server/lib/scheduler.js', import.meta.url), 'utf8');
   const fn = src.slice(src.indexOf('export async function forceSync'));
   assert.match(fn.slice(0, 400), /const today = _getUserLocalTime\(userId\)\.dateStr;/);
-  assert.match(src, /const lateMin = \(\(local\.hour % 24\) \* 60 \+ local\.minute\) - \(hh \* 60 \+ mm\);/);
+  assert.match(src, /const lateMin = _localMinutes\(local\) - \(hh \* 60 \+ mm\);/);
 });
