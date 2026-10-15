@@ -120,6 +120,11 @@ test('Settings: no key needed for OpenAI Compatible, the last field tests, Test 
   assert.match(s, /\(aiProviderVal === 'oai-compat' \? !!aiBaseUrlVal\?\.trim\(\) : !!aiApiKeyVal\?\.trim\(\)\)/, 'the status line too');
   assert.match(s, /async function _autoTest\(\) \{\s*if \(!_canTest\(\)\) return;[\s\S]{0,200}await testConnection\(\{ quietFail: keyMayFollow \}\)/);
   assert.equal((s.match(/if \(stale\(\)\) return;/g) || []).length, 2);
+  // A stale result just goes: no test of its own (a provider switch would
+  // send the old key to the new provider; a model being typed would test
+  // half a name).
+  const staleFn = s.match(/const stale = \(\) => \{[\s\S]*?\n {4}\};/)[0];
+  assert.doesNotMatch(staleFn, /_testAgain/);
   assert.match(s, /if \(!quietFail\) showError/);
   assert.match(s, /settings_trace\.labels\.test_connection'\)[\s\S]{0,400}on:click=\{\(\) => testConnection\(\)\} disabled=\{testing\}/);
   assert.doesNotMatch(s, /onRetest=/);
