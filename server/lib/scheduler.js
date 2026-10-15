@@ -4,7 +4,7 @@
  * Runs periodic checks for:
  * 1. Scheduled wellness sync (Fitbit/Garmin/Withings) per user settings
  * 2. Push notifications for time-based reminders (water, meal, weigh-in)
- * 3. Weekly summary on Sundays
+ * 3. Weekly summary on the day and hour each person chose
  *
  * Checks every 15 minutes. Each user's schedule is read from user_settings.
  */

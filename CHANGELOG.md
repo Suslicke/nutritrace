@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **The weekly summary push comes once a week, on your Delivery Day.** A Fitbit sync of several days that ran on a Sunday sent it again every time, whatever day was set in Settings > Notifications.
 - **Signing in with SSO finishes on phones with an older Android System WebView.** On older WebView versions (seen on 124), the app didn't recognize the sign-in return from the browser, so the sign-in page closed and the app stayed signed out.
 
 ---
