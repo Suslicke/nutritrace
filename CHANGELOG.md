@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Trace's diary averages cover the days before today.** In the evening west of UTC the window took in today and left out its oldest day.
 - **Scheduled fasts start at your time and are marked on your day.** On a server in another time zone, a scheduled fast followed the server's clock (a New York 23:00 fast started at 19:00 on a UTC server), and the day it fired was marked with the UTC date, so after an evening start west of UTC the next day's fast was skipped. `POST /api/settings/force-sync` also fetches your today, not the UTC date's.
 - **Weekly Summary can be turned on with email alone.** Settings > Notifications showed it only with Device Notifications or a Push Service on. It now also shows when the server sends email and you have an address, and its description says whether it comes by push, email or both.
 - **Scheduled Fitbit syncs and the smart bedtime reminder use the right days at UTC+13 and +14.** On a server in New Zealand (in summer), Tonga or Samoa, the scheduled sync fetched each day a day early and never today, and the bedtime reminder used the night before last as last night.

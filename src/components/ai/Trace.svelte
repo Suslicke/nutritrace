@@ -352,8 +352,10 @@
             // Build the date window: the previous numDays days, excluding today.
             const dates = new Set();
             for (let i = numDays; i >= 1; i--) {
+              // Local days, as the diary keys them: the UTC date moved the
+              // window a day forward in the evening west of UTC.
               const d = new Date(); d.setDate(d.getDate() - i);
-              dates.add(d.toISOString().slice(0, 10));
+              dates.add(localDateStr(d));
             }
             // Single bulk fetch instead of N per-date round trips. The server
             // returns every diary row for this user; we filter client-side.
