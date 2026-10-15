@@ -121,7 +121,13 @@
       "distance": "Distance",
       "temperature": "Temperature",
       "time_12h": "12-hour (AM/PM)",
-      "time_24h": "24-hour"
+      "time_24h": "24-hour",
+      "first_day": "First Day of Week",
+      "first_day_desc": "Automatic follows your device's region, which starts the week on {day}.",
+      "first_day_auto": "Automatic",
+      "first_day_monday": "Monday",
+      "first_day_sunday": "Sunday",
+      "first_day_saturday": "Saturday"
     },
     "diary": {
       "section": "Diary",

@@ -8,6 +8,7 @@
 import db from '../db.js';
 import { logger } from '../logger.js';
 import { fetchChecked, serviceBase } from './ssrf-guard.js';
+import { userWeeklyRange } from './weekly-range.js';
 
 // Push services (Gotify, ntfy, Apprise) usually live on the home network,
 // so that's allowed for every account; the address is still checked on
@@ -203,12 +204,18 @@ export function notifyStepGoal(userId, steps, goal) {
 }
 
 export async function sendWeeklySummary(userId) {
+  // The last 7 days, or with a First Day of Week chosen, the same whole
+  // week the email covers (#232, lib/weekly-range.js).
+  const week = userWeeklyRange(userId);
+  const span = week ? `date >= ? AND date <= ?` : `date >= date('now','-7 days')`;
+  const spanArgs = week ? [week.from, week.to] : [];
+  const spanTo = week ? `date >= ? AND date <= ?` : `date >= date('now','-7 days') AND date <= date('now')`;
   const rows = db.prepare(
     `SELECT metric_type, AVG(value) as avg FROM wellness_data
-     WHERE user_id=? AND source='fitbit' AND date >= date('now','-7 days')
+     WHERE user_id=? AND source='fitbit' AND ${span}
      AND metric_type IN ('steps','calories_out','sleep_duration_min')
      GROUP BY metric_type`
-  ).all(userId);
+  ).all(userId, ...spanArgs);
 
   const m = {};
   for (const r of rows) m[r.metric_type] = r.avg;
@@ -240,9 +247,9 @@ export async function sendWeeklySummary(userId) {
       const doneRow = db.prepare(
         `SELECT COUNT(*) AS n FROM diary
           WHERE user_id = ? AND completed_at IS NOT NULL
-            AND date >= date('now','-7 days') AND date <= date('now')
+            AND ${spanTo}
             AND deleted_at IS NULL`
-      ).get(userId);
+      ).get(userId, ...spanArgs);
       const done = Number(doneRow?.n || 0);
       if (done > 0) {
         parts.push(`Marked complete: ${done} of 7 days`);

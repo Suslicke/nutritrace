@@ -8,7 +8,8 @@
   import { _ } from 'svelte-i18n';
   import { NtApi } from '../../lib/api.js';
   import { Nutrition } from '../../lib/nutrition.js';
-  import { energyUnit, weightUnit, dateFormat } from '../../stores/settings.js';
+  import { energyUnit, weightUnit, dateFormat, weekStartDay } from '../../stores/settings.js';
+  import { weekdayOrder } from '../../lib/week.js';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { TARGET_KEYS } from '../../lib/coach-targets.js';
   import { coachingErrorText } from '../../lib/coaching-view.js';
@@ -22,6 +23,8 @@
 
   const dispatch = createEventDispatcher();
   const LABEL = { calories: 'coaching.targets.calories', proteins: 'coaching.targets.protein', carbohydrates: 'coaching.targets.carbs', fat: 'coaching.targets.fat' };
+  // Indexed by weekday (0 Sunday), as targets store their days. Shown from
+  // the coach's own first day of the week; each value stays on its weekday (#232).
   const DAYS = Array.from({ length: 7 }, (_, d) => new Date(2026, 9, 11 + d).toLocaleDateString(undefined, { weekday: 'short' }));
   const KJ = 4.184;
 
@@ -184,7 +187,8 @@
           </div>
         {:else}
           <div class="te-days">
-            {#each DAYS as d, i}
+            {#each weekdayOrder($weekStartDay) as i}
+              {@const d = DAYS[i]}
               <label class="te-day"><span>{d}</span><input class="input" inputmode="decimal" aria-label="{$_(LABEL[key])} {d}" bind:value={ed[key].days[i]} on:input={() => touch(key)} /></label>
             {/each}
           </div>

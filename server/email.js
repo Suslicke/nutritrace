@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import db from './db.js';
 import { logger } from './logger.js';
+import { userWeeklyRange } from './lib/weekly-range.js';
 
 /** Seed app_config from env vars at startup (env vars take priority) */
 export function seedSmtpFromEnv() {
@@ -417,11 +418,18 @@ export async function sendWeeklySummaryEmail(userId, origin) {
     const toEmail  = user.email;
     const name     = user.full_name || user.username || 'there';
 
-    // Date range: last 7 days
-    const toDate   = new Date();
-    const fromDate = new Date(toDate); fromDate.setDate(toDate.getDate() - 6);
-    const fromStr  = fromDate.toISOString().slice(0, 10);
-    const toStr    = toDate.toISOString().slice(0, 10);
+    // Date range: last 7 days, or with a First Day of Week chosen, the
+    // latest whole week by it (#232, lib/weekly-range.js).
+    let toDate   = new Date();
+    let fromDate = new Date(toDate); fromDate.setDate(toDate.getDate() - 6);
+    let fromStr  = fromDate.toISOString().slice(0, 10);
+    let toStr    = toDate.toISOString().slice(0, 10);
+    const week = userWeeklyRange(userId);
+    if (week) {
+      fromStr = week.from; toStr = week.to;
+      fromDate = new Date(`${week.from}T12:00:00`);
+      toDate   = new Date(`${week.to}T12:00:00`);
+    }
 
     // ── Nutrition averages from diary ─────────────────────────────────────
     const diaryRows = db.prepare(

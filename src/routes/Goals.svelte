@@ -7,7 +7,8 @@
   import { DB, localDateStr } from '../lib/db.js';
   import { NtApi } from '../lib/api.js';
   import { portal } from '../lib/portal.js';
-  import { goals, goalTemplates, energyUnit, weightUnit, heightUnit, lengthUnit, visibleNutriments, hiddenBodyStats, waterGoalMl, waterUnit, pageBanners, bannerStyle, wellnessEnabled, fitbitEnabled, garminEnabled, googleHealthEnabled, healthConnectEnabled, fitbitFamilyEnabled, calorieGoalMode, calorieGoalFactor } from '../stores/settings.js';
+  import { goals, goalTemplates, energyUnit, weightUnit, heightUnit, lengthUnit, visibleNutriments, hiddenBodyStats, waterGoalMl, waterUnit, pageBanners, bannerStyle, wellnessEnabled, fitbitEnabled, garminEnabled, googleHealthEnabled, healthConnectEnabled, fitbitFamilyEnabled, calorieGoalMode, calorieGoalFactor, weekStartDay } from '../stores/settings.js';
+  import { weekdayOrder } from '../lib/week.js';
   import { NUTRIMENTS, Nutrition } from '../lib/nutrition.js';
   import { readBodyStat } from '../lib/body-stats-unit.js';
   import { decimalInput, parseDecimal } from '../lib/decimal-input.js';
@@ -415,7 +416,8 @@
         editVal0 = String(toDisp(g.max ?? g.min ?? ''));
       } else {
         editDayVals = g.days ? g.days.map(v => v != null ? String(toDisp(v)) : '') : ['','','','','','',''];
-        editVal0 = String(editDayVals[0]);
+        // The first day shown (the week's first day, #232) seeds One Target.
+        editVal0 = String(editDayVals[$weekStartDay]);
       }
     } else {
       editShared  = true; editIsMin = false;
@@ -479,6 +481,8 @@
     editOpen = false;
   }
 
+  // Indexed by weekday (0 Sunday), as goals store their days; the editor
+  // lists them from the week's first day (#232).
   const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   const MACRO_DENSITY = { fat: 9, 'saturated-fat': 9, carbohydrates: 4, sugars: 4, proteins: 4 };
@@ -1382,7 +1386,8 @@
           <input class="input" type="text" inputmode="decimal" use:decimalInput
             placeholder="0" bind:value={editVal0} />
         {:else}
-          {#each DAYS as day, i}
+          {#each weekdayOrder($weekStartDay) as i}
+            {@const day = DAYS[i]}
             <label class="form-label">{$_('goals_page.editor.value_label_day', { values: { day, unit: editIsPercent ? $_('goals_page.editor.value_percent_of_cal') : (_editUnit || '') } })}</label>
             <input class="input" type="text" inputmode="decimal" use:decimalInput
               placeholder="0" bind:value={editDayVals[i]} style="margin-bottom:8px" />

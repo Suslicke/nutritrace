@@ -6,7 +6,8 @@
   import { createEventDispatcher } from 'svelte';
   import { slide } from 'svelte/transition';
   import { _ } from 'svelte-i18n';
-  import { goals, calorieGoalMode, calorieGoalFactor, energyUnit, dateFormat, goalTemplates } from '../../stores/settings.js';
+  import { goals, calorieGoalMode, calorieGoalFactor, energyUnit, dateFormat, goalTemplates, weekStartDay } from '../../stores/settings.js';
+  import { inWeekOrder } from '../../lib/week.js';
   import { NtApi } from '../../lib/api.js';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { Nutrition } from '../../lib/nutrition.js';
@@ -63,6 +64,8 @@
     if (row.key === 'calories') { const e = Nutrition.displayEnergy(Math.round(row.diff), $energyUnit); return `${sign}${e.value.toLocaleString()} ${e.unit}`; }
     return `${sign}${Math.round(row.diff)} g`;
   };
+  // Indexed by weekday (0 Sunday), like the day values; shown from the
+  // viewer's first day of the week (#232).
   const DAYS = Array.from({ length: 7 }, (_, d) => new Date(2026, 9, 11 + d).toLocaleDateString(undefined, { weekday: 'short' }));
 
   async function accept() {
@@ -136,13 +139,13 @@
       {#if showDays}
         <div class="tc-days" transition:slide={{ duration: 150 }}>
           <table class="tc-table tc-week">
-            <thead><tr><th></th>{#each DAYS as d}<th scope="col">{d}</th>{/each}</tr></thead>
+            <thead><tr><th></th>{#each inWeekOrder(DAYS, $weekStartDay) as d}<th scope="col">{d}</th>{/each}</tr></thead>
             <tbody>
               {#each rows.filter(r => r.byWeekday) as row (row.key)}
                 {#if !coachView && row.currentDays}
-                  <tr class="tc-old"><th scope="row">{$_(LABEL[row.key])} · {$_('coaching.targets.now')}</th>{#each row.currentDays as v}<td>{v == null ? '' : row.key === 'calories' ? Math.round(Nutrition.displayEnergy(v, $energyUnit).value) : Math.round(v)}</td>{/each}</tr>
+                  <tr class="tc-old"><th scope="row">{$_(LABEL[row.key])} · {$_('coaching.targets.now')}</th>{#each inWeekOrder(row.currentDays, $weekStartDay) as v}<td>{v == null ? '' : row.key === 'calories' ? Math.round(Nutrition.displayEnergy(v, $energyUnit).value) : Math.round(v)}</td>{/each}</tr>
                 {/if}
-                <tr><th scope="row">{$_(LABEL[row.key])}</th>{#each row.proposedDays as v}<td>{v == null ? '' : row.key === 'calories' ? Math.round(Nutrition.displayEnergy(v, $energyUnit).value) : Math.round(v)}</td>{/each}</tr>
+                <tr><th scope="row">{$_(LABEL[row.key])}</th>{#each inWeekOrder(row.proposedDays, $weekStartDay) as v}<td>{v == null ? '' : row.key === 'calories' ? Math.round(Nutrition.displayEnergy(v, $energyUnit).value) : Math.round(v)}</td>{/each}</tr>
               {/each}
             </tbody>
           </table>

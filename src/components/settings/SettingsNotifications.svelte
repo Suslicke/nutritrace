@@ -6,7 +6,8 @@
   import ConnectionStatus from './ConnectionStatus.svelte';
   import { showSuccess, showError } from '../../stores/toast.js';
   import { DB } from '../../lib/db.js';
-  import { scheduleSave } from '../../stores/settings.js';
+  import { scheduleSave, weekStartDay } from '../../stores/settings.js';
+  import { weekdayOrder } from '../../lib/week.js';
   import { coachingSupported, inCoaching, coachTab, clientsTab } from '../../stores/coaching.js';
 
   function set(key, value) { DB.setSetting(key, value); scheduleSave(key, value); }
@@ -452,8 +453,10 @@
         <div class="setting-divider"></div>
         <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px">
           <span class="setting-label">{$_('settings_notifications.alerts.delivery_day')}</span>
-          <div class="seg-control" style="--seg-count:7;--seg-active:{_weeklySummaryDay};width:100%">
-            {#each [$_('settings_notifications.alerts.day_sun'), $_('settings_notifications.alerts.day_mon'), $_('settings_notifications.alerts.day_tue'), $_('settings_notifications.alerts.day_wed'), $_('settings_notifications.alerts.day_thu'), $_('settings_notifications.alerts.day_fri'), $_('settings_notifications.alerts.day_sat')] as day, i}
+          <!-- Stored by weekday (0 Sunday); shown from the week's first day (#232). -->
+          <div class="seg-control" style="--seg-count:7;--seg-active:{weekdayOrder($weekStartDay).indexOf(_weeklySummaryDay)};width:100%">
+            {#each weekdayOrder($weekStartDay) as i}
+              {@const day = [$_('settings_notifications.alerts.day_sun'), $_('settings_notifications.alerts.day_mon'), $_('settings_notifications.alerts.day_tue'), $_('settings_notifications.alerts.day_wed'), $_('settings_notifications.alerts.day_thu'), $_('settings_notifications.alerts.day_fri'), $_('settings_notifications.alerts.day_sat')][i]}
               <button class="seg-opt" class:seg-active={_weeklySummaryDay === i}
                 on:click={() => { _weeklySummaryDay = i; set('weeklySummaryDay', i); }}>
                 {day}

@@ -1,6 +1,7 @@
 import { writable, get, derived } from 'svelte/store';
 import { DB } from '../lib/db.js';
 import { noteCoachingSignature } from './coaching.js';
+import { FIRST_DAY_DEFAULT, resolveFirstDay } from '../lib/week.js';
 
 // Verbose settings sync logs gated on dev OR opt-in verbose mode
 // (Settings → Diagnostics → Verbose diagnostic logging).
@@ -44,7 +45,7 @@ export const USER_PREFS = new Set([
   'offEnabled','offSearchLanguage','offSearchCountry','offUploadCountry','offImportPortion',
   'weightUnit','heightUnit','lengthUnit','distUnit','tempUnit',
   'waterGoalMl','waterUnit','waterContainers','waterShowInStats','waterShowInDiary',
-  'dateFormat','timeFormat','timezone',
+  'dateFormat','timeFormat','timezone','firstDayOfWeek',
   'statsChartType','statsYZero','statsAvgLine','statsGoalLine','statsTrendLine','statsIncludeToday','statsShowEmptyDays',
   'statsMetricOrder','statsHiddenMetrics',
   // User profile (collected by Wizard, used for goal calculation; sync so multi-device
@@ -768,6 +769,11 @@ export const goalCelebrations   = createSettingStore('goalCelebrations',   true)
 export const dateFormat = createSettingStore('dateFormat', 'US');   // 'ISO' | 'US' | 'EU' | 'natural'
 export const timeFormat = createSettingStore('timeFormat', '12h');  // '12h' | '24h'
 export const timezone   = createSettingStore('timezone',   '');     // IANA timezone (e.g. 'America/New_York'), empty = auto-detect
+// First Day of Week (#232): 'auto' (the device's locale), 'monday', 'sunday'
+// or 'saturday'. weekStartDay is the day it comes to (0 Sunday, 1 Monday ...).
+// It only orders weeks; what's stored by weekday keeps its real weekdays.
+export const firstDayOfWeek = createSettingStore('firstDayOfWeek', FIRST_DAY_DEFAULT);
+export const weekStartDay   = derived(firstDayOfWeek, s => resolveFirstDay(s));
 
 // Statistics chart settings
 export const statsChartType = createSettingStore('statsChartType', 'bar');

@@ -21,7 +21,8 @@
   import { NtApi } from '../../lib/api.js';
   import { localDateStr } from '../../lib/db.js';
   import { Nutrition } from '../../lib/nutrition.js';
-  import { disableAnimations, dateFormat } from '../../stores/settings.js';
+  import { disableAnimations, dateFormat, weekStartDay } from '../../stores/settings.js';
+  import { weekIsos } from '../../lib/week.js';
 
   // Mirrors Diary.svelte's formatDateSub — respects the user's
   // Settings → Regional → Date Format preference (ISO / US / EU /
@@ -138,24 +139,15 @@
   });
   $: _popDay = hoveredIso ? strip.find(d => d.iso === hoveredIso && d.stats) || null : null;
 
-  // Return the 7 iso dates of the calendar week containing anchorIso
-  // (Sunday through Saturday). Extracted from the previous inline logic
-  // because both the strip derivation AND _loadWeekAdjustments need it.
-  function _weekIsos(anchorIso) {
-    const anchor = anchorIso ? new Date(anchorIso + 'T12:00:00') : new Date();
-    const sunday = new Date(anchor);
-    sunday.setDate(anchor.getDate() - anchor.getDay());
-    const out = [];
-    for (let i = 0; i < 7; i++) {
-      const dt = new Date(sunday);
-      dt.setDate(sunday.getDate() + i);
-      out.push(localDateStr(dt));
-    }
-    return out;
+  // Return the 7 iso dates of the calendar week containing anchorIso,
+  // from the person's first day of the week (Settings > Regional & Units,
+  // #232). Both the strip derivation AND _loadWeekAdjustments need it.
+  function _weekIsos(anchorIso, firstDay) {
+    return weekIsos(anchorIso || localDateStr(), firstDay);
   }
 
   // Build the 7-day array — the CALENDAR WEEK containing the
-  // currently-viewed date (Sunday through Saturday). Previously
+  // currently-viewed date (from the first day of the week). Previously
   // this was always "last 6 days + today" which made the strip
   // stuck on the current real-world week even when the user
   // navigated back to a diary from weeks ago — disorienting
@@ -163,7 +155,7 @@
   // relative to the diary I'm viewing, not to real-life today.
   $: today = localDateStr();
   $: strip = (() => {
-    const isos = _weekIsos(currentDate);
+    const isos = _weekIsos(currentDate, $weekStartDay);
     const out = [];
     for (const iso of isos) {
       const dt = new Date(iso + 'T12:00:00');
@@ -274,7 +266,7 @@
       return;
     }
     const mySeq = ++_adjustmentsSeq;
-    const dates = _weekIsos(currentDate);
+    const dates = _weekIsos(currentDate, $weekStartDay);
     let activitySums = dates.map(() => ({ effective: 0 }));
     let dynamicOuts  = dates.map(() => ({ calories_out: null }));
     try {
@@ -315,7 +307,7 @@
   // parent bumps refreshKey (activity + food edits), or when any of
   // the mode / policy / toggle props change upstream. Cheap when
   // neither adjustment is active — the function early-returns.
-  $: currentDate, refreshKey, adjustFromActivity, activityPolicy, calorieGoalMode, calorieGoalFactor, calorieGoal, _loadWeekAdjustments();
+  $: currentDate, $weekStartDay, refreshKey, adjustFromActivity, activityPolicy, calorieGoalMode, calorieGoalFactor, calorieGoal, _loadWeekAdjustments();
 </script>
 
 <nav class="week-strip" aria-label="Week strip">
