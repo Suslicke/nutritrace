@@ -298,7 +298,7 @@
   // reachable even when the section body isn't mounted — the search
   // runs on the index, before drill-in.
   const SECTION_KEYWORDS = {
-    serverConnection:  ['server','connection','sync','cloud','local','remote','connect','disconnect','url'],
+    serverConnection:  ['server','connection','sync','cloud','local','remote','connect','disconnect','url','http','https','plain http','not encrypted','unencrypted','encryption'],
     authentication:    ['authentication','auth','sso','single sign-on','single sign on','oidc','openid','authentik','keycloak','authelia','pocket id','auth0','google','password login','admin group'],
     appearance:        ['appearance','theme','dark','light','accent','color','navigation','sidebar','persistent','start page','animations','celebrations','reduce motion','banner','page banner','force mobile','mobile layout','mobile view','phone layout','narrow layout'],
     regional:          ['regional','language','translation','date format','time format','locale','date','time','12h','24h','units','energy unit','weight unit','height','circumference','distance','temperature','imperial','metric'],

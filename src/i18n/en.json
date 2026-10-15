@@ -533,8 +533,25 @@
       "browser_open_failed": "Could not open sign-in browser",
       "connected": "Connected to server",
       "login_failed": "Login failed",
-      "server_needs_setup": "This server isn't set up yet. Open it in a browser to create the first account, then connect here."
+      "server_needs_setup": "This server isn't set up yet. Open it in a browser to create the first account, then connect here.",
+      "unreachable": "Couldn't reach the server"
     }
+  },
+  "plain_http": {
+    "warning_title": "Connect Without Encryption?",
+    "warning_body": "This server uses plain HTTP, so the connection isn't encrypted. Anyone on the same network can read and change what's sent, including your password.",
+    "warning_advice": "Use it only on your home network or over a VPN.",
+    "warning_stored": "Until you connect, nothing syncs with this server, and the app keeps working with what's on this phone. It asks again the next time it opens.",
+    "connect_anyway": "Connect Anyway",
+    "refused_title": "HTTPS Needed",
+    "refused_body": "This server uses plain HTTP and isn't on your own network, so the app won't connect to it. Plain HTTP works only with a server at a private address, such as 192.168.1.20, or a local name, such as nutritrace.local. Anywhere else, use HTTPS.",
+    "refused_stored": "Nothing syncs with this server, and the app keeps working with what's on this phone. To switch to an HTTPS address, disconnect in Settings > Server Connection and connect again.",
+    "refused_short": "Plain HTTP works only with a server on your own network. Use an https:// address for this server.",
+    "https_guide": "How to Set Up HTTPS",
+    "unreachable": "Couldn't reach {url}. Check the address, and that this phone is on the same network or VPN as the server.",
+    "not_encrypted": "Not Encrypted",
+    "invalid_address": "Enter an address that starts with http:// or https://, such as https://nutritrace.example.com.",
+    "blocked": "Plain HTTP to {origin} isn't allowed. Use an https:// address, or a server on your own network."
   },
   "profile": {
     "title": "Profile",

@@ -3,6 +3,9 @@
   import { setNativeMode, setServerUrl, setAuthToken, resolveAssetUrl, iconUrl, explainConnectError, healthNeedsSetup } from '../lib/platform.js';
   import { showError, showSuccess } from '../stores/toast.js';
   import { DB } from '../lib/db.js';
+  import { NativeHttp } from '../lib/native-http.js';
+  import { serverAddressCheck, confirmPlainHttp } from '../lib/plain-http.js';
+  import { askPlainHttp } from '../stores/plainHttp.js';
 
   // State machine:
   //   'choose'      → pick local vs server
@@ -46,10 +49,18 @@
   async function validateAndNext() {
     if (!serverUrl.trim()) { showError($_('native_setup.errors.server_url_required')); return; }
     const url = serverUrl.trim().replace(/\/$/, '');
+    // Plain http:// (#194): refused unless the server is on your own network,
+    // and then only after the warning. Nothing is sent before this.
+    const plain = serverAddressCheck(url);
+    if (plain === 'invalid') { showError($_('plain_http.invalid_address')); return; }
+    if (plain === 'refuse') { await askPlainHttp(url, { kind: 'refuse' }); return; }
+    if (plain === 'ask') {
+      if (!(await askPlainHttp(url))) return;
+      confirmPlainHttp(url);
+    }
     connecting = true;
     try {
-      const { CapacitorHttp } = await import('@capacitor/core');
-      const healthRes = await CapacitorHttp.get({ url: `${url}/api/health` });
+      const healthRes = await NativeHttp.get({ url: `${url}/api/health` });
       if (healthNeedsSetup(healthRes)) { showError($_('native_setup.errors.server_needs_setup')); return; }
       if (healthRes.status < 200 || healthRes.status >= 300) {
         throw new Error('Server not reachable');
@@ -60,7 +71,7 @@
       let discoveredProviders = [];
       let discoveredPasswordEnabled = true;
       try {
-        const statusRes = await CapacitorHttp.get({ url: `${url}/api/auth/status` });
+        const statusRes = await NativeHttp.get({ url: `${url}/api/auth/status` });
         if (statusRes.status >= 200 && statusRes.status < 300) {
           const data = typeof statusRes.data === 'string' ? JSON.parse(statusRes.data) : statusRes.data;
           if (data?.oidc) {
@@ -74,7 +85,7 @@
       passwordLoginEnabled = discoveredPasswordEnabled;
       step = 'server-auth';
     } catch (e) {
-      showError(explainConnectError(e, url));
+      showError(explainConnectError(e, url, $_));
     } finally {
       connecting = false;
     }
@@ -87,8 +98,7 @@
     if (!username.trim() || !password.trim()) { showError($_('native_setup.errors.credentials_required')); return; }
     connecting = true;
     try {
-      const { CapacitorHttp } = await import('@capacitor/core');
-      const loginRes = await CapacitorHttp.post({
+      const loginRes = await NativeHttp.post({
         url: `${validatedUrl}/api/auth/login`,
         headers: { 'Content-Type': 'application/json' },
         data: { username: username.trim(), password },
@@ -103,7 +113,7 @@
       showSuccess($_('native_setup.errors.connected'));
       window.location.reload();
     } catch (e) {
-      showError(explainConnectError(e, validatedUrl));
+      showError(explainConnectError(e, validatedUrl, $_));
     } finally {
       connecting = false;
     }

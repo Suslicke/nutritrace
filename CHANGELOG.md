@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **The Android app connects over plain HTTP to a server on your own network** ([#194](https://github.com/TraceApps/nutritrace/issues/194)). Enter an `http://` address such as `http://192.168.1.20:3001` or `http://nutritrace.local:3001`, read the warning that the connection isn't encrypted, and choose Connect Anyway; the answer is kept for that server, and Settings > Server Connection shows Not Encrypted. Only private, Tailscale, loopback and link-local addresses, one-word names, and names ending in `.local`, `.home.arpa`, `.internal` or `.lan` qualify; any other `http://` address is refused before anything is sent. HTTPS works as before. Coming from a debug build that used plain HTTP, the app asks before it contacts the server. Debug builds now follow the same rule. Everything else the app reaches directly (Open Food Facts, USDA, update checks, ntfy, Gotify, Apprise, AI providers, pictures) is still HTTPS-only, as before. [Guide](https://traceapps.github.io/docs/getting-started/lan-http/) Thanks @systems-monitor for the request.
+
 ### Fixed
 
 - **Signing in with SSO finishes on phones with an older Android System WebView.** On older WebView versions (seen on 124), the app didn't recognize the sign-in return from the browser, so the sign-in page closed and the app stayed signed out.

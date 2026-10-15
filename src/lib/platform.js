@@ -7,6 +7,8 @@
 
 import { Capacitor } from '@capacitor/core';
 import { originalUrlForCachedImage } from './image-cache-map.js';
+import { classifyServerAddress } from './local-address.js';
+import { mirroredConfirmation, blockedError } from './plain-http.js';
 
 /**
  * True when running inside the Capacitor native shell (Android / iOS).
@@ -96,6 +98,10 @@ export function getAuthToken() {
  * private data directory, not world-readable. Future improvement could swap
  * the auth_token row for EncryptedSharedPreferences.
  *
+ * 'server_http_ok' is the server URL again when it is plain http:// to a
+ * server on your own network that you said Connect Anyway to, and empty
+ * otherwise; the worker sends over plain HTTP only when the two match (#194).
+ *
  * Best-effort: silently skips on web, on local-only mode, on startup before
  * the DB is initialized, or on any other failure. Each setter calls this; on
  * app launch the auth store also fires it once via _bootMirror() below.
@@ -104,6 +110,7 @@ function _mirrorAuthToSyncMeta() {
   if (!isNative) return;
   const url   = localStorage.getItem('nt:serverUrl')  || '';
   const token = localStorage.getItem('nt:authToken')  || '';
+  const httpOk = mirroredConfirmation(url);
   (async () => {
     try {
       const { getDb } = await import('./db-native.js');
@@ -112,6 +119,7 @@ function _mirrorAuthToSyncMeta() {
                    ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
       await db.run(sql, ['server_url', url]);
       await db.run(sql, ['auth_token', token]);
+      await db.run(sql, ['server_http_ok', httpOk]);
     } catch { /* db not ready or local-only mode — fine */ }
   })();
 }
@@ -137,28 +145,27 @@ export function healthNeedsSetup(res) {
 
 /**
  * Translate a connect-server error into something the user can act on.
- * Release-signed Android APKs ship with a strict network_security_config
- * that blocks cleartext (http://) traffic — the WebView and CapacitorHttp
- * surface this as a generic network error or "ERR_CLEARTEXT_NOT_PERMITTED".
- * If the user typed an http:// URL, point them at the HTTPS setup docs
- * instead of leaving them staring at a generic failure.
+ * `t` is svelte-i18n's translate function ($_).
+ *
+ * The Android app uses plain http:// only with a server on your own network,
+ * after the warning (lib/plain-http.js, #194); any other http:// address is
+ * refused before a request is made. So a plain-HTTP failure is either that
+ * refusal, or a local server the phone can't reach (a wrong address, or not
+ * on the same network or VPN), and the message says which.
  */
-export function explainConnectError(rawError, serverUrl) {
+export function explainConnectError(rawError, serverUrl, t) {
+  const fallback = rawError?.message || t('native_setup.errors.unreachable');
+  if (!isNative) return fallback;
+  const kind = classifyServerAddress(serverUrl);
+  if (kind === 'invalid') return t('plain_http.invalid_address');
   const msg = (rawError?.message || String(rawError) || '').toLowerCase();
-  const isHttp = typeof serverUrl === 'string' && serverUrl.toLowerCase().startsWith('http://');
-  const looksLikeCleartextBlock =
-    msg.includes('cleartext') ||
-    msg.includes('err_cleartext') ||
-    (isNative && isHttp && (msg.includes('network') || msg.includes('not reachable') || msg.includes('failed to fetch')));
-  if (isHttp && looksLikeCleartextBlock) {
-    return 'This build only allows HTTPS connections. Set up a reverse proxy (Caddy, Tailscale, Cloudflare Tunnel) or install a debug APK. See DEPLOY.md → Connecting from Android.';
+  if (kind === 'public' || rawError?.code === blockedError().code || msg.includes('cleartext')) {
+    return t('plain_http.refused_short');
   }
-  if (isHttp && isNative) {
-    // Plain http on native — even if it succeeded, surface the warning so
-    // users on debug builds know release builds will reject this URL.
-    return rawError?.message || 'Could not reach server';
+  if (kind === 'local' && /network|not reachable|failed to fetch|connect|timed? ?out|unreachable/.test(msg)) {
+    return t('plain_http.unreachable', { values: { url: serverUrl } });
   }
-  return rawError?.message || 'Could not reach server';
+  return fallback;
 }
 
 /**

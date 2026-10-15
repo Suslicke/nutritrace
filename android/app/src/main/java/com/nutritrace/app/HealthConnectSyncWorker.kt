@@ -166,15 +166,20 @@ class HealthConnectSyncWorker(
             // (the original bug behind #68). Best-effort: failures here don't
             // surface to the user; the local SQLite write above already
             // succeeded, and the JS-side sync will catch up on next app open.
-            val (serverUrl, authToken) = readServerCredentials(ctx)
-            if (!serverUrl.isNullOrBlank() && !authToken.isNullOrBlank() && !dataIsTokensAccount(ctx, serverUrl, authToken)) {
+            val (serverUrl, authToken, httpOk) = readServerCredentials(ctx)
+            // Plain http:// only to a server on your own network that the
+            // app confirmed (#194, LocalAddress.kt); nothing is sent otherwise.
+            val base = LocalAddress.workerBase(serverUrl, httpOk)
+            if (!serverUrl.isNullOrBlank() && !authToken.isNullOrBlank() && base == null) {
+                Log.d(TAG, "server address not usable here (not https, or plain HTTP not confirmed for a server on your own network), skipping server push")
+            } else if (!serverUrl.isNullOrBlank() && !authToken.isNullOrBlank() && !dataIsTokensAccount(ctx, serverUrl, base!!, authToken)) {
                 // The local database still holds another account's data (a
                 // sign-in the app hasn't finished checking, see
                 // src/lib/local-account.js). Nothing goes up under this
                 // token; the app sends today's values once it has checked.
                 Log.d(TAG, "local data belongs to another account, skipping server push")
             } else if (!serverUrl.isNullOrBlank() && !authToken.isNullOrBlank()) {
-                pushToServer(serverUrl, authToken, todayStr, metrics, workouts)
+                pushToServer(base!!, authToken, todayStr, metrics, workouts)
             } else {
                 Log.d(TAG, "no server credentials in sync_meta, skipping server push (local-mode install?)")
             }
@@ -344,21 +349,24 @@ class HealthConnectSyncWorker(
 
     /**
      * Read serverUrl + authToken from the sync_meta table that JS keeps
-     * up to date via platform.js#_mirrorAuthToSyncMeta. Returns (null, null)
+     * up to date via platform.js#_mirrorAuthToSyncMeta. Returns nulls
      * if either is missing (local-mode install or pre-mirror app version).
+     * The third value, 'server_http_ok', is the server URL again when the
+     * app confirmed plain HTTP to it (#194), and empty or missing otherwise.
      */
-    private fun readServerCredentials(ctx: Context): Pair<String?, String?> {
+    private fun readServerCredentials(ctx: Context): Triple<String?, String?, String?> {
         val dbFile = ctx.getDatabasePath(DB_FILENAME)
-        if (!dbFile.exists()) return Pair(null, null)
+        if (!dbFile.exists()) return Triple(null, null, null)
         var db: SQLiteDatabase? = null
         return try {
             db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
             val url = readSyncMeta(db, "server_url")
             val token = readSyncMeta(db, "auth_token")
-            Pair(url, token)
+            val httpOk = readSyncMeta(db, "server_http_ok")
+            Triple(url, token, httpOk)
         } catch (e: Exception) {
             Log.w(TAG, "credential read failed: ${e.message}")
-            Pair(null, null)
+            Triple(null, null, null)
         } finally {
             db?.close()
         }
@@ -373,9 +381,10 @@ class HealthConnectSyncWorker(
      * another address only two known, equal instance ids make it the same
      * server; anything less is for the person to decide in the app, so
      * the worker doesn't send. No tag, a local-mode tag, or a token
-     * without an id in it doesn't block.
+     * without an id in it doesn't block. `base` is where to ask
+     * (LocalAddress.workerBase): the saved address for https://.
      */
-    private fun dataIsTokensAccount(ctx: Context, serverUrl: String, token: String): Boolean {
+    private fun dataIsTokensAccount(ctx: Context, serverUrl: String, base: String, token: String): Boolean {
         val owner = try {
             val dbFile = ctx.getDatabasePath(DB_FILENAME)
             if (!dbFile.exists()) return true
@@ -404,7 +413,7 @@ class HealthConnectSyncWorker(
         if (ownerServer.isEmpty() || ownerServer == here) return true
         val ownerInstance = tag.optString("i", "")
         if (ownerInstance.isEmpty()) return false
-        val instance = fetchInstanceId(here) ?: return false
+        val instance = fetchInstanceId(if (base == serverUrl) here else base) ?: return false
         return instance == ownerInstance
     }
 
@@ -412,9 +421,12 @@ class HealthConnectSyncWorker(
     private fun fetchInstanceId(serverUrl: String): String? {
         var conn: HttpURLConnection? = null
         return try {
-            conn = (URL("$serverUrl/api/auth/status").openConnection() as HttpURLConnection).apply {
+            val url = URL("$serverUrl/api/auth/status")
+            conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10_000
                 readTimeout = 10_000
+                // Plain HTTP stays with the checked server (#194).
+                if (url.protocol == "http") instanceFollowRedirects = false
             }
             if (conn.responseCode !in 200..299) return null
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -512,6 +524,8 @@ class HealthConnectSyncWorker(
                 doOutput = true
                 connectTimeout = 10_000
                 readTimeout = 15_000
+                // Plain HTTP stays with the checked server (#194).
+                if (url.protocol == "http") instanceFollowRedirects = false
             }
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(payload) }
 

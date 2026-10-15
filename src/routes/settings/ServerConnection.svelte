@@ -11,6 +11,10 @@
   } from '../../lib/platform.js';
   import { currentUser, userMgmtActive } from '../../stores/auth.js';
   import { showSuccess, showError } from '../../stores/toast.js';
+  import { NativeHttp } from '../../lib/native-http.js';
+  import { serverAddressCheck, confirmPlainHttp } from '../../lib/plain-http.js';
+  import { classifyServerAddress } from '../../lib/local-address.js';
+  import { askPlainHttp } from '../../stores/plainHttp.js';
 
   // ── Sync state + manual trigger ────────────────────────────────────────
   // Native server mode only. lastSyncAt comes from sync_meta on mount and is
@@ -62,6 +66,8 @@
   let serverShowPw = false;
   let serverConnecting = false;
   let serverMode = getNativeMode(); // 'local' | 'server'
+  // On plain http:// (#194): shown under the server's address.
+  const _plainHttp = classifyServerAddress(getServerUrl() || '') === 'local';
 
   // ── Server connect/merge flow ──────────────────────────────────────────────
   let mergeStep = null;  // null | 'ask-settings' | 'syncing' | 'summary'
@@ -80,16 +86,26 @@
     if (!serverUrlInput.trim()) { showError('Enter a server URL'); return; }
     if (!serverUsername.trim() || !serverPassword.trim()) { showError('Enter credentials'); return; }
     const url = serverUrlInput.trim().replace(/\/$/, '');
+    // Plain http:// (#194): refused unless the server is on your own network,
+    // and then only after the warning. Nothing is sent before this.
+    if (isNative) {
+      const plain = serverAddressCheck(url);
+      if (plain === 'invalid') { showError($_('plain_http.invalid_address')); return; }
+      if (plain === 'refuse') { await askPlainHttp(url, { kind: 'refuse' }); return; }
+      if (plain === 'ask') {
+        if (!(await askPlainHttp(url))) return;
+        confirmPlainHttp(url);
+      }
+    }
     serverConnecting = true;
     try {
       // Use CapacitorHttp on native to bypass CORS (WebView fetch can't reach external origins)
       let loginData;
       if (isNative) {
-        const { CapacitorHttp } = await import('@capacitor/core');
-        const healthRes = await CapacitorHttp.get({ url: `${url}/api/health` });
+        const healthRes = await NativeHttp.get({ url: `${url}/api/health` });
         if (healthNeedsSetup(healthRes)) { showError($_('native_setup.errors.server_needs_setup')); return; }
         if (healthRes.status < 200 || healthRes.status >= 300) throw new Error('Server not reachable');
-        const loginRes = await CapacitorHttp.post({
+        const loginRes = await NativeHttp.post({
           url: `${url}/api/auth/login`,
           headers: { 'Content-Type': 'application/json' },
           data: { username: serverUsername.trim(), password: serverPassword },
@@ -127,7 +143,7 @@
         _finalizeConnect();
       }
     } catch (e) {
-      showError(explainConnectError(e, url));
+      showError(explainConnectError(e, url, $_));
     } finally {
       serverConnecting = false;
     }
@@ -300,6 +316,9 @@
         <div>
           <span class="setting-label">{_serverReachable ? $_('sync.connected') : $_('sync.server_unavailable')}</span>
           <div class="setting-desc">{getServerUrl()}</div>
+          {#if _plainHttp}
+            <div class="not-encrypted"><span class="material-symbols-rounded" aria-hidden="true">lock_open</span>{$_('plain_http.not_encrypted')}</div>
+          {/if}
         </div>
         <span class="material-symbols-rounded" style:color={_serverReachable ? 'var(--success, #22c55e)' : 'var(--danger)'} style="font-size:22px">
           {_serverReachable ? 'cloud_done' : 'cloud_off'}
@@ -465,6 +484,16 @@
 {/if}
 
 <style>
+  .not-encrypted {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--warning, #f59e0b);
+  }
+  .not-encrypted .material-symbols-rounded { font-size: 15px; }
   /* ── Merge dialog ── */
   .merge-overlay {
     position: fixed; inset: 0; z-index: 200;

@@ -11,6 +11,7 @@
   import Sidebar   from './components/layout/Sidebar.svelte';
   import Toast     from './components/ui/Toast.svelte';
   import ConfirmDialogMount from './components/ui/ConfirmDialogMount.svelte';
+  import PlainHttpSheetMount from './components/ui/PlainHttpSheetMount.svelte';
   import { DB, localDateStr } from './lib/db.js';
   import { currentDate, loadEntry } from './stores/diary.js';
   import { reloadSettingStores } from './stores/settings.js';
@@ -528,6 +529,12 @@
                 // false and reveals the router. #110.
                 showNativeSetup = needsNativeSetup();
                 window.location.hash = '#/';
+                // A plain-HTTP server confirmed on the setup screen isn't in the
+                // image policy set at start (#194); only a reload adds it.
+                const { imagePolicyStale } = await import('./lib/plain-http.js');
+                if (imagePolicyStale(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content)) {
+                  window.location.reload();
+                }
               }
             } else if (
               params.get('fitbit')        === 'connected' ||
@@ -565,6 +572,25 @@
     // account still signed in from last time; moved before anyone else
     // can sign in (lib/editor-draft.js).
     try { (await import('./lib/editor-draft.js')).migrateUnscopedDrafts(); } catch {}
+    // A saved server on plain http:// that this build hasn't been told to use
+    // (#194): connected from a build that allowed plain HTTP. Asked here,
+    // before anything goes to the server; until it's confirmed nothing does
+    // (lib/plain-http.js), the app works from what's on the phone, and the
+    // next launch asks again. One that isn't on your own network is refused.
+    if (isNative && getServerUrl()) {
+      const saved = getServerUrl();
+      const { serverAddressCheck, confirmPlainHttp } = await import('./lib/plain-http.js');
+      const plain = serverAddressCheck(saved);
+      if (plain === 'ask' || plain === 'refuse') {
+        authLoaded = false;
+        const { askPlainHttp } = await import('./stores/plainHttp.js');
+        if (await askPlainHttp(saved, { kind: plain, stored: true })) {
+          confirmPlainHttp(saved);
+          window.location.reload();
+          return;
+        }
+      }
+    }
     // Load auth state first (sets $currentUser and $userMgmtActive)
     try { await loadAuthState(); } finally { authLoaded = true; }
 
@@ -1002,6 +1028,7 @@
 {#if needsLogin}<Toast />{/if}
 <!-- ConfirmDialog is always-mounted so it works on every screen including login + native setup -->
 <ConfirmDialogMount />
+{#if isNative}<PlainHttpSheetMount />{/if}
 
 <style>
   :global(body) { overflow-x: hidden; }

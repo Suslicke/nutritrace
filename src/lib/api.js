@@ -24,7 +24,7 @@ import { asSoldNutriments } from './off-nutrition-sets.js';
 async function _extFetch(url, { live = false } = {}) {
   const proxyPath = '/api/proxy?url=' + encodeURIComponent(url) + (live ? '&live=1' : '');
   if (isNative) {
-    const { CapacitorHttp } = await import('@capacitor/core');
+    const { NativeHttp } = await import('./native-http.js');
     const { apiUrl, getServerUrl, getAuthToken } = await import('./platform.js');
     let envLockedOffLocal = false;
     try {
@@ -39,7 +39,7 @@ async function _extFetch(url, { live = false } = {}) {
       const headers = { 'Accept': 'application/json' };
       const token = getAuthToken();
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const resp = await CapacitorHttp.get({ url: proxyUrl, headers });
+      const resp = await NativeHttp.get({ url: proxyUrl, headers });
       return {
         ok: resp.status >= 200 && resp.status < 300,
         status: resp.status,
@@ -48,7 +48,7 @@ async function _extFetch(url, { live = false } = {}) {
     }
     // Default native path: direct call (bypasses WebView CORS, unchanged
     // behavior for all users who don't enable the local mirror).
-    const resp = await CapacitorHttp.get({ url, headers: { 'Accept': 'application/json' } });
+    const resp = await NativeHttp.get({ url, headers: { 'Accept': 'application/json' } });
     return {
       ok: resp.status >= 200 && resp.status < 300,
       status: resp.status,
