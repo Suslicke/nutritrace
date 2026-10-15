@@ -291,17 +291,23 @@ function _checkFastingSchedule(userId) {
   try {
     if (_getUserSetting(userId, 'fastingEnabled') !== true) return;
     if (_getUserSetting(userId, 'fastingScheduleEnabled') !== true) return;
-    const todayStr = new Date().toISOString().slice(0, 10);
+    // The person's own day and clock (their timezone setting, else the
+    // server's), as the app reads them: the UTC date as the "fired today"
+    // mark disagreed with the app's, and the server's clock started an
+    // evening fast hours early on a server in another time zone.
+    const local = _getUserLocalTime(userId);
+    const todayStr = local.dateStr;
     if (_getUserSetting(userId, 'fastingScheduleLastFired') === todayStr) return;
     const days = _getUserSetting(userId, 'fastingScheduleDays') || [0,1,2,3,4,5,6];
-    const dow = new Date().getDay();
+    const dow = local.dayOfWeek;
     if (!Array.isArray(days) || !days.includes(dow)) return;
     const time = _getUserSetting(userId, 'fastingScheduleTime') || '20:00';
     const [hh, mm] = String(time).split(':').map(n => parseInt(n) || 0);
-    const scheduled = new Date(); scheduled.setHours(hh, mm, 0, 0);
-    if (Date.now() < scheduled.getTime()) return;
-    // 4-hour grace window — if user opens late we don't backdate a fast
-    if (Date.now() - scheduled.getTime() > 4 * 3600 * 1000) {
+    // Node 20's ICU writes the hour after midnight as "24": that is 0 here.
+    const lateMin = ((local.hour % 24) * 60 + local.minute) - (hh * 60 + mm);
+    if (lateMin < 0) return;
+    // 4-hour grace window: if the person opens late we don't backdate a fast
+    if (lateMin > 4 * 60) {
       _setUserSetting(userId, 'fastingScheduleLastFired', todayStr);
       return;
     }
@@ -633,7 +639,7 @@ async function _checkBackupSchedule() {
 /** Force sync all connected services for a user — bypasses schedule check */
 export async function forceSync(userId) {
   logger.info(`[scheduler] forced sync for user ${userId}`);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = _getUserLocalTime(userId).dateStr;   // their day, not the UTC date
 
   // Same dispatch logic as the periodic tick above: prefer the new Google
   // Health pipe when the user has those tokens, fall back to legacy fitbit.

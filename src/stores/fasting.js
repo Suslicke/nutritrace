@@ -129,7 +129,10 @@ export async function checkScheduleAndStart() {
     const settings = await import('./settings.js');
     if (!get(settings.fastingEnabled) || !get(settings.fastingScheduleEnabled)) return;
     const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    // This device's calendar day, as the server marks it too: the UTC date
+    // made an evening start west of UTC count as tomorrow's, and the next
+    // day's scheduled fast never started.
+    const todayStr = today.toLocaleDateString('sv-SE');
     if (get(settings.fastingScheduleLastFired) === todayStr) return;
     const days = get(settings.fastingScheduleDays) || [];
     if (!days.includes(today.getDay())) return;
