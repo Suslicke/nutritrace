@@ -715,6 +715,37 @@ test('#277: after Push all from this device diary items name their food and reci
   assert.deepEqual([...await server(DW), ...await server(D)], want, 'the server');
 });
 
+// #277 follow-up: of several foods (or recipes) of one name, with no id to
+// tell them apart, the phone showed the newest one's photo by its own ids
+// and the server the oldest one's. Both show the newest now, by one rule
+// (fixtures/same-name.mjs); the server's side is in
+// android-sync-server.test.js. The phone's own ids run in another order
+// than the server's here; a row not on the server yet is the newest.
+test("#277: same-named foods: the phone shows the newest one's photo, as the server does", async (t) => {
+  if (skip(t)) return;
+  const { ROWS, ITEMS, expectedPhotos } = await import('./fixtures/same-name.mjs');
+  const r = phone('same-name', A, `
+    const db = await p.dbn.getDb();
+    const ROWS = ${JSON.stringify(ROWS)};
+    // Server ids in the order the rows were made; the phone's own the other way round.
+    for (const t of ['foods', 'meals']) {
+      const rows = ROWS[t];
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const x = rows[i];
+        if (t === 'foods') await db.run('INSERT INTO foods (id, server_id, name, brand, img_url) VALUES (?, ?, ?, ?, ?)', [900 - i, 5000 + i, x.name, x.brand || null, x.img]);
+        else await db.run('INSERT INTO meals (id, server_id, name, img_url, is_recipe) VALUES (?, ?, ?, ?, 1)', [900 - i, 6000 + i, x.name, x.img]);
+      }
+    }
+    const items = ${JSON.stringify(ITEMS.map(x => x.item))};
+    await p.dbn.dbSaveDiaryDate('2026-06-24', { items });
+    const before = (await p.dbn.dbGetDiaryDate('2026-06-24')).items.map(i => i.imgUrl);
+    await db.run("INSERT INTO foods (id, server_id, name, img_url) VALUES (1, NULL, 'Twin Pear', '/same/new.jpg')", []);
+    const unsent = (await p.dbn.dbGetDiaryDate('2026-06-24')).items[0].imgUrl;
+    p.done({ before, unsent });`);
+  assert.deepEqual(r.before, expectedPhotos());
+  assert.equal(r.unsent, '/same/new.jpg', 'a row not on the server yet is the newest');
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);

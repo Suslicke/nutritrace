@@ -337,6 +337,36 @@ test("Yesterday's Meals and the diary agree on each item's photo", (t) => {
   });
 });
 
+// #277 follow-up: of several foods (or recipes) of one name, with no id to
+// tell them apart, the server showed the oldest one's photo and the phone
+// the newest's. Both show the newest now, by one rule
+// (fixtures/same-name.mjs); the phone's side is in android-sync.test.js.
+test('same-named foods: the server and Yesterday\'s Meals show the newest one\'s photo', async (t) => {
+  const { ROWS, ITEMS, expectedPhotos } = await import('./fixtures/same-name.mjs');
+  const { catalogImgFor } = await import('../src/lib/item-source.js');
+  const want = expectedPhotos();
+  const items = ITEMS.map(x => x.item);
+  if (!skip(t)) {
+    const u = user('same-name');
+    for (const r of ROWS.foods) db.prepare(`INSERT INTO foods (user_id, name, brand, img_url) VALUES (?, ?, ?, ?)`).run(u, r.name, r.brand || null, r.img);
+    for (const r of ROWS.meals) db.prepare(`INSERT INTO meals (user_id, name, items, is_recipe, img_url) VALUES (?, ?, '[]', 1, ?)`).run(u, r.name, r.img);
+    assert.deepEqual(helpers.freshenItemImages(items, u).map(i => i.imgUrl), want, 'the server, with accounts');
+    assert.deepEqual(helpers.freshenItemImages(items, null).map(i => i.imgUrl), want, 'the server, without');
+  }
+  // Yesterday's Meals, in the browser (the server's ids) and on a phone
+  // (its own ids, listed in another order than the server's).
+  const ids = { foods: ROWS.foods.map((r, i) => 100 + i), meals: ROWS.meals.map((r, i) => 200 + i) };
+  const web = { foods: ROWS.foods.map((r, i) => ({ id: ids.foods[i], name: r.name, brand: r.brand, imgUrl: r.img })),
+    meals: ROWS.meals.map((r, i) => ({ id: ids.meals[i], name: r.name, is_recipe: 1, imgUrl: r.img })) };
+  assert.deepEqual(items.map(i => catalogImgFor(i, web)), want, 'the browser');
+  assert.deepEqual(items.map(i => catalogImgFor(i, { foods: [...web.foods].reverse(), meals: [...web.meals].reverse() })), want, 'in any order');
+  const phone = { foods: web.foods.map((r, i) => ({ ...r, id: 50 - i, server_id: r.id })), meals: web.meals.map((r, i) => ({ ...r, id: 50 - i, server_id: r.id })) };
+  assert.deepEqual(items.map(i => catalogImgFor(i, phone, { native: true })), want, 'a phone');
+  // A row not on the server yet is the newest.
+  const unsent = { ...phone, foods: [...phone.foods, { id: 1, server_id: null, name: 'Twin Pear', imgUrl: '/same/new.jpg' }] };
+  assert.equal(catalogImgFor(items[0], unsent, { native: true }), '/same/new.jpg');
+});
+
 // #277 follow-up: when the phone's foods, meals and recipes go up as new
 // rows (Connect > Upload or Merge, Push all), each diary item that names
 // one of them follows it, and nothing else moves.

@@ -67,8 +67,9 @@ const _norm = s => String(s || '').trim().toLowerCase();
  *     table was rebuilt and ids reshuffled)
  *  2. name + brand match (foods only; disambiguates between e.g. multiple
  *     "Fat Free Milk" entries from different brands)
- *  3. name only (last resort; first-inserted-row wins when the user has
- *     duplicates with no brand to tie-break)
+ *  3. name only (last resort)
+ * Of several rows a name tier matches, the reader's own come first, then
+ * the newest wins (the highest id), the same rule as on the phone (#277).
  *  4. empty string (renders placeholder)
  *
  * Wrapped in try/catch so a query error never breaks the calling
@@ -175,17 +176,19 @@ export function freshenItemImages(items, userId = null) {
     // /uploads/) prevents new occurrences; this read-side filter also
     // shields existing rows that were pushed before the write fix.
     // The reader's own rows first, so their own Banana's photo wins a
-    // name match over one shared with them.
+    // name match over one shared with them; then the newest first, so of
+    // several of the same name the newest one's photo shows, as on the
+    // phone (db-native.js _freshenItemImages, #277).
     const fs = foodScope(userId), ms = mealScope(userId);
     const foods = db.prepare(
       `SELECT f.id, f.name, f.brand, f.img_url FROM foods f
         WHERE f.deleted_at IS NULL AND f.img_url IS NOT NULL AND f.img_url != '' AND f.img_url NOT LIKE 'data:%' AND ${fs.sql}
-        ORDER BY ${userId == null ? '' : 'f.user_id = @u DESC,'} f.id ASC`
+        ORDER BY ${userId == null ? '' : 'f.user_id = @u DESC,'} f.id DESC`
     ).all(fs.args);
     const meals = db.prepare(
       `SELECT m.id, m.name, m.img_url FROM meals m
         WHERE m.deleted_at IS NULL AND m.img_url IS NOT NULL AND m.img_url != '' AND m.img_url NOT LIKE 'data:%' AND ${ms.sql}
-        ORDER BY ${userId == null ? '' : 'm.user_id = @u DESC,'} m.id ASC`
+        ORDER BY ${userId == null ? '' : 'm.user_id = @u DESC,'} m.id DESC`
     ).all(ms.args);
 
     // Foods: three lookup tiers.
@@ -195,10 +198,8 @@ export function freshenItemImages(items, userId = null) {
     for (const r of foods) {
       foodByIdName.set(`${r.id}|${_norm(r.name)}`, r.img_url);
       const nb = `${_norm(r.name)}|${_norm(r.brand)}`;
-      // With accounts on, the reader's own row (first) wins; otherwise the
-      // newest, as before.
-      if (userId == null || !foodByNameBrand.has(nb)) foodByNameBrand.set(nb, r.img_url);
-      // First-inserted wins for the name-only fallback (ORDER BY id ASC + setIfAbsent).
+      // The first row of a name wins: the reader's own, the newest.
+      if (!foodByNameBrand.has(nb)) foodByNameBrand.set(nb, r.img_url);
       if (!foodByName.has(_norm(r.name))) foodByName.set(_norm(r.name), r.img_url);
     }
     // Meals: two lookup tiers (no brand on meals/recipes).

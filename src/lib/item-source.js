@@ -31,8 +31,9 @@ const _norm = s => String(s || '').trim().toLowerCase();
  * finds it (server/lib/diary-helpers.js freshenItemImages, db-native.js
  * _freshenItemImages): a recipe among meals and recipes, anything else
  * among foods; by its source's id with the same name first, then by name
- * and brand (foods only), then by name. Names are trimmed and compared
- * case-insensitively, and only rows with a photo count. Falls back to the
+ * and brand (foods only), then by name, the newest of several. Names are
+ * trimmed and compared case-insensitively, and only rows with a photo
+ * count. Falls back to the
  * item's own imgUrl.
  * catalogue: { foods, meals } (meals with the recipes); native: the rows
  * are the Android app's (their server id in server_id); mine: the
@@ -40,11 +41,21 @@ const _norm = s => String(s || '').trim().toLowerCase();
  */
 export function catalogImgFor(item, { foods = [], meals = [] } = {}, { native = false, mine = null } = {}) {
   if (!item || typeof item !== 'object') return '';
-  const pool = (item.is_recipe ? meals : foods).filter(f => f && f.imgUrl);
-  const name = _norm(item.name), brand = _norm(item.brand);
-  const ref = itemSourceRef(item, { native });
   // A browser's rows carry the server's id as id; the phone's, as server_id.
   const serverIdOf = f => ('server_id' in f ? f.server_id : f.id);
+  // Newest first, so of several of one name the newest one's photo shows,
+  // as in the diary (#277): the highest server id, and a row not on the
+  // server yet (a phone's, or one made offline in the browser, with a
+  // negative id) newer still.
+  const sid = f => { const v = serverIdOf(f); return typeof v === 'number' && v > 0 ? v : null; };
+  const pool = (item.is_recipe ? meals : foods).filter(f => f && f.imgUrl).sort((a, b) => {
+    const x = sid(a), y = sid(b);
+    if ((x == null) !== (y == null)) return x == null ? -1 : 1;
+    if (x != null && x !== y) return y - x;
+    return Math.abs(Number(b.id) || 0) - Math.abs(Number(a.id) || 0);
+  });
+  const name = _norm(item.name), brand = _norm(item.brand);
+  const ref = itemSourceRef(item, { native });
   let m = null;
   if (ref?.serverId != null) m = pool.find(f => serverIdOf(f) === ref.serverId && _norm(f.name) === name);
   // The phone's own id: an item logged before its row went up names only

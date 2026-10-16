@@ -1133,7 +1133,7 @@ async function _freshenItemImages(items) {
            AND img_url IS NOT NULL
            AND img_url != ''
            AND (${conds.join(' OR ')})
-         ORDER BY id ASC`,
+         ORDER BY server_id IS NULL DESC, server_id DESC, id DESC`,
         params
       );
       return _rows(r);
@@ -1171,8 +1171,13 @@ async function _freshenItemImages(items) {
     };
     const foodByNameBrand = new Map();
     const foodByName = new Map();
+    // Of several rows of one name, the newest wins, as on the server
+    // (#277): the rows come newest first, by server id, and one not on the
+    // server yet is newer still. The phone's own ids don't say: a reinstall
+    // or a pull numbers them in another order.
     for (const r of foods) {
-      foodByNameBrand.set(`${_norm(r.name)}|${_norm(r.brand)}`, r.img_url);
+      const nb = `${_norm(r.name)}|${_norm(r.brand)}`;
+      if (!foodByNameBrand.has(nb)) foodByNameBrand.set(nb, r.img_url);
       if (!foodByName.has(_norm(r.name))) foodByName.set(_norm(r.name), r.img_url);
     }
     const mealByName = new Map();
