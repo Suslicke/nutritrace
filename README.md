@@ -201,11 +201,9 @@ Part of the **TraceApps** family. Sister apps: [CookTrace](https://github.com/tr
 
 ## Translations
 
-NutriTrace is translated with [Weblate](https://weblate.org/), a free web platform for libre translation projects. No coding required — pick your language, translate the strings, submit. Missing keys fall back to English at runtime, so partial translations are safe to release.
+NutriTrace is translated with [Weblate](https://weblate.org/), a free web platform for libre translation projects. No coding required: pick your language, translate the strings, submit. Missing strings fall back to English, so a partial translation is safe to use.
 
-[![Translation status](https://hosted.weblate.org/widget/nutritrace/svg-badge.svg)](https://hosted.weblate.org/engage/nutritrace/)
-
-Start translating at [hosted.weblate.org/projects/nutritrace/](https://hosted.weblate.org/projects/nutritrace/). See [CONTRIBUTING.md](CONTRIBUTING.md#translations) for domain-specific guidance (regulatory nutrition terms, proper nouns, tone).
+Start translating at [hosted.weblate.org/projects/nutritrace/](https://hosted.weblate.org/projects/nutritrace/). See [CONTRIBUTING.md](CONTRIBUTING.md#translations) for guidance (regulatory nutrition terms, proper nouns, tone).
 
 ---
 
