@@ -10,7 +10,7 @@
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { hydrateWithoutFoods } from './diary-hydration.js';
 import { parseAltUnits } from './units.js';
-import { itemSourceRef } from './item-source.js';
+import { itemSourceRef, relinkItems } from './item-source.js';
 
 const LOCAL_USER_ID = 1;
 const DB_NAME = 'nutritrace_local';
@@ -1752,6 +1752,36 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
   return changed;
 }
 
+// #277: the phone's foods, meals and recipes are about to go up to a
+// server as new rows (Connect > Upload or Merge, Push all from this
+// device), and the server ids they have now stop naming them. Every diary
+// item that names one of them by that server id, or by this phone's own,
+// follows it (item-source.js relinkItems): to its new server id where
+// `newIds` has it ({ foods, meals }: [[id here, server id]]), else to its
+// id here until it has gone up (dbLinkDiaryItems). Run before the server
+// ids are cleared. Changed days go up with the next push. Returns how
+// many days changed.
+export async function dbRelinkDiaryForNewServer(newIds = {}) {
+  const db = await getDb();
+  const rows = {};
+  for (const t of ['foods', 'meals']) {
+    rows[t] = _rows(await db.query(`SELECT id, server_id, name FROM ${t} WHERE user_id = ? AND deleted_at IS NULL`, [LOCAL_USER_ID]));
+  }
+  const days = _rows(await db.query(`SELECT id, items FROM diary WHERE user_id = ? AND deleted_at IS NULL`, [LOCAL_USER_ID]));
+  if (!days.length) return 0;
+  const opts = { rows, newIds, install: await dbInstallId(), mine: await dbOwnInstallIds() };
+  let changed = 0;
+  for (const day of days) {
+    const items = _parseJson(day.items, []);
+    const r = relinkItems(items, opts);
+    if (!r.changed) continue;
+    await db.run(`UPDATE diary SET items = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
+      [JSON.stringify(r.items), _now(), day.id]);
+    changed++;
+  }
+  return changed;
+}
+
 // Rows the server removed outright (see sync_deletions on the server):
 // workouts by server id, wellness by day, source and metric. A Health
 // Connect value still waiting to go up stays; it's newer than the delete.
@@ -1881,10 +1911,16 @@ export async function dbClearUserData() {
 // with the server's ids); everything else is kept and goes up with the
 // next sync, as new rows: any server id it has is another server's, or
 // one this account doesn't have. Nothing that didn't go up is dropped.
-// The pull starts over.
+// The pull starts over. Diary items kept here follow their food, meal or
+// recipe first (dbRelinkDiaryForNewServer), to the server id the upload
+// gave it (uploaded.serverIds, from lib/migrate.js) or, for one still
+// to go up, to its id here, before those server ids go.
 const _UPLOAD_TABLES = ['foods', 'meals', 'diary', 'activity_log', 'fasts', 'wellness_data', 'workouts'];
 export async function dbKeepForNewServer(uploaded = {}) {
   const db = await getDb();
+  // A day left unlinked is no reason to keep the rows as another server's.
+  try { await dbRelinkDiaryForNewServer(uploaded.serverIds || {}); }
+  catch (e) { console.warn('[db-native] diary items not relinked for the new server:', e?.message || e); }
   for (const t of _UPLOAD_TABLES) {
     const ids = (Array.isArray(uploaded[t]) ? uploaded[t] : []).map(Number).filter(Number.isFinite);
     for (let i = 0; i < ids.length; i += _DEL_CHUNK) {

@@ -32,7 +32,8 @@
  * running upload twice produces duplicates (user is warned in the dialog).
  */
 
-import { dbGetFoods, dbGetMeals, dbGetAllDiary, getDb, dbInstallId, createKeyOf } from './db-native.js';
+import { dbGetFoods, dbGetMeals, dbGetAllDiary, getDb, dbInstallId, dbOwnInstallIds, createKeyOf } from './db-native.js';
+import { relinkItems } from './item-source.js';
 import { DB } from './db.js';
 import { isNative, getServerUrl, getAuthToken } from './platform.js';
 
@@ -88,8 +89,11 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
     errors: [],
     total: 0,
     totalSuccess: 0,
-    // Local row ids per table that went up whole.
-    uploaded: { foods: [], meals: [], diary: [], activity_log: [], fasts: [], wellness_data: [], workouts: [] },
+    // Local row ids per table that went up whole, and the server's id for
+    // each food, meal and recipe ([[id here, server id]]), so diary items
+    // kept on the phone follow them (db-native.js dbKeepForNewServer).
+    uploaded: { foods: [], meals: [], diary: [], activity_log: [], fasts: [], wellness_data: [], workouts: [],
+      serverIds: { foods: [], meals: [] } },
   };
   const headers = {
     'Content-Type': 'application/json',
@@ -177,14 +181,20 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
 
   // ── Diary (one PUT per date: items + body_stats + water + notes, then
   // the day's and each meal's completion marks) ──────────────────────────
-  const linkItems = items => (Array.isArray(items) ? items : []).map(it => {
-    if (!it || typeof it !== 'object' || typeof it.food_server_id === 'number' || typeof it.id !== 'number') return it;
-    const sid = (it.is_recipe ? mealIds : foodIds).get(it.id);
-    if (sid == null) return it;
-    const { food_device: _d, ...rest } = it;
-    const out = { ...rest, food_server_id: sid };
-    return Array.isArray(out._splitItems) ? { ...out, _splitItems: linkItems(out._splitItems) } : out;
-  });
+  // #277: each item names its food, meal or recipe by the server id it
+  // has here. Every one of them goes up as a new row, so whatever server
+  // id it had (another server's, or another account's) means nothing
+  // there: an item follows its row to the id it got just now, or, for a
+  // row that didn't go up, to its id here, linked once the sync sends it
+  // (item-source.js relinkItems). Items of anything else stay as they are.
+  summary.uploaded.serverIds = { foods: [...foodIds], meals: [...mealIds] };
+  const linkOpts = {
+    rows: Object.fromEntries(await Promise.all(['foods', 'meals'].map(async t => [t, await _liveRows(t).catch(() => [])]))),
+    newIds: { foods: foodIds, meals: mealIds },
+    install,
+    mine: await dbOwnInstallIds().catch(() => new Set([install])),
+  };
+  const linkItems = items => (Array.isArray(items) ? relinkItems(items, linkOpts).items : []);
   const localDiary = (await dbGetAllDiary().catch(() => [])).filter(d => !d.deleted_at);
   for (let i = 0; i < localDiary.length; i++) {
     onProgress?.('diary', i, localDiary.length);
@@ -261,6 +271,13 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
   }
   summary.total += summary.errors.length;
   return summary;
+}
+
+// Every food or meal here (shared ones too): all of them go up as new
+// rows, by the upload or by the sync after it.
+async function _liveRows(table) {
+  const db = await getDb();
+  return (await db.query(`SELECT id, server_id, name FROM ${table} WHERE user_id = 1 AND deleted_at IS NULL`, [])).values || [];
 }
 
 async function _countOther() {

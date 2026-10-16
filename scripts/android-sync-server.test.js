@@ -281,6 +281,52 @@ test("an item logged before its food synced (food_server_id null) names no food,
   assert.deepEqual(names, ['Real Recent']);
 });
 
+// #277 follow-up: when the phone's foods, meals and recipes go up as new
+// rows (Connect > Upload or Merge, Push all), each diary item that names
+// one of them follows it, and nothing else moves.
+test("diary items follow their food, meal or recipe to its new server id, and only theirs", async () => {
+  const { relinkItems } = await import('../src/lib/item-source.js');
+  const rows = {
+    foods: [{ id: 1, server_id: 101, name: 'Milk' }, { id: 2, server_id: 102, name: 'Pear' }, { id: 3, server_id: null, name: 'Made Here' }, { id: 4, server_id: 104, name: 'Not Up' }],
+    meals: [{ id: 1, server_id: 201, name: 'Oats' }],
+  };
+  const newIds = { foods: [[1, 501], [2, 502], [3, 503]], meals: [[1, 601]] };
+  const opts = { rows, newIds, install: 'me', mine: new Set(['me', 'me-before']) };
+  const items = [
+    { uuid: 'a', id: 101, food_server_id: 101, name: 'Milk' },                    // logged in the browser
+    { uuid: 'b', id: 2, food_server_id: 102, name: 'Pear (renamed)' },            // logged here: the server id decides, not the name
+    { uuid: 'c', id: 3, food_server_id: null, food_device: 'me-before', name: 'Made Here' }, // before it went up, this phone
+    { uuid: 'd', id: 3, food_server_id: null, food_device: 'another', name: 'Made Here' },   // another phone's id
+    { uuid: 'e', id: 1, food_server_id: 101, is_recipe: 1, name: 'Milk' },        // a recipe's server id 101 is no recipe here
+    { uuid: 'f', id: 7, food_server_id: 201, is_recipe: 1, name: 'Oats' },        // the recipe
+    { uuid: 'g', food_server_id: 999, name: 'Elsewhere' },                         // not one of the phone's
+    { uuid: 'h', id: 104, food_server_id: 104, name: 'Not Up' },                  // its food didn't go up: the phone's id until it does
+    { uuid: 'i', id: 2, name: 'Pear' },                                            // older, untagged: same name
+    { uuid: 'j', id: 2, name: 'Apple' },                                           // older, another name: left alone
+    { uuid: 'k', id: 3, food_server_id: null, name: 'made here ' },               // untagged before it went up: same name
+    { uuid: 'l', name: 'Split', is_recipe: 1, _splitItems: [{ uuid: 'l1', id: 101, food_server_id: 101, name: 'Milk' }] },
+    { uuid: 'm', id: 102, name: 'Pear' },                                          // older, logged in the browser: the server's id, same name
+    { uuid: 'n', id: 102, name: 'Plum' },                                          // the same, another name: left alone
+  ];
+  const { items: out, changed } = relinkItems(items, opts);
+  assert.equal(changed, true);
+  assert.deepEqual(out.map(i => [i.uuid, i.id ?? null, i.food_server_id, i.food_device ?? null]), [
+    ['a', 101, 501, null], ['b', 2, 502, null], ['c', 3, 503, null], ['d', 3, null, 'another'],
+    ['e', 1, 101, null], ['f', 7, 601, null], ['g', null, 999, null], ['h', 4, null, 'me'],
+    ['i', 2, 502, null], ['j', 2, undefined, null], ['k', 3, 503, null], ['l', null, undefined, null],
+    ['m', 102, 502, null], ['n', 102, undefined, null],
+  ]);
+  assert.deepEqual(out[11]._splitItems.map(i => i.food_server_id), [501]);
+  assert.equal(out[6], items[6], 'untouched items are the same objects');
+  // Again, on what it gave (an upload sent twice): the same.
+  assert.deepEqual(relinkItems(out, { ...opts, rows: { foods: rows.foods.map(r => ({ ...r, server_id: Object.fromEntries(newIds.foods)[r.id] ?? r.server_id })), meals: [{ id: 1, server_id: 601, name: 'Oats' }] } }).items, out);
+  // Push all: no new ids yet, so the phone's own until they come back; again, the same.
+  const pushAll = relinkItems(items, { ...opts, newIds: {} });
+  assert.deepEqual(pushAll.items.slice(0, 3).map(i => [i.id, i.food_server_id, i.food_device]), [[1, null, 'me'], [2, null, 'me'], [3, null, 'me']]);
+  assert.equal(relinkItems(pushAll.items, { ...opts, newIds: {} }).changed, false);
+  assert.deepEqual(relinkItems([items[6], items[3]], opts), { items: [items[6], items[3]], changed: false });
+});
+
 test('a note: unchanged keeps its time, an edit with no time is now, an older edit loses', async () => {
   const { resolveNote, clientClock } = await import('../server/lib/sync-clock.js');
   const now = Date.parse('2026-10-06T12:00:00Z');

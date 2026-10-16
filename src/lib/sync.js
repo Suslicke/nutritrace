@@ -302,6 +302,11 @@ async function pushChanges({ token = getAuthToken(), signal = null, gen = accoun
     if (String(e?.message).includes('401')) throw e;
     console.warn('[sync] completion marks wait for the next sync:', e?.message || e);
   }
+  // Items whose food or meal went up in an earlier push but that came back
+  // to the phone only afterwards (a day sent by Connect > Upload while its
+  // food was still to go) are linked now and go up with this push.
+  try { await dbLinkDiaryItems([], live); }
+  catch (e) { console.warn('[sync] linking diary items waits for the next push:', e?.message || e); }
   const pending = await dbGetPendingChanges();
   const pendingSettings = await dbGetPendingSettings();
   const activity = pending.activity || [];
@@ -902,8 +907,13 @@ export async function pushAllFromDevice() {
   const { isNative, getServerUrl } = await import('./platform.js');
   if (!isNative) throw new Error('This action only works in the native app.');
   if (!getServerUrl()) throw new Error('Connect to a server first.');
-  const { getDb } = await import('./db-native.js');
+  const { getDb, dbRelinkDiaryForNewServer } = await import('./db-native.js');
   const db = await getDb();
+
+  // #277: every food, meal and recipe goes up as a new row, so diary items
+  // follow them first, by this phone's ids until the server's come back
+  // (dbLinkDiaryItems links them after the push).
+  await dbRelinkDiaryForNewServer();
 
   // Clear stale server_id refs (server may have lost rows; their old IDs
   // are meaningless) and mark every row pending. user_settings doesn't
@@ -925,7 +935,9 @@ export async function pushAllFromDevice() {
 
   // Trigger a user-requested full sync — this pushes everything we just
   // marked pending and may surface detailed failure feedback.
-  await fullSync(false, false, true);
+  // The items linked after that push go up with the next one.
+  const r = await fullSync(false, false, true);
+  if (r?.ok) await fullSync(true, false, true);
   return { pushed: counts };
 }
 

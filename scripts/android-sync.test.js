@@ -555,6 +555,166 @@ test("#277: a diary item's photo comes from its own row, by the right kind of id
   assert.notEqual(r[3], '/x.jpg', "not the food that has that id on this phone");
 });
 
+// #277 follow-up: Connect > Upload (or Merge) sends the phone's foods,
+// meals and recipes up as new rows, with new server ids. Diary items kept
+// the server ids they had before (from the server the phone used to be
+// connected to), so on the new server, and on the phone once its copy
+// came back, they named no row or another one: no units, barcode or
+// photo of their own. They follow their source now, the upload sent
+// again or not, a row or a day that failed to go up included; an item
+// whose source isn't one of the phone's rows stays as it was.
+test('#277: after Connect > Upload diary items name their food and recipe by its new server id', async (t) => {
+  if (skip(t)) return;
+  const pia = await account('relinkpia', A), quinn = await account('relinkquinn', A);
+  const P = (await http(pia, 'GET', '/api/auth/me')).user, Q = (await http(quinn, 'GET', '/api/auth/me')).user;
+  const DW = '2026-06-19', D = '2026-06-20', D2 = '2026-06-21';
+  const food = (name, extra = {}) => http(pia, 'POST', '/api/foods', { name, nutrition: { calories: 50 }, visibility: 'private', ...extra });
+  const milk = await food('Relink Milk', { barcode: 'BC-RL-MILK', alt_units: [{ abbr: 'glass', grams: 250 }], img_url: '/uploads/rl-milk.jpg' });
+  // Three of one name: by name alone neither the oldest nor the newest is
+  // the middle one.
+  const pears = [];
+  for (const n of [1, 2, 3]) pears.push(await food('Relink Pear', { barcode: `BC-RL-PEAR${n}`, img_url: `/uploads/rl-pear-${n}.jpg` }));
+  const oats = await http(pia, 'POST', '/api/meals', { name: 'Relink Oats', is_recipe: 1, items: [], img_url: '/uploads/rl-oats.jpg', visibility: 'private' });
+  // Logged in the browser: id and food_server_id both Pia's server ids.
+  const web = (f, extra = {}) => ({ uuid: `rl-web-${f.name}`, id: f.id, food_server_id: f.id, name: f.name, meal: 0, quantity: 1, nutrition: {}, ...extra });
+  await http(pia, 'PUT', `/api/diary/${DW}`, { items: [web(milk), web(oats, { is_recipe: 1 }),
+    // Its food isn't one of the phone's: it stays as it is.
+    { uuid: 'rl-elsewhere', food_server_id: 987654, name: 'Elsewhere', meal: 0, quantity: 1, nutrition: {} }], body_stats: {}, water: [] });
+  phone('relink', pia, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(P)}, { confirm: async () => true });
+    await p.sync();
+    const { addDiaryItem } = await import(p.src + 'stores/diary.js');
+    await addDiaryItem(await p.food(${pears[1].id}), 1, '${D}');
+    await addDiaryItem(await p.food(${milk.id}), 0, '${D2}');
+    await addDiaryItem((await p.api.getRecipes()).find(r => r.server_id === ${oats.id}), 0, '${D2}');
+    await p.sync();
+    p.done();`);
+  // Settings > Disconnect, then a food made and logged with no server.
+  // Saving the day keeps only what names each item's food (diary.js
+  // _toReferenceShape): units and barcode come from the food on reading.
+  phone('relink', '', `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.setLocalOwner();
+    const f = await p.dbn.dbCreateFood({ name: 'Relink Local', nutrition: {}, barcode: 'BC-RL-LOCAL' });
+    const { addDiaryItem } = await import(p.src + 'stores/diary.js');
+    await addDiaryItem(await p.dbn.dbGetFood(f.id), 2, '${DW}');
+    p.done();`, { NT_SERVER: '' });
+  // Connect as Quinn and choose Upload, twice (a retry): the recipe fails
+  // both times, so it goes up only with the sync, after the days that name
+  // it; the third day fails once and stays on the phone for the sync.
+  let refuseMeal = 2, refuseDay = 1;
+  const px = await proxy(req => {
+    if (req.method === 'POST' && req.url === '/api/meals' && refuseMeal-- > 0) return { status: 500 };
+    if (req.method === 'PUT' && req.url === `/api/diary/${D2}` && refuseDay-- > 0) return { status: 500 };
+    return null;
+  });
+  let up;
+  try {
+    up = await phoneAsync('relink', quinn, `
+      const la = await import(p.src + 'lib/local-account.js');
+      const { uploadLocalToServer } = await import(p.src + 'lib/migrate.js');
+      const first = await uploadLocalToServer({ serverUrl: process.env.NT_SERVER, authToken: process.env.NT_TOKEN });
+      const summary = await uploadLocalToServer({ serverUrl: process.env.NT_SERVER, authToken: process.env.NT_TOKEN });
+      await la.claimForServer(process.env.NT_SERVER, ${Q.id}, { uploaded: summary.uploaded });
+      p.done({ errors: first.errors.map(e => e.stage), retried: summary.errors.map(e => e.stage) });`, { NT_SERVER: px.url });
+  } finally { await px.close(); }
+  assert.deepEqual(up.errors.sort(), ['diary', 'recipes']);
+  assert.deepEqual(up.retried, ['recipes'], 'sent again, the recipe still fails');
+  const r = phone('relink', quinn, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(Q)}, { confirm: async () => true });
+    await p.sync(); await p.sync();
+    const day = async d => (await p.api.getDiaryDate(d)).items.map(i => [i.name, i.food_server_id ?? null, i.barcode || null, i.alt_units?.[0]?.abbr || null, i.imgUrl || null]);
+    p.done({ dw: await day('${DW}'), d: await day('${D}'), d2: await day('${D2}') });`);
+  const id = img => q(`SELECT id FROM foods WHERE user_id = ? AND img_url = ? AND deleted_at IS NULL`, Q.id, img).map(x => x.id);
+  const [qMilk] = id('/uploads/rl-milk.jpg'), [qPear2] = id('/uploads/rl-pear-2.jpg');
+  const [qLocal] = q(`SELECT id FROM foods WHERE user_id = ? AND name = 'Relink Local'`, Q.id).map(x => x.id);
+  const [qOats] = q(`SELECT id FROM meals WHERE user_id = ? AND img_url = '/uploads/rl-oats.jpg' AND deleted_at IS NULL`, Q.id).map(x => x.id);
+  assert.ok(qMilk && qPear2 && qLocal && qOats, 'each went up');
+  assert.equal(id('/uploads/rl-pear-2.jpg').length, 1, 'sent twice, made once');
+  const want = {
+    dw: [
+      ['Relink Milk', qMilk, 'BC-RL-MILK', 'glass', '/uploads/rl-milk.jpg'],
+      ['Relink Oats', qOats, null, null, '/uploads/rl-oats.jpg'],
+      ['Elsewhere', 987654, null, null, null],
+      ['Relink Local', qLocal, 'BC-RL-LOCAL', null, null],
+    ],
+    d: [['Relink Pear', qPear2, 'BC-RL-PEAR2', null, '/uploads/rl-pear-2.jpg']],
+    d2: [
+      ['Relink Milk', qMilk, 'BC-RL-MILK', 'glass', '/uploads/rl-milk.jpg'],
+      ['Relink Oats', qOats, null, null, '/uploads/rl-oats.jpg'],
+    ],
+  };
+  assert.deepEqual(r, want, 'the phone');
+  const server = async d => (await http(quinn, 'GET', `/api/diary/${d}`)).items.map(i => [i.name, i.food_server_id ?? null, i.barcode || null, i.alt_units?.[0]?.abbr || null, i.imgUrl || null]);
+  assert.deepEqual({ dw: await server(DW), d: await server(D), d2: await server(D2) }, want, 'the server');
+});
+
+// #277 follow-up: Push all from this device (a server that lost its
+// rows) sends every food, meal and recipe up again as a new row. Diary
+// items kept the server ids from before, so they named no row on the
+// phone or on the server: no units, barcode or photo of their own. They
+// follow now, push all run once or twice.
+test('#277: after Push all from this device diary items name their food and recipe by its new server id', async (t) => {
+  if (skip(t)) return;
+  const ravi = await account('ravi', A);
+  const R = (await http(ravi, 'GET', '/api/auth/me')).user;
+  const DW = '2026-06-23', D = '2026-06-22';
+  const food = (name, extra = {}) => http(ravi, 'POST', '/api/foods', { name, nutrition: { calories: 50 }, visibility: 'private', ...extra });
+  const milk = await food('Push Milk', { barcode: 'BC-PA-MILK', alt_units: [{ abbr: 'glass', grams: 250 }], img_url: '/uploads/pa-milk.jpg' });
+  const pears = [];
+  for (const n of [1, 2, 3]) pears.push(await food('Push Pear', { barcode: `BC-PA-PEAR${n}`, img_url: `/uploads/pa-pear-${n}.jpg` }));
+  const oats = await http(ravi, 'POST', '/api/meals', { name: 'Push Oats', is_recipe: 1, items: [], img_url: '/uploads/pa-oats.jpg', visibility: 'private' });
+  await http(ravi, 'PUT', `/api/diary/${DW}`, { items: [
+    { uuid: 'pa-web-milk', id: milk.id, food_server_id: milk.id, name: 'Push Milk', meal: 0, quantity: 1, nutrition: {} },
+    { uuid: 'pa-elsewhere', food_server_id: 987655, name: 'Elsewhere', meal: 0, quantity: 1, nutrition: {} },
+  ], body_stats: {}, water: [] });
+  phone('pushall', ravi, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(R)}, { confirm: async () => true });
+    await p.sync();
+    const { addDiaryItem } = await import(p.src + 'stores/diary.js');
+    await addDiaryItem(await p.food(${pears[1].id}), 1, '${D}');
+    await addDiaryItem((await p.api.getRecipes()).find(r => r.server_id === ${oats.id}), 1, '${D}');
+    const phoneMade = await p.api.createFood({ name: 'Push Phone Made', nutrition: {}, barcode: 'BC-PA-PHONE' });
+    await addDiaryItem(await p.api.getFood(phoneMade.id), 2, '${D}');
+    await p.sync();
+    p.done();`);
+  // The server loses the rows made in the browser.
+  for (const f of [milk, ...pears]) await http(ravi, 'DELETE', `/api/foods/${f.id}`);
+  await http(ravi, 'DELETE', `/api/meals/${oats.id}`);
+  const r = phone('pushall', ravi, `
+    // A day saved here keeps only what names each item's food: units and
+    // barcode come from the food on reading.
+    await p.offline(async () => {
+      const { addDiaryItem } = await import(p.src + 'stores/diary.js');
+      await addDiaryItem(await p.api.getFood((await p.api.getFoods()).find(f => f.name === 'Push Phone Made').id), 2, '${DW}');
+    });
+    const { pushAllFromDevice } = await import(p.src + 'lib/sync.js');
+    await pushAllFromDevice();
+    await pushAllFromDevice();
+    const sid = async name => (await p.api.getFoods()).find(f => f.name === name && (name !== 'Push Pear' || f.barcode === 'BC-PA-PEAR2'))?.server_id;
+    const ids = { milk: await sid('Push Milk'), pear: await sid('Push Pear'), phone: await sid('Push Phone Made'),
+      oats: (await p.api.getRecipes()).find(x => x.name === 'Push Oats')?.server_id };
+    const day = async d => (await p.api.getDiaryDate(d)).items.map(i => [i.name, i.food_server_id ?? null, i.barcode || null, i.alt_units?.[0]?.abbr || null, i.imgUrl || null]);
+    p.done({ ids, items: [...await day('${DW}'), ...await day('${D}')] });`);
+  const { ids } = r;
+  assert.ok(ids.milk && ids.pear && ids.oats && ids.phone);
+  assert.notEqual(ids.milk, milk.id, 'Push all made the food again, with a new server id');
+  const want = [
+    ['Push Milk', ids.milk, 'BC-PA-MILK', 'glass', '/uploads/pa-milk.jpg'],
+    ['Elsewhere', 987655, null, null, null],
+    ['Push Phone Made', ids.phone, 'BC-PA-PHONE', null, null],
+    ['Push Pear', ids.pear, 'BC-PA-PEAR2', null, '/uploads/pa-pear-2.jpg'],
+    ['Push Oats', ids.oats, null, null, '/uploads/pa-oats.jpg'],
+    ['Push Phone Made', ids.phone, 'BC-PA-PHONE', null, null],
+  ];
+  assert.deepEqual(r.items, want, 'the phone');
+  const server = async d => (await http(ravi, 'GET', `/api/diary/${d}`)).items.map(i => [i.name, i.food_server_id ?? null, i.barcode || null, i.alt_units?.[0]?.abbr || null, i.imgUrl || null]);
+  assert.deepEqual([...await server(DW), ...await server(D)], want, 'the server');
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);
