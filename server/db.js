@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { foldText } from './lib/search-text.js';
+import { fillProfileFromSetup } from './lib/profile-fields.js';
 
 const dbPath = process.env.DB_PATH || './nutritrace.db';
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -1191,6 +1192,25 @@ try {
   }
 } catch (e) {
   console.warn('[db] foods nutriment key canonicalization failed:', e?.message || e);
+}
+
+// #269: the first-run setup kept birthday and gender only as settings, so
+// accounts set up that way show an empty Profile. Once, copy them onto any
+// account that has none; from here on the settings routes do it as they
+// arrive (lib/profile-fields.js). Never overwrites what Profile set.
+try {
+  const done = db.prepare(`SELECT value FROM app_config WHERE key = 'profile_from_setup_v1'`).get();
+  if (!done) {
+    let changed = 0;
+    db.transaction(() => {
+      changed = fillProfileFromSetup(db);
+      db.prepare(`INSERT OR REPLACE INTO app_config (key, value) VALUES ('profile_from_setup_v1', ?)`)
+        .run(new Date().toISOString());
+    })();
+    if (changed > 0) console.log(`[db] birthday and gender from setup: ${changed} account(s) filled in`);
+  }
+} catch (e) {
+  console.warn('[db] birthday and gender from setup failed:', e?.message || e);
 }
 
 // ── Coaching (1.5) ─────────────────────────────────────────────────────────

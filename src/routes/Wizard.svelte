@@ -452,6 +452,17 @@
     if (_useLocalProfile && localName.trim()) batch.localUserName = localName.trim();
     await bulkSet(batch);
 
+    // An account keeps birthday and gender on the account itself, which is
+    // what Profile shows. The server copies these answers there when the
+    // account has none (#269); show them now too, connection or not.
+    if (!_useLocalProfile) {
+      currentUser.update(u => (u ? {
+        ...u,
+        birthday: u.birthday || dob || null,
+        gender: u.gender || (gender === 'female' ? 'Female' : gender === 'male' ? 'Male' : null),
+      } : u));
+    }
+
     // Refresh the synthetic LOCAL_USER so Sidebar / Trace / etc. pick up the
     // new name without a page reload.
     if (_useLocalProfile && localName.trim()) {

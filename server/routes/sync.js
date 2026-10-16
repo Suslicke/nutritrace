@@ -15,6 +15,7 @@ import { requireAuth, userMgmtActive } from '../middleware/auth.js';
 import { logger } from '../logger.js';
 import { resolveNewItemVisibility } from '../lib/default-visibility.js';
 import { isServerOnlyKey } from '../lib/server-only-keys.js';
+import { fillIfSetupAnswers } from '../lib/profile-fields.js';
 import { localizeImage, isExternalUrl } from '../lib/image-localizer.js';
 import { mirrorWeightToBodyStats } from '../lib/wellness-mirror.js';
 import { cleanCreateKey, findByCreateKey, setCreateKey } from '../lib/create-keys.js';
@@ -738,6 +739,9 @@ router.post('/push', wrap(async (req, res) => {
         }
         result.settings.push({ key: s.key });
       }
+      // Setup's birthday and gender belong on the account too (#269): an
+      // app moving its local data to this account sends them this way.
+      fillIfSetupAnswers(db, u, settings.filter(s => !s.deleted_at && !isServerOnlyKey(s.key)).map(s => s.key));
     }
   });
 

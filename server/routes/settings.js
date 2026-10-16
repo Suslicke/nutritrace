@@ -5,6 +5,7 @@ import { requireAuth, userMgmtActive } from '../middleware/auth.js';
 import { isServerOnlyKey } from '../lib/server-only-keys.js';
 import { fetchChecked, serviceBase } from '../lib/ssrf-guard.js';
 import { coachingSignature } from '../lib/coaching.js';
+import { fillIfSetupAnswers } from '../lib/profile-fields.js';
 
 // Push services usually live on the home network, so that's allowed for
 // every account; the address is still checked, and a redirect only
@@ -54,6 +55,8 @@ router.put('/', wrap((req, res) => {
   db.prepare(`INSERT INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, datetime('now'))
     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now'), deleted_at = NULL`)
     .run(req.user.id, key, JSON.stringify(value));
+  // Setup's birthday and gender belong on the account too (#269).
+  fillIfSetupAnswers(db, req.user.id, [key]);
   res.json({ ok: true });
 }));
 
@@ -78,6 +81,8 @@ router.put('/bulk', wrap((req, res) => {
       upsert.run(req.user.id, key, JSON.stringify(value));
       written++;
     }
+    // Setup's birthday and gender belong on the account too (#269).
+    fillIfSetupAnswers(db, req.user.id, Object.keys(settings).filter(k => !isServerOnlyKey(k)));
   })();
   res.json({ ok: true, written, skipped });
 }));

@@ -4,6 +4,7 @@ import { localizeImage } from '../lib/image-localizer.js';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import db from '../db.js';
+import { normalizeGender } from '../lib/profile-fields.js';
 import { wrap } from '../logger.js';
 import { signToken, sessionMaxAge, userMgmtActive, setupRequired, requireAuth, requireAdmin } from '../middleware/auth.js';
 import { listProviders as oidcListProviders, publicProvider as oidcPublicProvider, isPasswordLoginEnabled, listUserLinks } from '../lib/oidc.js';
@@ -241,7 +242,7 @@ router.post('/register', wrap((req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     username.trim().toLowerCase(), hash,
-    full_name || null, nickname || null, birthday || null, gender || null, assignedRole,
+    full_name || null, nickname || null, birthday || null, normalizeGender(gender), assignedRole,
     email ? email.trim().toLowerCase() : null
   );
 
@@ -264,15 +265,27 @@ router.post('/register', wrap((req, res) => {
 
 // ── Update own profile ─────────────────────────────────────────────────────
 router.put('/profile', requireAuth, wrap(async (req, res) => {
-  const { full_name, nickname, birthday, gender, email } = req.body;
+  const body = req.body || {};
+  const before = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id) || {};
+  // A field the request leaves out stays as it is. Profile always sends all
+  // of them (an empty one clears it); turning user accounts on sends only
+  // what this device knew, and used to wipe the email just registered (#269).
+  const given = (k) => Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined;
+  const full_name = given('full_name') ? body.full_name : before.full_name;
+  const nickname = given('nickname') ? body.nickname : before.nickname;
+  const birthday = given('birthday') ? body.birthday : before.birthday;
+  const gender = given('gender') ? body.gender : before.gender;
+  const email = given('email') ? body.email : before.email;
   // A picture chosen with no connection arrives embedded in this request,
   // since there was nowhere to upload it to. It becomes a file here, the
   // same way a food's photo does.
-  const avatar_url = await localizeImage(req.body?.avatar_url, { allowPrivate: ownerOrOptIn(req, 'ALLOW_PRIVATE_IMAGE_URLS') });
+  const avatar_url = given('avatar_url')
+    ? await localizeImage(body.avatar_url, { allowPrivate: ownerOrOptIn(req, 'ALLOW_PRIVATE_IMAGE_URLS') })
+    : before.avatar_url;
   db.prepare(
     `UPDATE users SET full_name=?, nickname=?, birthday=?, gender=?, avatar_url=?, email=? WHERE id=?`
-  ).run(full_name || null, nickname || null, birthday || null, gender || null, avatar_url || null,
-        email ? email.trim().toLowerCase() : null, req.user.id);
+  ).run(full_name || null, nickname || null, birthday || null, normalizeGender(gender), avatar_url || null,
+        email ? String(email).trim().toLowerCase() : null, req.user.id);
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({ user: safeUser(user) });
