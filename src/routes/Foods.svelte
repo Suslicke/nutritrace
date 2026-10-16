@@ -30,8 +30,10 @@
   import { offNutritionStatus, needsFullLookup } from '../lib/off-nutrition.js';
   import { resolveAssetUrl, isNative } from '../lib/platform.js';
   import { catalogImgFor } from '../lib/item-source.js';
+  import { dayBefore, dayName } from '../lib/prev-day.js';
+  import { formatDay } from '../lib/coaching-view.js';
   import { offCountryTagToFlag, offCountryTagToName } from '../lib/off-country-flag.js';
-  import { foodsShowThumbnails, foodsShowCategories, foodsShowLabels, foodsShowNotes, foodsSort, mealsSort, recipesSort, foodCategories, foodsShowYesterdayMeals, foodsYesterdayCollapsed, foodsSavedCollapsed, mealNames, usdaEnabled, usdaApiKey, offEnabled, offSearchCountry, offSearchLanguage, foodsDefaultSource, diaryDefaultField, catName as _catName, catDisplay as _catDisplay, pageBanners, bannerStyle, energyUnit } from '../stores/settings.js';
+  import { dateFormat, foodsShowThumbnails, foodsShowCategories, foodsShowLabels, foodsShowNotes, foodsSort, mealsSort, recipesSort, foodCategories, foodsShowYesterdayMeals, foodsYesterdayCollapsed, foodsSavedCollapsed, mealNames, usdaEnabled, usdaApiKey, offEnabled, offSearchCountry, offSearchLanguage, foodsDefaultSource, diaryDefaultField, catName as _catName, catDisplay as _catDisplay, pageBanners, bannerStyle, energyUnit } from '../stores/settings.js';
   import { mealIcon } from '../lib/mealIcon.js';
   import { focusDefaultField } from '../lib/default-field.js';
   import { pageScrollTop, restorePageScroll } from '../lib/scroll-anchor.js';
@@ -83,7 +85,8 @@
     requestAnimationFrame(reset);
   }
   $: _tabIcon = activeTab === 0 ? 'restaurant' : activeTab === 1 ? 'dinner_dining' : 'menu_book';
-  $: { if (pickMode) loadYesterdayMeals(); }
+  // #280: the day before the one being added to, again when that changes.
+  $: { if (pickMode) loadYesterdayMeals(pickDate); }
   // Saved-meals collapse only kicks in when the SAVED MEALS header is actually rendered
   // (Meals tab + pick mode + yesterday section visible + not searching). Otherwise the
   // header isn't shown and the user has no way to toggle it back, so the list must render.
@@ -1646,12 +1649,26 @@
     }
   }
 
-  async function loadYesterdayMeals() {
+  // The day the meals come from: the day before the one being added to
+  // (#280), not the day before today. Named "Yesterday's Meals" when that
+  // is yesterday, else after its day (lib/prev-day.js).
+  let yesterdayDay = null;
+  $: _yName = yesterdayDay ? dayName(yesterdayDay) : { kind: 'yesterday' };
+  $: _yDayLabel = _yName.kind === 'yesterday' ? $_('foods.prev_day.yesterday')
+    : _yName.kind === 'today' ? $_('foods.prev_day.today')
+    : _yName.kind === 'weekday' ? _yName.name
+    : formatDay(_yName.day, $dateFormat);
+  $: _ySectionLabel = _yName.kind === 'yesterday' ? $_('foods.prev_day.section_yesterday')
+    : $_('foods.prev_day.section_from', { values: { day: _yDayLabel } });
+  let _yLoad = 0;
+  async function loadYesterdayMeals(target = pickDate) {
+    const run = ++_yLoad;
     if (!pickMode || !$foodsShowYesterdayMeals) { yesterdayMeals = []; return; }
-    const yDate = new Date();
-    yDate.setDate(yDate.getDate() - 1);
-    const yStr = localDateStr(yDate);
+    const yStr = dayBefore(target);
     const entry = await NtApi.getDiaryDate(yStr);
+    // A later call (another day picked meanwhile) has the say.
+    if (run !== _yLoad) return;
+    yesterdayDay = yStr;
     if (!entry || !entry.items || !entry.items.length) { yesterdayMeals = []; return; }
     const names = $mealNames || ['Breakfast','Lunch','Dinner','Snacks'];
     const groups = {};
@@ -1692,7 +1709,7 @@
     const targetMeal = Number(pickMeal) || 0;
     const { addDiaryItem } = await import('../stores/diary.js');
     // Same lookup as the popup rendering — pull each item's live imgUrl
-    // from the user's foods catalog before writing to today's diary, so
+    // from the user's foods catalog before writing to the day's diary, so
     // the new diary row uses the food's current image (just like the
     // food picker does) instead of whatever stale value yesterday's
     // diary item is carrying.
@@ -2094,7 +2111,7 @@
     <button class="meal-section-header" type="button"
       on:click={() => foodsYesterdayCollapsed.set(!$foodsYesterdayCollapsed)}
       aria-expanded={!$foodsYesterdayCollapsed}>
-      <span class="meal-section-label">Yesterday's Meals</span>
+      <span class="meal-section-label">{_ySectionLabel}</span>
       <span class="material-symbols-rounded meal-section-chevron"
         class:meal-section-chevron-collapsed={$foodsYesterdayCollapsed}>expand_more</span>
     </button>
@@ -2118,7 +2135,7 @@
             <span class="material-symbols-rounded">info</span>
           </button>
           <button class="btn-icon accent" on:click|stopPropagation={() => addYesterdayMeal(group)}
-            aria-label="Add {group.mealName} to today" title="Add to today">
+            aria-label={$_('foods.prev_day.add_aria', { values: { meal: group.mealName } })} title={$_('foods.prev_day.add_title')}>
             <span class="material-symbols-rounded">add_circle</span>
           </button>
         </div>
@@ -2811,7 +2828,7 @@
 
 <!-- Yesterday's meal info sheet — list of items in that meal group -->
 <Sheet open={yesterdayInfoGroup != null}
-  title={yesterdayInfoGroup ? `Yesterday: ${yesterdayInfoGroup.mealName}` : ''}
+  title={yesterdayInfoGroup ? $_('foods.prev_day.sheet_title', { values: { day: _yDayLabel, meal: yesterdayInfoGroup.mealName } }) : ''}
   on:close={() => yesterdayInfoGroup = null}>
   {#if yesterdayInfoGroup}
     {@const _yTotEnergy = Nutrition.displayEnergy(yesterdayInfoGroup.totalKcal, $energyUnit)}

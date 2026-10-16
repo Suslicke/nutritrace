@@ -1073,6 +1073,7 @@
   let showSmartLog = false;
   let smartLogPreParsed = null;     // [{ item, candidates, best, source }, ...]
   let smartLogMeal = null;
+  let smartLogDate = null;          // the day it logs to, fixed when it was heard
   let smartLogText = '';
 
   async function _hapticBuzz(style = 'medium') {
@@ -1252,7 +1253,10 @@
         showError(`Couldn't find any food in "${text}"`);
         return;
       }
-      const matches = await matchItems(parsed.items);
+      // The Smart Log below logs to today, so "same as yesterday" is the
+      // day before today (#280: counted from the day being logged to).
+      smartLogDate = localDateStr();
+      const matches = await matchItems(parsed.items, { date: smartLogDate });
       smartLogPreParsed = matches;
       smartLogMeal = parsed.meal;
       showSmartLog = true;
@@ -2440,7 +2444,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
   <!-- ── Smart Log modal — global mount, opens after a hold-to-record gesture ── -->
   {#if showSmartLog && smartLogPreParsed}
     <SmartLogModal
-      date={localDateStr()}
+      date={smartLogDate || localDateStr()}
       defaultMealSlot={0}
       openMode="preParsed"
       preParsedMatches={smartLogPreParsed}

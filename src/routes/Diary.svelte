@@ -1522,7 +1522,8 @@
     // Store the item to replace, then navigate to food picker in pick mode
     const mealSlot = item.meal != null ? Number(item.meal) : 0;
     sessionStorage.setItem('nt:replaceItem', JSON.stringify({ index: item._i, meal: mealSlot }));
-    push('/foods?pick=1&meal=' + mealSlot);
+    // The day too (#280): the picker's meals of the day before count back from it.
+    push('/foods?pick=1&meal=' + mealSlot + '&date=' + $currentDate);
   }
   async function moveItemToMeal(e) {
     const mealIdx = e.detail?.value;

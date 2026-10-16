@@ -839,6 +839,15 @@
     }
   },
   "foods": {
+    "prev_day": {
+      "section_yesterday": "Yesterday's Meals",
+      "section_from": "From {day}",
+      "yesterday": "Yesterday",
+      "today": "Today",
+      "sheet_title": "{day}: {meal}",
+      "add_title": "Add to Diary",
+      "add_aria": "Add {meal} to the diary"
+    },
     "off_no_values_listed": "No values listed",
     "off_skipped": "Left out, since Open Food Facts has no values \"as sold\" for them: {names}. Add them under Foods with the values from the label.",
     "category_all": "All",

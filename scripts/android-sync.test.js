@@ -746,6 +746,22 @@ test("#277: same-named foods: the phone shows the newest one's photo, as the ser
   assert.equal(r.unsent, '/same/new.jpg', 'a row not on the server yet is the newest');
 });
 
+// #280 (@fatman00): Smart Log's "same as yesterday" on the phone, from its
+// own database: the day before the day being logged to (matchItems' date;
+// Trace logs to today), the rule Foods' Yesterday's Meals now follows.
+test('#280: "same as yesterday" on the phone is the day before the day being logged to', async (t) => {
+  if (skip(t)) return;
+  const r = phone('prev-day', A, `
+    await p.dbn.dbSaveDiaryDate('2026-03-01', { items: [{ uuid: 'pd-1', name: 'Day One Soup', meal: 1, quantity: 1, nutrition: { calories: 100 } }] });
+    await p.dbn.dbSaveDiaryDate('2026-03-02', { items: [{ uuid: 'pd-2', name: 'Day Two Salad', meal: 1, quantity: 1, nutrition: { calories: 200 } }] });
+    const { matchItems } = await import(p.src + 'lib/quick-log.js');
+    const lunch = [{ name: 'Lunch', quantity: 1, unit: null, kind: 'yesterday' }];
+    const [day3] = await matchItems(lunch, { date: '2026-03-03' });
+    const [day2] = await matchItems(lunch, { date: '2026-03-02' });
+    p.done({ day3: [day3.best?._yesterdayDate, (day3.best?.items || []).map(i => i.name)], day2: [day2.best?._yesterdayDate, (day2.best?.items || []).map(i => i.name)] });`);
+  assert.deepEqual(r, { day3: ['2026-03-02', ['Day Two Salad']], day2: ['2026-03-01', ['Day One Soup']] });
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);
