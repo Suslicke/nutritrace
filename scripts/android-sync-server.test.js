@@ -263,7 +263,7 @@ test("an item logged before its food synced (food_server_id null) names no food,
   assert.deepEqual(itemSourceRef({ id: 5 }, { native: false }), { serverId: 5 }, 'older items read as before');
   assert.deepEqual(itemSourceRef({ id: 5 }, { native: true }), { localId: 5, unsent: false });
   assert.match(read('../src/stores/diary.js'), /const ref = itemSourceRef\(item, \{ native: isNative \}\);[\s\S]*dbFindLocalId\('meals', ref\.serverId\)/, 'splitting a recipe on a phone finds it by server id');
-  assert.match(read('../src/routes/Foods.svelte'), /const ref = itemSourceRef\(item, \{ native: isNative \}\);/);
+  assert.match(read('../src/routes/Foods.svelte'), /return catalogImgFor\(item, \{ foods: localFoods \|\| \[\], meals: \[\.\.\.\(localMeals \|\| \[\]\), \.\.\.\(localRecipes \|\| \[\]\)\] \}, \{ native: isNative, mine: _myInstalls \}\);/);
   if (skip(t)) return;
   const { registerRecentFoods } = await import('../server/lib/mcp/tools/recent-foods.js');
   const u = user('recent');
@@ -279,6 +279,62 @@ test("an item logged before its food synced (food_server_id null) names no food,
   const res = await handler({ limit: 10 });
   const names = (res.structuredContent?.items || []).map(i => i.name);
   assert.deepEqual(names, ['Real Recent']);
+});
+
+// #277 follow-up: Yesterday's Meals (Foods.svelte liveImgFor) shows each
+// item's photo the way the diary does: a recipe's from the recipes, by the
+// server id first, then by name, trimmed and case-insensitively. It looked
+// in foods, meals and recipes at once, so a recipe took the photo of a food
+// with the same id, and a name with a space after it or in other letter
+// case found nothing.
+test("Yesterday's Meals shows each item's photo the way the diary does", (t) => {
+  return import('../src/lib/item-source.js').then(({ catalogImgFor }) => {
+    // The browser: a row's id is the server's.
+    const foods = [{ id: 3, name: 'Toast', imgUrl: '/toast.jpg' }, { id: 4, name: 'Slim Milk ', imgUrl: '/milk.jpg' }, { id: 5, name: 'pear', brand: 'Orchard', imgUrl: '/pear.jpg' }];
+    const meals = [{ id: 3, name: 'Overnight Oats', is_recipe: 1, imgUrl: '/oats.jpg' }];
+    const web = it => catalogImgFor(it, { foods, meals });
+    assert.equal(web({ id: 3, food_server_id: 3, is_recipe: 1, name: 'Overnight Oats' }), '/oats.jpg', "a recipe's photo, not the food with its id");
+    assert.equal(web({ id: 3, food_server_id: 3, name: 'Toast' }), '/toast.jpg');
+    assert.equal(web({ food_server_id: 99, name: 'slim milk', imgUrl: '' }), '/milk.jpg', 'by name, trimmed, any case');
+    assert.equal(web({ name: 'PEAR ', brand: 'orchard' }), '/pear.jpg', 'name and brand, trimmed, any case');
+    assert.equal(web({ name: 'Pear', brand: 'Other' }), '/pear.jpg', 'then the name alone, as the diary');
+    assert.equal(web({ food_server_id: 3, name: 'Butter', imgUrl: '/own.jpg' }), '/own.jpg', "an id whose row has another name isn't it");
+    assert.equal(web({ id: 4, food_server_id: null, name: 'Slim Milk' }), '/milk.jpg', "another phone's id names nothing; the name decides");
+    // The Android app: its own ids in id, the server's in server_id.
+    const pf = [{ id: 1, server_id: 3, name: 'Toast', imgUrl: '/p-toast.jpg' }, { id: 3, server_id: 9, name: 'Toast', imgUrl: '/p-toast9.jpg' }, { id: 7, server_id: null, name: 'New Food', imgUrl: '/p-new.jpg' }];
+    const phone = it => catalogImgFor(it, { foods: pf, meals: [] }, { native: true });
+    assert.equal(phone({ id: 3, food_server_id: 3, name: 'Toast' }), '/p-toast.jpg', "by the server's id, not the phone's");
+    assert.equal(phone({ id: 7, food_server_id: null, name: 'new food' }), '/p-new.jpg', 'logged before it went up');
+    const twoNew = { foods: [{ id: 7, server_id: null, name: 'Soup', imgUrl: '/old-soup.jpg' }, { id: 8, server_id: null, name: 'Soup', imgUrl: '/new-soup.jpg' }], meals: [] };
+    const other = { id: 7, food_server_id: null, food_device: 'other-phone', name: 'Soup' };
+    assert.equal(catalogImgFor(other, twoNew, { native: true, mine: new Set(['me']) }), catalogImgFor({ name: 'Soup' }, twoNew, { native: true }), "another phone's id names nothing here: by name, as the diary");
+    assert.equal(catalogImgFor({ ...other, food_device: 'me' }, twoNew, { native: true, mine: new Set(['me']) }), '/old-soup.jpg', "this phone's: by its id");
+  });
+});
+
+// The same, against the diary's own lookup on the server: for each item
+// Yesterday's Meals and the diary show the same photo.
+test("Yesterday's Meals and the diary agree on each item's photo", (t) => {
+  if (skip(t)) return;
+  return import('../src/lib/item-source.js').then(({ catalogImgFor }) => {
+    const u = user('yday');
+    const food = (name, img, brand = null) => ({ id: Number(db.prepare(`INSERT INTO foods (user_id, name, brand, img_url) VALUES (?, ?, ?, ?)`).run(u, name, brand, img).lastInsertRowid), name, brand, imgUrl: img });
+    const meal = (name, img) => ({ id: Number(db.prepare(`INSERT INTO meals (user_id, name, items, is_recipe, img_url) VALUES (?, ?, '[]', 1, ?)`).run(u, name, img).lastInsertRowid), name, is_recipe: 1, imgUrl: img });
+    const toast = food('Toast Y', '/y-toast.jpg'), milk = food('Slim Milk Y ', '/y-milk.jpg'), cheese = food('Cheese Y', '/y-cheese.jpg', 'Dairy Co');
+    const oats = meal('Oats Y', '/y-oats.jpg');
+    const items = [
+      { id: toast.id, food_server_id: toast.id, name: 'Toast Y' },
+      { id: oats.id, food_server_id: oats.id, is_recipe: 1, name: 'Oats Y' },
+      { id: toast.id, food_server_id: toast.id, is_recipe: 1, name: 'Oats Y' },
+      { food_server_id: null, id: 1, name: 'slim milk y' },
+      { name: 'CHEESE Y ', brand: ' dairy co' },
+      { name: 'cheese y', brand: 'Another' },
+    ];
+    const server = helpers.freshenItemImages(items, u).map(i => i.imgUrl);
+    const catalogue = { foods: [toast, milk, cheese], meals: [oats] };
+    assert.deepEqual(items.map(i => catalogImgFor(i, catalogue)), server);
+    assert.deepEqual(server, ['/y-toast.jpg', '/y-oats.jpg', '/y-oats.jpg', '/y-milk.jpg', '/y-cheese.jpg', '/y-cheese.jpg']);
+  });
 });
 
 // #277 follow-up: when the phone's foods, meals and recipes go up as new

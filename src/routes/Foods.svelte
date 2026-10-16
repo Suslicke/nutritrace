@@ -29,7 +29,7 @@
   import { offlineState } from '../lib/offline-api.js';
   import { offNutritionStatus, needsFullLookup } from '../lib/off-nutrition.js';
   import { resolveAssetUrl, isNative } from '../lib/platform.js';
-  import { itemSourceRef } from '../lib/item-source.js';
+  import { catalogImgFor } from '../lib/item-source.js';
   import { offCountryTagToFlag, offCountryTagToName } from '../lib/off-country-flag.js';
   import { foodsShowThumbnails, foodsShowCategories, foodsShowLabels, foodsShowNotes, foodsSort, mealsSort, recipesSort, foodCategories, foodsShowYesterdayMeals, foodsYesterdayCollapsed, foodsSavedCollapsed, mealNames, usdaEnabled, usdaApiKey, offEnabled, offSearchCountry, offSearchLanguage, foodsDefaultSource, diaryDefaultField, catName as _catName, catDisplay as _catDisplay, pageBanners, bannerStyle, energyUnit } from '../stores/settings.js';
   import { mealIcon } from '../lib/mealIcon.js';
@@ -1675,41 +1675,17 @@
   // food.imgUrl if a match is found, else the item's own (possibly stale)
   // imgUrl as a fallback. No async, no preprocessing — the foods list is
   // already loaded by the time yesterday-meal cards are visible.
+  // This phone's install ids, so an item another phone logged before its
+  // food went up never takes a photo here by that phone's id.
+  let _myInstalls = null;
+  onMount(() => {
+    if (isNative) import('../lib/db-native.js').then(m => m.dbOwnInstallIds()).then(s => { _myInstalls = s; }).catch(() => {});
+  });
   function liveImgFor(item) {
-    // Search across foods + meals + recipes. Diary items can reference
-    // any of the three (recipes are added as single-line entries
-    // carrying the recipe's id, not expanded into ingredients).
-    const all = [...(localFoods || []), ...(localMeals || []), ...(localRecipes || [])];
-    // foodStableId — server_id when set (Android cache rows), else id
-    // (PWA rows use the server's id directly as `id`). itemStableId —
-    // food_server_id (set explicitly by addDiaryItem post-fix), or
-    // item.id for legacy items (PWA-written items already use the
-    // server's id; Android-pre-fix items have local ids that may have
-    // renumbered after a re-install — those fall through to name match).
-    // A row not yet on the server (server_id null) has no server id, so
-    // it never matches one by its own id. An item logged before its food
-    // reached the server (food_server_id null) only matches that phone
-    // row, by the same name too: ids renumber when the app is reinstalled.
-    const foodServerId = (f) => ('server_id' in f) ? f.server_id : f.id;
-    const ref = itemSourceRef(item, { native: isNative });
-    const m = ref?.serverId != null ? all.find(f => foodServerId(f) === ref.serverId)
-      : ref?.localId != null ? all.find(f => f.id === ref.localId && (!ref.unsent || (f.server_id == null && f.name === item.name)))
-      : null;
-    if (m?.imgUrl) return m.imgUrl;
-    const itemName = (item.name || '').trim();
-    const itemBrand = (item.brand || '').toLowerCase().trim();
-    if (itemName) {
-      const exact = all.filter(f =>
-        f.name === itemName && (f.brand || '').toLowerCase().trim() === itemBrand);
-      const m = exact.find(f => f.imgUrl) || exact[0] || null;
-      if (m?.imgUrl) return m.imgUrl;
-    }
-    if (itemName && !itemBrand) {
-      const nameOnly = all.filter(f => f.name === itemName);
-      const m = nameOnly.find(f => f.imgUrl) || nameOnly[0] || null;
-      if (m?.imgUrl) return m.imgUrl;
-    }
-    return item.imgUrl;
+    // The diary's own lookup (lib/item-source.js catalogImgFor): a recipe
+    // among meals and recipes, anything else among foods, by its source's
+    // server id first, then by name, trimmed and case-insensitively (#277).
+    return catalogImgFor(item, { foods: localFoods || [], meals: [...(localMeals || []), ...(localRecipes || [])] }, { native: isNative, mine: _myInstalls });
   }
 
   async function addYesterdayMeal(group) {

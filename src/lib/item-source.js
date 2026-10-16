@@ -25,6 +25,42 @@ export function itemSourceRef(item, { native = false } = {}) {
 const _norm = s => String(s || '').trim().toLowerCase();
 
 /**
+ * The photo of the food, meal or recipe a diary item (or a meal's
+ * ingredient) came from, out of the catalogue this device has loaded
+ * (Foods: Yesterday's Meals and a meal's items), found the way the diary
+ * finds it (server/lib/diary-helpers.js freshenItemImages, db-native.js
+ * _freshenItemImages): a recipe among meals and recipes, anything else
+ * among foods; by its source's id with the same name first, then by name
+ * and brand (foods only), then by name. Names are trimmed and compared
+ * case-insensitively, and only rows with a photo count. Falls back to the
+ * item's own imgUrl.
+ * catalogue: { foods, meals } (meals with the recipes); native: the rows
+ * are the Android app's (their server id in server_id); mine: the
+ * phone's install ids (db-native.js dbOwnInstallIds).
+ */
+export function catalogImgFor(item, { foods = [], meals = [] } = {}, { native = false, mine = null } = {}) {
+  if (!item || typeof item !== 'object') return '';
+  const pool = (item.is_recipe ? meals : foods).filter(f => f && f.imgUrl);
+  const name = _norm(item.name), brand = _norm(item.brand);
+  const ref = itemSourceRef(item, { native });
+  // A browser's rows carry the server's id as id; the phone's, as server_id.
+  const serverIdOf = f => ('server_id' in f ? f.server_id : f.id);
+  let m = null;
+  if (ref?.serverId != null) m = pool.find(f => serverIdOf(f) === ref.serverId && _norm(f.name) === name);
+  // The phone's own id: an item logged before its row went up names only
+  // a row still waiting to go up, and only on the phone that logged it
+  // (`mine`, this database's install ids, when known).
+  else if (ref?.localId != null && !(ref.unsent && item.food_device && !mine?.has(item.food_device))) {
+    m = pool.find(f => f.id === ref.localId && _norm(f.name) === name && (!ref.unsent || f.server_id == null));
+  }
+  if (!m && name) {
+    if (!item.is_recipe) m = pool.find(f => _norm(f.name) === name && _norm(f.brand) === brand);
+    if (!m) m = pool.find(f => _norm(f.name) === name);
+  }
+  return m?.imgUrl || item.imgUrl || '';
+}
+
+/**
  * The phone's foods, meals and recipes are going up to a server as new
  * rows (Connect > Upload or Merge, Push all from this device), so the
  * server ids they had stop naming them. This points each diary item whose
