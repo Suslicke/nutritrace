@@ -170,10 +170,17 @@
       // with no connection is queued like everything else and goes up when
       // the connection returns (lib/offline-api.js).
       const data = await NtApi.updateProfile({ full_name, nickname, birthday, gender, avatar_url, email });
-      if (data?.user) currentUser.set(data.user);
+      // A save kept to send later answers with only the fields sent: keep
+      // the rest of who is signed in (id, role), or the app loses track of
+      // whose settings it is showing.
+      if (data?.user) currentUser.set({ ...get(currentUser), ...data.user });
       showSuccess($_('profile.saved'));
     } catch(e) {
-      showError($_('profile.errors.save_failed'));
+      // Say what went wrong (#269): this device could not keep it, there is
+      // no connection (Android), or the server said no.
+      showError(e?.storage ? $_('profile.errors.not_kept')
+        : e?.offline ? $_('profile.errors.needs_connection')
+        : $_('profile.errors.save_failed'));
     } finally {
       saving = false;
     }

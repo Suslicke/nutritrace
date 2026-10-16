@@ -357,6 +357,14 @@ export const NtApiCached = {
     catch { return { enabled: false }; }
   },
 
+  // ── Your profile (server-only) ────────────────────────────────────────
+
+  // Not one of the synced tables, so it goes straight to the server, and
+  // with no connection it says so (the same request the coaching calls
+  // use). Profile calls this; without it every save on Android failed
+  // before any request was made (#269).
+  async updateProfile(data) { return _coachingFetch('PUT', '/api/auth/profile', data); },
+
   // ── Upload ────────────────────────────────────────────────────────────
 
   async uploadImage(file) {

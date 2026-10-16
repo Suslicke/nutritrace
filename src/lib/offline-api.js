@@ -68,8 +68,18 @@ const _STORES = ['diary', 'foods', 'meals', 'recipes', 'activity', 'activity_sum
   // Coaching (1.5): conversations kept for a dead zone, and recommendations.
   'coach_messages', 'coach_recommendations'];
 
+/**
+ * The browser's IndexedDB, or null. A browser refusing this site storage can
+ * throw just for asking (a SecurityError), and that has to read as "no
+ * database" like every other way of not having one.
+ */
+function _idb() {
+  try { return typeof indexedDB === 'undefined' ? null : indexedDB; } catch { return null; }
+}
+
 function _db() {
-  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+  const idb = _idb();
+  if (!idb) return Promise.resolve(null);
   const name = _dbName();
   if (_dbPromise && _dbPromise.name === name) return _dbPromise;
   // The first reads of a page happen before the app knows who is signed in,
@@ -77,7 +87,11 @@ function _db() {
   // what was kept with it rather than leaving it in a database nothing reads.
   const leaving = _dbPromise?.name && _dbPromise.name !== name ? _dbPromise.name : null;
   const p = new Promise((resolve) => {
-    const req = indexedDB.open(name, 5);
+    let req;
+    // Opening throws outright when the browser refuses this site storage.
+    // Thrown here it rejected every read and write of this layer, so a
+    // Profile or diary save failed before any request was made (#269).
+    try { req = idb.open(name, 5); } catch { resolve(null); return; }
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('diary')) db.createObjectStore('diary', { keyPath: 'date' });
@@ -115,7 +129,9 @@ function _db() {
 async function _absorb(oldName, db) {
   if (!db) return;
   const old = await new Promise((resolve) => {
-    const req = indexedDB.open(oldName);
+    let req;
+    try { req = _idb()?.open(oldName); } catch { req = null; }
+    if (!req) return resolve(null);
     req.onsuccess = () => resolve(req.result);
     req.onerror = req.onblocked = () => resolve(null);
   });
@@ -247,6 +263,16 @@ function _offlineError(message) {
   return err;
 }
 
+/**
+ * This browser would not keep a change to send later (storage full, blocked
+ * or broken). Not "offline": the screen says what actually went wrong.
+ */
+function _storageError() {
+  const err = new Error('This browser could not keep the change to send later.');
+  err.storage = true;
+  return err;
+}
+
 // How many provider readings to keep. A season of wellness days is plenty,
 // and a database that never fills is what keeps the outbox writable: a full
 // one would refuse what you log, which matters far more than a copy of
@@ -290,7 +316,7 @@ async function _queueDay(date, day) {
   const seq = await _addOp(op);
   // No database to queue into (private mode, no space): say so rather than
   // pretending the day was saved.
-  if (seq == null) throw _offlineError();
+  if (seq == null) throw _storageError();
   op.seq = seq;
   ops.push(op);
   _publish();
@@ -306,7 +332,7 @@ async function _queueCatalog(store, table, action, id, data) {
   const ops = await _loadOps();
   const op = { type: 'catalog', table, action, id: Number(id), data, at: Date.now() };
   const seq = await _addOp(op);
-  if (seq == null) throw _offlineError();
+  if (seq == null) throw _storageError();
   op.seq = seq;
   ops.push(op);
   if (action === 'delete') await _tx(store, 'readwrite', s => s.delete(Number(id)));
@@ -331,13 +357,74 @@ async function _queueRequest(kind, key, method, path, body) {
   const ops = await _loadOps();
   const op = { type: 'request', kind, key, method, path, body, at: Date.now() };
   const seq = await _addOp(op);
-  if (seq == null) throw _offlineError();
+  if (seq == null) throw _storageError();
   op.seq = seq;
   ops.push(op);
   _publish();
   _channel?.postMessage({ type: 'outbox' });
   _scheduleFlush(_online() ? 0 : _retryMs);
   return op;
+}
+
+/**
+ * Queue a change; if this browser cannot keep it, send it now when that is
+ * safe. Changes wait behind what is already queued so they go up in the
+ * order they were made. But when the queue cannot be written and nothing
+ * waiting can be read back either (the store broke after the page loaded),
+ * no flush will send anything ahead of this one, so with a connection it
+ * goes straight to the server rather than failing (#269). `send` is null
+ * when this save was already tried directly (it may have landed), or when
+ * it names something the server has never had.
+ */
+async function _queueOrSend(queue, send) {
+  try {
+    return await queue();
+  } catch (err) {
+    if (!err?.storage || !send || !_online()) throw err;
+    // Read from disk, not the copy in memory: that copy stays, so what is
+    // waiting is still counted and shown.
+    if ((await _all('outbox')).length) throw err;
+    try {
+      return await send();
+    } catch (e) {
+      if (!isOfflineError(e)) throw e;
+      _publish({ online: false });
+      throw err;
+    }
+  }
+}
+
+const _isProfileOp = (op) => op?.type === 'request' && op.key === 'profile';
+const _namesTempId = (value) => /"(id|food_id|food_server_id|foodId|meal_id|meal_server_id)":-\d/.test(JSON.stringify(value ?? null));
+
+/**
+ * Send a request that supersedes queued ones with the same key (a profile
+ * save carries the whole profile), and drop those once it lands. Held under
+ * the flush's lock, so a flush in this or another tab can't send an older
+ * one after it.
+ */
+function _superseding(key, send) {
+  const run = async () => {
+    const answer = await send();
+    const stale = (await _all('outbox')).filter(op => op.type === 'request' && op.key === key).map(op => op.seq);
+    if (stale.length) {
+      await _tx('outbox', 'readwrite', s => { for (const seq of stale) s.delete(seq); });
+      _channel?.postMessage({ type: 'outbox' });
+    }
+    _ops = null;
+    await _loadOps();
+    _publish();
+    return answer;
+  };
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request('nutritrace-offline-flush', run);
+  }
+  // No Web Locks (a page on plain http): stand in for the flush, so one
+  // that starts meanwhile waits for this rather than sending the older one.
+  const mine = (_flushing || Promise.resolve()).catch(() => {}).then(run);
+  const held = mine.then(() => false, () => false).finally(() => { if (_flushing === held) { _flushing = null; _scheduleFlush(0); } });
+  _flushing = held;
+  return mine;
 }
 
 export async function queueSetting(key, value) {
@@ -648,6 +735,9 @@ async function _canReachServer() {
   return _online() && !(await _loadOps()).some(_isFastOp);
 }
 
+/** The direct send for a fast, unless it names one the server has never had. */
+const _fastDirect = (path, send) => (/\/-\d+(\/|$)/.test(String(path)) ? null : send);
+
 /** Queue the whole fast as it stands after this change. */
 async function _queueFast(id, change) {
   const merged = fastWith(await _all('fasts'), await _loadOps(), id, change);
@@ -723,29 +813,39 @@ export function createOfflineApi(http) {
     async saveDiaryDate(date, data) {
       _changedSomething = true;
       const ops = await _loadOps();
+      const direct = async () => {
+        const saved = await http.saveDiaryDate(date, data);
+        await _remember('diary', { ...saved, date });
+        _publish({ online: true, error: null });
+        return saved;
+      };
       // Anything already waiting goes first, so days keep their order.
-      if (_online() && !ops.length) {
+      const tried = _online() && !ops.length;
+      if (tried) {
         try {
-          const saved = await http.saveDiaryDate(date, data);
-          await _remember('diary', { ...saved, date });
-          _publish({ online: true, error: null });
-          return saved;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueDay(date, data);
+      // A day naming a food made offline can only go up through the queue,
+      // once that food has its real id.
+      return _queueOrSend(() => _queueDay(date, data), tried || _namesTempId(data) ? null : direct);
     },
 
     async createFood(data) {
       _changedSomething = true;
       const ops = await _loadOps();
-      if (_online() && !ops.length) {
+      const direct = async () => {
+        const food = await http.createFood(data);
+        await _remember('foods', food);
+        return food;
+      };
+      const tried = _online() && !ops.length;
+      if (tried) {
         try {
-          const food = await http.createFood(data);
-          await _remember('foods', food);
-          return food;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
@@ -753,42 +853,49 @@ export function createOfflineApi(http) {
       }
       // A temporary id so the diary can log it straight away; it becomes the
       // server's id when the queue goes up.
-      return _queueCatalog('foods', 'foods', 'create', newTempId(), data);
+      return _queueOrSend(() => _queueCatalog('foods', 'foods', 'create', newTempId(), data), tried ? null : direct);
     },
 
     async updateFood(id, data) {
       _changedSomething = true;
       id = _realId(id);
       const ops = await _loadOps();
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const food = await http.updateFood(id, data);
+        await _remember('foods', food);
+        return food;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const food = await http.updateFood(id, data);
-          await _remember('foods', food);
-          return food;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueCatalog('foods', 'foods', 'update', id, data);
+      return _queueOrSend(() => _queueCatalog('foods', 'foods', 'update', id, data), tried ? null : direct);
     },
 
     async deleteFood(id) {
       _changedSomething = true;
       id = _realId(id);
       const ops = await _loadOps();
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const r = await http.deleteFood(id);
+        await _tx('foods', 'readwrite', s => s.delete(Number(id)));
+        return r;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const r = await http.deleteFood(id);
-          await _tx('foods', 'readwrite', s => s.delete(Number(id)));
-          return r;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      await _queueCatalog('foods', 'foods', 'delete', id, null);
-      return { ok: true };
+      return _queueOrSend(async () => { await _queueCatalog('foods', 'foods', 'delete', id, null); return { ok: true }; }, tried ? null : direct);
     },
 
     // Meals and recipes live in the same table on the server; a recipe is a
@@ -797,17 +904,21 @@ export function createOfflineApi(http) {
       _changedSomething = true;
       const ops = await _loadOps();
       const store = data?.is_recipe ? 'recipes' : 'meals';
-      if (_online() && !ops.length) {
+      const direct = async () => {
+        const meal = await http.createMeal(data);
+        await _remember(store, meal);
+        return meal;
+      };
+      const tried = _online() && !ops.length;
+      if (tried) {
         try {
-          const meal = await http.createMeal(data);
-          await _remember(store, meal);
-          return meal;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueCatalog(store, 'meals', 'create', newTempId(), data);
+      return _queueOrSend(() => _queueCatalog(store, 'meals', 'create', newTempId(), data), tried ? null : direct);
     },
 
     async updateMeal(id, data) {
@@ -815,36 +926,46 @@ export function createOfflineApi(http) {
       id = _realId(id);
       const ops = await _loadOps();
       const store = data?.is_recipe ? 'recipes' : 'meals';
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const meal = await http.updateMeal(id, data);
+        await _remember(store, meal);
+        return meal;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const meal = await http.updateMeal(id, data);
-          await _remember(store, meal);
-          return meal;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueCatalog(store, 'meals', 'update', id, data);
+      return _queueOrSend(() => _queueCatalog(store, 'meals', 'update', id, data), tried ? null : direct);
     },
 
     async deleteMeal(id) {
       _changedSomething = true;
       id = _realId(id);
       const ops = await _loadOps();
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const r = await http.deleteMeal(id);
+        for (const store of ['meals', 'recipes']) await _tx(store, 'readwrite', s => s.delete(Number(id)));
+        return r;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const r = await http.deleteMeal(id);
-          for (const store of ['meals', 'recipes']) await _tx(store, 'readwrite', s => s.delete(Number(id)));
-          return r;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      await _queueCatalog('meals', 'meals', 'delete', id, null);
-      await _tx('recipes', 'readwrite', s => s.delete(Number(id)));
-      return { ok: true };
+      return _queueOrSend(async () => {
+        await _queueCatalog('meals', 'meals', 'delete', id, null);
+        await _tx('recipes', 'readwrite', s => s.delete(Number(id)));
+        return { ok: true };
+      }, tried ? null : direct);
     },
 
     // Manual workouts. The day's list and its summary are loaded together by
@@ -899,52 +1020,63 @@ export function createOfflineApi(http) {
     async createActivity(data) {
       _changedSomething = true;
       const ops = await _loadOps();
-      if (_online() && !ops.length) {
+      const direct = async () => {
+        const row = await http.createActivity(data);
+        await _remember('activity', row);
+        return row;
+      };
+      const tried = _online() && !ops.length;
+      if (tried) {
         try {
-          const row = await http.createActivity(data);
-          await _remember('activity', row);
-          return row;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueCatalog('activity', 'activity', 'create', newTempId(), data);
+      return _queueOrSend(() => _queueCatalog('activity', 'activity', 'create', newTempId(), data), tried ? null : direct);
     },
 
     async updateActivity(id, data) {
       _changedSomething = true;
       id = _realId(id);
       const ops = await _loadOps();
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const row = await http.updateActivity(id, data);
+        await _remember('activity', row);
+        return row;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const row = await http.updateActivity(id, data);
-          await _remember('activity', row);
-          return row;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      return _queueCatalog('activity', 'activity', 'update', id, data);
+      return _queueOrSend(() => _queueCatalog('activity', 'activity', 'update', id, data), tried ? null : direct);
     },
 
     async deleteActivity(id) {
       _changedSomething = true;
       id = _realId(id);
       const ops = await _loadOps();
-      if (_online() && !ops.length && !isTempId(id)) {
+      const direct = isTempId(id) ? null : async () => {
+        const r = await http.deleteActivity(id);
+        await _tx('activity', 'readwrite', s => s.delete(Number(id)));
+        return r;
+      };
+      const tried = _online() && !ops.length && !!direct;
+      if (tried) {
         try {
-          const r = await http.deleteActivity(id);
-          await _tx('activity', 'readwrite', s => s.delete(Number(id)));
-          return r;
+          return await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
         }
       }
-      await _queueCatalog('activity', 'activity', 'delete', id, null);
-      return { ok: true };
+      return _queueOrSend(async () => { await _queueCatalog('activity', 'activity', 'delete', id, null); return { ok: true }; }, tried ? null : direct);
     },
 
     async getFoods() {
@@ -967,8 +1099,9 @@ export function createOfflineApi(http) {
      * it into a file when it arrives.
      */
     async uploadImage(file) {
-      const ops = await _loadOps();
-      if (_online() && !ops.length) {
+      // An upload has nothing to wait for in the queue: the row it ends up in
+      // keeps its own place there. So only a missing connection embeds it.
+      if (_online()) {
         try {
           return await http.uploadImage(file);
         } catch (err) {
@@ -982,10 +1115,17 @@ export function createOfflineApi(http) {
     /** Your own profile, including a picture chosen with no connection. */
     async updateProfile(data) {
       _changedSomething = true;
-      const ops = await _loadOps();
-      if (_online() && !ops.length) {
+      const direct = () => http.updateProfile(data);
+      if (_online()) {
         try {
-          return await http.updateProfile(data);
+          // A save carries the whole profile and nothing else in the queue
+          // depends on it, so only an earlier save of it still waiting has to
+          // stay behind this one (it is dropped once this lands). Other
+          // queued work, even a change the server keeps refusing, no longer
+          // holds it up, and neither does a store that can't be written: it
+          // used to be queued behind them and fail with nothing sent (#269).
+          const earlier = (await _loadOps()).some(_isProfileOp);
+          return earlier ? await _superseding('profile', direct) : await direct();
         } catch (err) {
           if (!isOfflineError(err)) throw err;
           _publish({ online: false });
@@ -1063,7 +1203,8 @@ export function createOfflineApi(http) {
       _changedSomething = true;
       if (!_FASTS.test(path)) return _through(http, 'post', path, [body, ...rest]);
       path = _fixFastPath(path);
-      if (await _canReachServer()) {
+      const tried = await _canReachServer();
+      if (tried) {
         try {
           const row = await http.post(path, body, ...rest);
           await _remember('fasts', row);
@@ -1073,16 +1214,21 @@ export function createOfflineApi(http) {
           _publish({ online: false });
         }
       }
+      const direct = _fastDirect(path, async () => {
+        const row = await http.post(path, body, ...rest);
+        await _remember('fasts', row);
+        return row;
+      });
       if (path === '/api/fasts/start') {
         // The server refuses a second fast while one is running; so does this,
         // or reconnecting would leave two of them open.
         if (activeFastRow(await _all('fasts'), await _loadOps())) {
           throw new Error('A fast is already in progress. End it before starting a new one.');
         }
-        return _queueCatalog('fasts', 'fasts', 'create', newTempId(), newFastRow(body));
+        return _queueOrSend(() => _queueCatalog('fasts', 'fasts', 'create', newTempId(), newFastRow(body)), tried ? null : direct);
       }
       const ending = String(path).match(/^\/api\/fasts\/(-?\d+)\/end$/);
-      if (ending) return _queueFast(ending[1], { end_at: new Date().toISOString() });
+      if (ending) return _queueOrSend(() => _queueFast(ending[1], { end_at: new Date().toISOString() }), tried ? null : direct);
       throw _offlineError();
     },
 
@@ -1090,7 +1236,8 @@ export function createOfflineApi(http) {
       _changedSomething = true;
       if (!_FASTS.test(path)) return _through(http, 'patch', path, [body, ...rest]);
       path = _fixFastPath(path);
-      if (await _canReachServer()) {
+      const tried = await _canReachServer();
+      if (tried) {
         try {
           const row = await http.patch(path, body, ...rest);
           await _remember('fasts', row);
@@ -1101,7 +1248,12 @@ export function createOfflineApi(http) {
         }
       }
       const one = String(path).match(/^\/api\/fasts\/(-?\d+)$/);
-      if (one) return _queueFast(one[1], body || {});
+      const direct = _fastDirect(path, async () => {
+        const row = await http.patch(path, body, ...rest);
+        await _remember('fasts', row);
+        return row;
+      });
+      if (one) return _queueOrSend(() => _queueFast(one[1], body || {}), tried ? null : direct);
       throw _offlineError();
     },
 
@@ -1109,7 +1261,8 @@ export function createOfflineApi(http) {
       _changedSomething = true;
       if (!_FASTS.test(path)) return _through(http, 'del', path, rest);
       path = _fixFastPath(path);
-      if (await _canReachServer()) {
+      const tried = await _canReachServer();
+      if (tried) {
         try {
           const r = await http.del(path, ...rest);
           const one = String(path).match(/^\/api\/fasts\/(-?\d+)$/);
@@ -1122,8 +1275,12 @@ export function createOfflineApi(http) {
       }
       const one = String(path).match(/^\/api\/fasts\/(-?\d+)$/);
       if (!one) throw _offlineError();
-      await _queueCatalog('fasts', 'fasts', 'delete', one[1], null);
-      return { ok: true };
+      const direct = _fastDirect(path, async () => {
+        const r = await http.del(path, ...rest);
+        await _tx('fasts', 'readwrite', s => s.delete(Number(one[1])));
+        return r;
+      });
+      return _queueOrSend(async () => { await _queueCatalog('fasts', 'fasts', 'delete', one[1], null); return { ok: true }; }, tried ? null : direct);
     },
 
     // The Foods screen loads foods, meals and recipes together, so all three
