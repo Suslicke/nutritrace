@@ -285,9 +285,16 @@ export async function addDiaryItem(foodItem, meal, date) {
   // Stored on the diary item so liveImgFor and friends can look up the
   // correct food regardless of any local-autoincrement renumbering that
   // happens after an Android re-install.
-  const food_server_id = ('server_id' in foodItem)
-    ? foodItem.server_id
-    : (typeof foodItem.id === 'number' ? foodItem.id : null);
+  // #277: a diary item logged again (Yesterday's Meals) already says which
+  // food it came from; on Android its `id` is the phone's own, not the
+  // server's, so it keeps its food_server_id (and food_device) as is.
+  const keepsSource = !('server_id' in foodItem) && 'food_server_id' in foodItem
+    && (typeof foodItem.food_server_id === 'number' || foodItem.food_server_id === null);
+  const food_server_id = keepsSource
+    ? foodItem.food_server_id
+    : ('server_id' in foodItem)
+      ? foodItem.server_id
+      : (typeof foodItem.id === 'number' ? foodItem.id : null);
   const item = {
     ...foodItem,
     uuid: _newUuid(),
@@ -298,7 +305,7 @@ export async function addDiaryItem(foodItem, meal, date) {
   // Logged on the phone before its food reached the server: `id` is this
   // phone's own. Say which phone, so once the food syncs this phone (and
   // no other) fills in food_server_id, even if the food was renamed.
-  if (isNative && food_server_id === null && typeof foodItem.id === 'number') {
+  if (isNative && !keepsSource && food_server_id === null && typeof foodItem.id === 'number') {
     try { item.food_device = await (await import('../lib/db-native.js')).dbInstallId(); } catch {}
   }
 

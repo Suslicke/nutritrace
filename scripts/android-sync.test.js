@@ -333,7 +333,8 @@ test.before(async () => {
   base = `http://127.0.0.1:${port}`;
   server = spawn(process.execPath, ['index.js'], {
     cwd: join(root, 'server'), stdio: 'ignore',
-    env: { ...process.env, PORT: String(port), DB_PATH: join(dir, 'server.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test' },
+    env: { ...process.env, PORT: String(port), DB_PATH: join(dir, 'server.db'), UPLOADS_PATH: join(dir, 'uploads'), JWT_SECRET, INSECURE_COOKIES: '1', NODE_ENV: 'test',
+      PUBLIC_API_ENABLED: '1', PUBLIC_API_WRITE_ENABLED: '1' },
   });
   for (let i = 0; i < 120; i++) {
     try { if ((await fetch(base + '/api/auth/status')).ok) break; } catch {}
@@ -429,6 +430,129 @@ test("a diary item shows its own food's units and barcode on the phone", async (
   assert.ok(r.clash, "the lookup can go wrong: Milk's server id is another food's phone id");
   assert.equal(r.barcode, 'BC-Milk');
   assert.deepEqual(r.units, [{ abbr: 'glass', grams: 10 }]);
+});
+
+// #277 (@Chrristin): items logged through MCP or the API carry only the
+// food's server id (food_server_id) and no photo; the phone fills the photo
+// in from its own copy of the food. It looked the server id up as one of
+// its own ids, and compared the item's name trimmed with the food's name as
+// stored, so once a reinstall renumbered the phone's ids a food saved as
+// "Slim Milk " lost its photo, and an id that is another food's on the
+// phone showed that food's photo.
+test('#277: after a reinstall the phone shows the photo of the food or recipe an item came from', async (t) => {
+  if (skip(t)) return;
+  const D = '2026-09-27';
+  const { raw: key } = await http(A, 'POST', '/api/admin/api-tokens', { name: 'nt-277', scopes: ['mcp:read', 'mcp:write'] });
+  // Another account's first, so Alice's server ids run ahead of the phone's.
+  for (let i = 0; i < 10; i++) {
+    await http(B, 'POST', '/api/foods', { name: `Bob Filler 277 ${i}`, visibility: 'private' });
+    await http(B, 'POST', '/api/meals', { name: `Bob Recipe 277 ${i}`, is_recipe: 1, items: [], visibility: 'private' });
+  }
+  const milk = await http(A, 'POST', '/api/foods', { name: 'Slim Milk 277 ', img_url: '/uploads/milk-277.jpg', nutrition: { calories: 35 } });
+  const banana = await http(A, 'POST', '/api/foods', { name: 'Banana 277', img_url: '/uploads/banana-277.jpg', nutrition: { calories: 90 } });
+  const oats = await http(A, 'POST', '/api/meals', { name: 'Overnight Oats 277 ', is_recipe: 1, items: [], img_url: '/uploads/oats-277.jpg' });
+  // The reinstall: a new phone, with foods and a recipe of its own before
+  // the account's come down, so its ids are not the server's.
+  const first = phone('reinstall277', A, `
+    await p.offline(async () => {
+      await p.api.createFood({ name: 'Phone Only 277', nutrition: {} });
+      await p.api.createMeal({ name: 'Phone Recipe 277', is_recipe: 1, items: [] });
+    });
+    await p.sync();
+    // More of its own until the next new food's phone id is Banana's server
+    // id, and the next recipe's is the recipe's.
+    let f; do { f = await p.api.createFood({ name: 'Filler 277', nutrition: {} }); } while (f.id < ${banana.id} - 1);
+    let m; do { m = await p.api.createMeal({ name: 'Filler Recipe 277', is_recipe: 1, items: [] }); } while (m.id < ${oats.id} - 1);
+    await p.sync();
+    const food = await p.food(${milk.id});
+    p.done({ milkPhoneId: food.id, food: f.id, meal: m.id });`);
+  assert.notEqual(first.milkPhoneId, milk.id, "the phone's ids are not the server's");
+  assert.equal(first.food, banana.id - 1);
+  assert.equal(first.meal, oats.id - 1);
+  // Others of the same name, with another photo, that will take those ids.
+  const other = await http(A, 'POST', '/api/foods', { name: 'Banana 277', img_url: '/uploads/other-banana-277.jpg', nutrition: { calories: 90 } });
+  const otherOats = await http(A, 'POST', '/api/meals', { name: 'Overnight Oats 277 ', is_recipe: 1, items: [], img_url: '/uploads/other-oats-277.jpg' });
+  // Logged in the browser (id and food_server_id both the server's) ...
+  const web = (id, name, extra = {}) => ({ uuid: `web-${id}-277`, id, food_server_id: id, name, meal: 0, quantity: 1, nutrition: {}, imgUrl: '', ...extra });
+  await http(A, 'PUT', `/api/diary/${D}`, { items: [web(banana.id, 'Banana 277'), web(oats.id, 'Overnight Oats 277 ', { is_recipe: 1 })], body_stats: {}, water: [] });
+  // ... and through the API, as MCP does: food_server_id only, no photo.
+  for (const food of [milk, banana]) {
+    const r = await serverFetch(`${base}/api/v1/diary/${D}/food`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ food_id: food.id }) });
+    assert.equal(r.status, 200, await r.text());
+  }
+  // A meal saved in the browser (its foods by their server ids in `id`),
+  // logged through the API too.
+  const breakfast = await http(A, 'POST', '/api/meals', { name: 'Banana Breakfast 277', items: [{ id: banana.id, name: 'Banana 277', quantity: 1, nutrition: { calories: 90 } }] });
+  const lm = await serverFetch(`${base}/api/v1/diary/${D}/meal`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ meal_id: breakfast.id }) });
+  assert.equal(lm.status, 200, await lm.text());
+  const r = phone('reinstall277', A, `
+    await p.sync();
+    // Logged here, then again from Yesterday's Meals (the diary item itself).
+    const { addDiaryItem } = await import(p.src + 'stores/diary.js');
+    await addDiaryItem(await p.food(${banana.id}), 0, '2026-09-25');
+    const logged = (await p.api.getDiaryDate('2026-09-25')).items[0];
+    await addDiaryItem(logged, 0, '2026-09-26');
+    const again = (await p.api.getDiaryDate('2026-09-26')).items[0];
+    const clash = { food: (await p.api.getFoods()).find(x => x.id === ${banana.id})?.server_id ?? null,
+      meal: (await p.api.getRecipes()).find(x => x.id === ${oats.id})?.server_id ?? null };
+    const items = (await p.api.getDiaryDate('${D}')).items;
+    p.done({ clash, items: items.map(i => [i.name, i.source || 'web', i.imgUrl]),
+      relog: [logged.food_server_id, again.food_server_id, logged.imgUrl, again.imgUrl] });`);
+  assert.deepEqual(r.clash, { food: other.id, meal: otherOats.id }, "the server ids of Banana and the recipe are the other ones' phone ids");
+  const want = [
+    ['Banana 277', 'web', '/uploads/banana-277.jpg'],
+    ['Overnight Oats 277 ', 'web', '/uploads/oats-277.jpg'],
+    ['Slim Milk 277 ', 'mcp', '/uploads/milk-277.jpg'],
+    ['Banana 277', 'mcp', '/uploads/banana-277.jpg'],
+    ['Banana 277', 'mcp:meal', '/uploads/banana-277.jpg'],
+  ];
+  assert.deepEqual(r.items, want, 'the phone');
+  assert.deepEqual(r.relog, [banana.id, banana.id, '/uploads/banana-277.jpg', '/uploads/banana-277.jpg'], "logged again, it keeps its food's server id");
+  const browser = await http(A, 'GET', `/api/diary/${D}`);
+  assert.deepEqual(browser.items.map(i => [i.name, i.source || 'web', i.imgUrl]), want, 'the browser, the same');
+});
+
+// #277, each way an item names its row, on the phone's own database:
+// server ids and the phone's ids swapped between two foods (and two
+// recipes) of the same name, items logged before their food went up, and
+// names stored with spaces around them.
+test("#277: a diary item's photo comes from its own row, by the right kind of id, and names match trimmed", async (t) => {
+  if (skip(t)) return;
+  const r = phone('img277', A, `
+    const db = await p.dbn.getDb();
+    const me = await p.dbn.dbInstallId();
+    const row = (t, id, sid, name, img, recipe) => db.run(
+      'INSERT INTO ' + t + ' (id, server_id, name, img_url' + (t === 'meals' ? ', is_recipe' : '') + ') VALUES (?, ?, ?, ?' + (t === 'meals' ? ', ?' : '') + ')',
+      t === 'meals' ? [id, sid, name, img, recipe ? 1 : 0] : [id, sid, name, img]);
+    await row('foods', 7, 12, 'Banana', '/x.jpg');
+    await row('foods', 12, 7, 'Banana', '/y.jpg');
+    await row('foods', 20, null, 'Banana', '/z.jpg');
+    await row('foods', 21, 7000, '  Oat Milk\\t', '/oat.jpg');
+    await row('foods', 30, 30, 'Overnight Oats', '/food-oats.jpg');
+    await row('meals', 3, 9, 'Overnight Oats ', '/r1.jpg', true);
+    await row('meals', 9, 3, 'Overnight Oats ', '/r2.jpg', true);
+    const items = [
+      { id: 7, food_server_id: 7, name: 'Banana' },                       // logged in the browser: server id 7
+      { food_server_id: 12, name: 'Banana' },                              // MCP / API: server id 12
+      { id: 20, food_server_id: null, food_device: me, name: 'Banana' },   // logged here before it went up
+      { id: 7, food_server_id: null, food_device: 'another-phone', name: 'Banana' }, // another phone's id
+      { name: 'Banana' },                                                  // no id at all
+      { id: 12, name: 'Banana' },                                          // from before food_server_id: this phone's id
+      { food_server_id: 99999, name: 'oat MILK' },                         // its food is gone: by name, trimmed
+      { id: 9, food_server_id: 9, is_recipe: 1, name: 'Overnight Oats' },  // recipe, server id 9
+      { food_server_id: 3, is_recipe: 1, name: 'Overnight Oats ' },        // recipe, server id 3
+      { is_recipe: 1, name: 'overnight oats' },                            // recipe by name only
+      { food_server_id: 30, name: 'Overnight Oats' },                      // the food of that name
+    ];
+    await p.dbn.dbSaveDiaryDate('2026-09-28', { items });
+    p.done((await p.dbn.dbGetDiaryDate('2026-09-28')).items.map(i => i.imgUrl));`);
+  assert.deepEqual(r, [
+    '/y.jpg', '/x.jpg', '/z.jpg',
+    r[4], // another phone's id names nothing here: the name decides, as with no id
+    r[4], '/y.jpg', '/oat.jpg',
+    '/r1.jpg', '/r2.jpg', '/r1.jpg', '/food-oats.jpg',
+  ]);
+  assert.notEqual(r[3], '/x.jpg', "not the food that has that id on this phone");
 });
 
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {

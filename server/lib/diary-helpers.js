@@ -62,8 +62,9 @@ const _norm = s => String(s || '').trim().toLowerCase();
  * which is the bug being fixed.
  *
  * Within each pool, lookup order is:
- *  1. id + name match (strongest signal; survives unless the foods table
- *     was rebuilt and ids reshuffled)
+ *  1. id + name match, by the source's server id (food_server_id, else
+ *     id, as hydrateItems; strongest signal; survives unless the foods
+ *     table was rebuilt and ids reshuffled)
  *  2. name + brand match (foods only; disambiguates between e.g. multiple
  *     "Fat Free Milk" entries from different brands)
  *  3. name only (last resort; first-inserted-row wins when the user has
@@ -211,12 +212,17 @@ export function freshenItemImages(items, userId = null) {
     return items.map(it => {
       const name = _norm(it.name);
       const brand = _norm(it.brand);
-      const idKey = `${it.id}|${name}`;
+      // #277: the item's source by the server's id, as hydrateItems finds
+      // it (_foodKey). `id` alone is the phone's own on an item logged in
+      // the Android app, and names another row here; items logged through
+      // MCP or the API have only food_server_id.
+      const key = _foodKey(it);
+      const idKey = typeof key === 'number' ? `${key}|${name}` : null;
       let live;
       if (it.is_recipe) {
-        live = mealByIdName.get(idKey) || mealByName.get(name) || '';
+        live = (idKey && mealByIdName.get(idKey)) || mealByName.get(name) || '';
       } else {
-        live = foodByIdName.get(idKey)
+        live = (idKey && foodByIdName.get(idKey))
           || foodByNameBrand.get(`${name}|${brand}`)
           || foodByName.get(name)
           || '';

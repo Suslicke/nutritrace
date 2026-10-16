@@ -1057,70 +1057,76 @@ async function _hydrateSplitChildren(item) {
 // everything else resolves against foods only. Within each pool, lookup
 // order is id+name → name+brand (foods only) → name only → ''.
 //
+// Which row an item came from, the same way _hydrateItems finds it
+// (_foodRef): food_server_id is the server's id and is matched against
+// server_id, an id the phone gave is matched against its own id, and the
+// two are kept apart, so neither can pick another row whose other id
+// happens to be the same number (#277). An item whose name no longer
+// matches its row falls to the name tiers, as on the server.
+//
 // Performance (2026-08-12): the fetch is scoped to only the foods and
-// meals that MATCH the day's items — by id, by (name+brand) for foods,
-// or by name alone. Prior implementation full-scanned the images-having
+// meals that MATCH the day's items, by server id, by the phone's own id,
+// or by name. Prior implementation full-scanned the images-having
 // foods + meals tables on every diary read, which through the Capacitor
 // SQLite bridge added multi-hundred-ms latency to every day-swipe. The
-// three-tier lookup semantic is preserved because we fetch every row
-// that ANY tier could match against.
+// lookup tiers are preserved because we fetch every row that ANY tier
+// could match against.
 const _norm = s => String(s || '').trim().toLowerCase();
+// What String.prototype.trim removes, for SQLite's TRIM(name, chars): the
+// name tiers compare trimmed names (_norm), on the server too, so a food
+// saved as "Slim Milk " has to come back for an item named "Slim Milk".
+const _TRIM_CHARS = ' \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
 async function _freshenItemImages(items) {
   if (!Array.isArray(items) || !items.length) return items;
   try {
-    // Split items by pool + collect the id/name/brand key sets we
-    // actually need to look up. Names/brands are matched case-insensitive
-    // downstream, but SQLite LIKE / lower() would defeat any index, so we
-    // send both cases the caller might store and normalise in JS.
-    const foodIds = new Set();
-    const foodNames = new Set();
-    const mealIds = new Set();
-    const mealNames = new Set();
+    // Split items by pool + collect the keys we actually need to look up.
+    // Names are matched trimmed and case-insensitively, in SQL (TRIM +
+    // COLLATE NOCASE) and again in JS (_norm), so only the matching rows
+    // cross the bridge.
+    const pool = () => ({ serverIds: new Set(), localIds: new Set(), names: new Set() });
+    const pools = { foods: pool(), meals: pool() };
+    let unsentTagged = false;
     for (const it of items) {
       if (!it) continue;
-      // Include BOTH id shapes: `it.id` (local autoincrement) AND
-      // `it.food_server_id` (server-assigned). Post-Android-reinstall or
-      // freshly-synced items may have one that matches the local
-      // foods.id and one that doesn't; querying both means the merge
-      // never misses a hit that the prior full-scan would have found.
-      // Set dedupes when they happen to be equal.
-      const nameKey = String(it.name || '').trim();
-      if (it.is_recipe) {
-        if (typeof it.id === 'number') mealIds.add(it.id);
-        if (typeof it.food_server_id === 'number') mealIds.add(it.food_server_id);
-        if (nameKey) mealNames.add(nameKey);
-      } else {
-        if (typeof it.id === 'number') foodIds.add(it.id);
-        if (typeof it.food_server_id === 'number') foodIds.add(it.food_server_id);
-        if (nameKey) foodNames.add(nameKey);
+      const p = it.is_recipe ? pools.meals : pools.foods;
+      const ref = _foodRef(it);
+      if (ref?.server != null) p.serverIds.add(ref.server);
+      else if (ref) {
+        p.localIds.add(ref.unsent ?? ref.local);
+        if (ref.unsent != null && it.food_device) unsentTagged = true;
       }
+      const nameKey = String(it.name || '').trim();
+      if (nameKey) p.names.add(nameKey);
     }
 
+    const empty = p => !p.serverIds.size && !p.localIds.size && !p.names.size;
     // Fast path: nothing to look up. Return items with empty imgUrl so
     // the downstream image-cache falls back to placeholder rendering.
-    if (!foodIds.size && !foodNames.size && !mealIds.size && !mealNames.size) {
+    if (empty(pools.foods) && empty(pools.meals)) {
       return items.map(it => ({ ...it, imgUrl: '' }));
     }
 
     const db = await getDb();
 
-    async function _lookupPool(table, ids, names, extraCols) {
-      if (!ids.size && !names.size) return [];
+    async function _lookupPool(table, p, extraCols) {
+      if (empty(p)) return [];
       const conds = [];
       const params = [];
-      if (ids.size) {
-        conds.push(`id IN (${Array.from(ids).map(() => '?').join(',')})`);
-        params.push(...ids);
+      const list = n => Array.from({ length: n }, () => '?').join(',');
+      if (p.serverIds.size) {
+        conds.push(`server_id IN (${list(p.serverIds.size)})`);
+        params.push(...p.serverIds);
       }
-      if (names.size) {
-        // Case-insensitive name match: SQLite's default LIKE/=  is
-        // case-sensitive for non-ASCII text and case-insensitive for
-        // ASCII only. Use COLLATE NOCASE = to get the same normalisation
-        // the JS-side _norm() applies (lowercased trim).
-        conds.push(`name COLLATE NOCASE IN (${Array.from(names).map(() => '?').join(',')})`);
-        params.push(...names);
+      if (p.localIds.size) {
+        conds.push(`id IN (${list(p.localIds.size)})`);
+        params.push(...p.localIds);
       }
-      const cols = ['id', 'name', ...extraCols, 'img_url'].join(', ');
+      if (p.names.size) {
+        // COLLATE NOCASE folds ASCII case only; _norm below decides.
+        conds.push(`TRIM(name, ?) COLLATE NOCASE IN (${list(p.names.size)})`);
+        params.push(_TRIM_CHARS, ...p.names);
+      }
+      const cols = ['id', 'server_id', 'name', ...extraCols, 'img_url'].join(', ');
       const r = await db.query(
         `SELECT ${cols} FROM ${table}
          WHERE deleted_at IS NULL
@@ -1133,33 +1139,55 @@ async function _freshenItemImages(items) {
       return _rows(r);
     }
 
-    const [foods, meals] = await Promise.all([
-      _lookupPool('foods', foodIds, foodNames, ['brand']),
-      _lookupPool('meals', mealIds, mealNames, []),
+    const [foods, meals, mine] = await Promise.all([
+      _lookupPool('foods', pools.foods, ['brand']),
+      _lookupPool('meals', pools.meals, []),
+      unsentTagged ? dbOwnInstallIds() : null,
     ]);
-    const foodByIdName = new Map();
+    // Id tier, per pool: server ids and the phone's own ids in separate
+    // maps, each keyed by id + name.
+    const idMaps = rows => {
+      const byServer = new Map(), byLocal = new Map();
+      for (const r of rows) {
+        if (r.server_id != null) byServer.set(`${r.server_id}|${_norm(r.name)}`, r.img_url);
+        byLocal.set(`${r.id}|${_norm(r.name)}`, r);
+      }
+      return { byServer, byLocal };
+    };
+    const foodIds = idMaps(foods), mealIds = idMaps(meals);
+    const byId = (it, name, { byServer, byLocal }) => {
+      const ref = _foodRef(it);
+      if (!ref) return '';
+      if (ref.server != null) return byServer.get(`${ref.server}|${name}`) || '';
+      const row = byLocal.get(`${ref.unsent ?? ref.local}|${name}`);
+      if (!row) return '';
+      // An item logged before its row reached the server: only a row
+      // still waiting to go up, made on this phone (or untagged), is it.
+      if (ref.unsent != null) {
+        if (row.server_id != null) return '';
+        if (it.food_device && !mine?.has(it.food_device)) return '';
+      }
+      return row.img_url;
+    };
     const foodByNameBrand = new Map();
     const foodByName = new Map();
     for (const r of foods) {
-      foodByIdName.set(`${r.id}|${_norm(r.name)}`, r.img_url);
       foodByNameBrand.set(`${_norm(r.name)}|${_norm(r.brand)}`, r.img_url);
       if (!foodByName.has(_norm(r.name))) foodByName.set(_norm(r.name), r.img_url);
     }
-    const mealByIdName = new Map();
     const mealByName = new Map();
     for (const r of meals) {
-      mealByIdName.set(`${r.id}|${_norm(r.name)}`, r.img_url);
       if (!mealByName.has(_norm(r.name))) mealByName.set(_norm(r.name), r.img_url);
     }
     return items.map(it => {
+      if (!it) return it;
       const name = _norm(it.name);
       const brand = _norm(it.brand);
-      const idKey = `${it.id}|${name}`;
       let live;
       if (it.is_recipe) {
-        live = mealByIdName.get(idKey) || mealByName.get(name) || '';
+        live = byId(it, name, mealIds) || mealByName.get(name) || '';
       } else {
-        live = foodByIdName.get(idKey)
+        live = byId(it, name, foodIds)
           || foodByNameBrand.get(`${name}|${brand}`)
           || foodByName.get(name)
           || '';

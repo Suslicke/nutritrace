@@ -192,6 +192,51 @@ test('an item logged before its food reached the server takes no food details by
   assert.equal(byServer.barcode, 'BC-CHEESE');
 });
 
+// #277: the browser's photo of an item comes from its source by the
+// server's id too. An item logged in the Android app has the phone's own
+// id in `id`, which names another row here.
+test("a diary item's photo comes from its source by the server's id, not the phone's", (t) => {
+  if (skip(t)) return;
+  for (const u of [user('img'), null]) {
+    const food = (name, img) => Number(db.prepare(`INSERT INTO foods (user_id, name, img_url) VALUES (?, ?, ?)`).run(u, name, img).lastInsertRowid);
+    const meal = (name, img) => Number(db.prepare(`INSERT INTO meals (user_id, name, items, is_recipe, img_url) VALUES (?, ?, '[]', 1, ?)`).run(u, name, img).lastInsertRowid);
+    const a = food('Pear 277', '/a.jpg'), b = food('Pear 277', '/b.jpg');
+    const ma = meal('Pear Crumble 277 ', '/ma.jpg'), mb = meal('Pear Crumble 277 ', '/mb.jpg');
+    const milk = food('Slim Milk 277 ', '/milk.jpg');
+    const got = helpers.freshenItemImages([
+      { id: a, food_server_id: b, name: 'Pear 277' },                     // logged on a phone: its id is a's here
+      { food_server_id: b, name: 'Pear 277' },                            // MCP / API
+      { id: b, food_server_id: b, name: 'Pear 277' },                     // the browser
+      { id: ma, food_server_id: mb, is_recipe: 1, name: 'Pear Crumble 277 ' }, // a recipe, the same
+      { id: b, food_server_id: null, name: 'Pear 277' },                  // the phone's id, before it went up
+      { name: 'Pear 277' },                                               // by name
+      { food_server_id: milk, name: 'Slim Milk 277' },
+      { name: 'slim milk 277' },
+    ], u).map(i => i.imgUrl);
+    assert.deepEqual(got, ['/b.jpg', '/b.jpg', '/b.jpg', '/mb.jpg', got[5], got[5], '/milk.jpg', '/milk.jpg'], `user ${u}`);
+  }
+});
+
+// #277: log_meal (MCP and the API) names each item's food by its server
+// id, whether the meal was saved in the browser (the server's id in `id`)
+// or in the Android app (the phone's own in `id`, the server's in
+// `server_id`).
+test("a meal logged through MCP or the API names each item's food by its server id", async (t) => {
+  if (skip(t)) return;
+  const { logMealCore } = await import('../server/lib/mcp/tools/log-meal.js');
+  const u = user('lm');
+  const food = (name, img) => Number(db.prepare(`INSERT INTO foods (user_id, name, img_url) VALUES (?, ?, ?)`).run(u, name, img).lastInsertRowid);
+  const a = food('Plum 277', '/plum-a.jpg'), b = food('Plum 277', '/plum-b.jpg');
+  const meal = items => Number(db.prepare(`INSERT INTO meals (user_id, name, items, is_recipe) VALUES (?, 'Plums', ?, 0)`).run(u, JSON.stringify(items)).lastInsertRowid);
+  const web = meal([{ id: b, name: 'Plum 277', nutrition: {} }]);
+  const phone = meal([{ id: a, server_id: b, name: 'Plum 277', nutrition: {} }, { id: a, server_id: null, name: 'Plum 277', nutrition: {} }]);
+  logMealCore(u, { meal_id: web, date: '2026-09-29' });
+  logMealCore(u, { meal_id: phone, date: '2026-09-29' });
+  const items = JSON.parse(db.prepare(`SELECT items FROM diary WHERE user_id = ? AND date = '2026-09-29'`).get(u).items);
+  assert.deepEqual(items.map(i => i.food_server_id), [b, b, null]);
+  assert.deepEqual(helpers.freshenItemImages(items, u).map(i => i.imgUrl).slice(0, 2), ['/plum-b.jpg', '/plum-b.jpg']);
+});
+
 test("the browser's offline push sends the day's note and its clock too", async () => {
   const { buildDiaryPush } = await import('../src/lib/offline-edits.js');
   const row = buildDiaryPush([{ type: 'diary', seq: 1, date: '2026-10-05', day: { items: [], notes: 'Late lunch' }, at: Date.now() }], []).diary[0];
