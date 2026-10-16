@@ -10,7 +10,7 @@
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { hydrateWithoutFoods } from './diary-hydration.js';
 import { parseAltUnits } from './units.js';
-import { itemSourceRef, relinkItems } from './item-source.js';
+import { itemSourceRef, relinkItems, relinkIngredients } from './item-source.js';
 
 const LOCAL_USER_ID = 1;
 const DB_NAME = 'nutritrace_local';
@@ -1701,7 +1701,14 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
     [LOCAL_USER_ID]
   );
   const rows = _rows(r);
-  if (!rows.length) return 0;
+  // Saved meals' and recipes' ingredients the same way (#277): an
+  // ingredient keeps the phone's id with server_id null until its food
+  // goes up.
+  const meals = _rows(await db.query(
+    `SELECT id, items FROM meals WHERE user_id = ? AND deleted_at IS NULL AND (items LIKE '%"server_id":null%' OR items LIKE '%"food_server_id":null%')`,
+    [LOCAL_USER_ID]
+  ));
+  if (!rows.length && !meals.length) return 0;
   const mine = await dbOwnInstallIds();
   const serverIdOf = { foods: new Map(), meals: new Map() };
   for (const t of ['foods', 'meals']) {
@@ -1722,13 +1729,7 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
       if (!it || typeof it !== 'object') return it;
       let next = it;
       if (it.food_server_id === null && typeof it.id === 'number') {
-        const t = it.is_recipe ? 'meals' : 'foods';
-        let sid = null;
-        if (mine.has(it.food_device)) sid = serverIdOf[t].get(it.id) ?? null;
-        else if (!it.food_device) {
-          const l = legacy.get(`${t}:${it.id}`);
-          if (l && _norm(it.name) === l.name) sid = l.serverId;
-        }
+        const sid = linkedId(it.is_recipe ? 'meals' : 'foods', it);
         if (sid != null) {
           const { food_device: _d, ...rest } = it;
           next = { ...rest, food_server_id: sid };
@@ -1743,6 +1744,29 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
     });
     return { out, hit };
   };
+  // The server id for the phone's own id of an ingredient's or item's row,
+  // by the same rules: this phone's tag, or an untagged one of the same
+  // name created in this push.
+  const linkedId = (t, it) => {
+    if (mine.has(it.food_device)) return serverIdOf[t].get(it.id) ?? null;
+    if (it.food_device) return null;
+    const l = legacy.get(`${t}:${it.id}`);
+    return l && _norm(it.name) === l.name ? l.serverId : null;
+  };
+  const fixIngredients = items => {
+    let hit = false;
+    const out = items.map(ing => {
+      if (!ing || typeof ing !== 'object' || typeof ing.id !== 'number') return ing;
+      const unsent = ('server_id' in ing && ing.server_id == null) || ing.food_server_id === null;
+      if (!unsent) return ing;
+      const sid = linkedId(ing.is_recipe ? 'meals' : 'foods', ing);
+      if (sid == null) return ing;
+      const { food_device: _d, ...rest } = ing;
+      hit = true;
+      return { ...rest, server_id: sid, ...('food_server_id' in ing ? { food_server_id: sid } : {}) };
+    });
+    return { out, hit };
+  };
   let changed = 0;
   for (const row of rows) {
     const items = _parseJson(row.items, []);
@@ -1753,6 +1777,15 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
     await db.run(`UPDATE diary SET items = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
       [JSON.stringify(out), _now(), row.id]);
     changed++;
+  }
+  for (const meal of meals) {
+    const items = _parseJson(meal.items, []);
+    if (!Array.isArray(items)) continue;
+    const { out, hit } = fixIngredients(items);
+    if (!hit) continue;
+    if (!live()) return changed;
+    await db.run(`UPDATE meals SET items = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
+      [JSON.stringify(out), _now(), meal.id]);
   }
   return changed;
 }
@@ -1773,9 +1806,16 @@ export async function dbRelinkDiaryForNewServer(newIds = {}) {
     rows[t] = _rows(await db.query(`SELECT id, server_id, name FROM ${t} WHERE user_id = ? AND deleted_at IS NULL`, [LOCAL_USER_ID]));
   }
   const days = _rows(await db.query(`SELECT id, items FROM diary WHERE user_id = ? AND deleted_at IS NULL`, [LOCAL_USER_ID]));
-  if (!days.length) return 0;
   const opts = { rows, newIds, install: await dbInstallId(), mine: await dbOwnInstallIds() };
   let changed = 0;
+  // Saved meals' and recipes' ingredients follow too (relinkIngredients):
+  // logging the meal or splitting the recipe later names its foods by them.
+  for (const meal of _rows(await db.query(`SELECT id, items FROM meals WHERE user_id = ? AND deleted_at IS NULL`, [LOCAL_USER_ID]))) {
+    const r = relinkIngredients(_parseJson(meal.items, []), opts);
+    if (!r.changed) continue;
+    await db.run(`UPDATE meals SET items = ?, updated_at = ?, sync_status = 'pending' WHERE id = ?`,
+      [JSON.stringify(r.items), _now(), meal.id]);
+  }
   for (const day of days) {
     const items = _parseJson(day.items, []);
     const r = relinkItems(items, opts);

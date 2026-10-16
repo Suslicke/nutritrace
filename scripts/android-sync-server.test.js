@@ -413,6 +413,44 @@ test("diary items follow their food, meal or recipe to its new server id, and on
   assert.deepEqual(relinkItems([items[6], items[3]], opts), { items: [items[6], items[3]], changed: false });
 });
 
+// #277 follow-up: a saved meal's or recipe's ingredients follow their food
+// the same way, in whichever shape they name it, and nothing else moves.
+test("a meal's ingredients follow their food or recipe to its new server id, and only theirs", async () => {
+  const { relinkIngredients } = await import('../src/lib/item-source.js');
+  const rows = {
+    foods: [{ id: 1, server_id: 101, name: 'Milk' }, { id: 2, server_id: null, name: 'Made Here' }, { id: 3, server_id: 103, name: 'Not Up' }],
+    meals: [{ id: 1, server_id: 201, name: 'Bowl' }],
+  };
+  const opts = { rows, newIds: { foods: [[1, 501], [2, 502]], meals: [[1, 601]] }, install: 'me', mine: new Set(['me']) };
+  const items = [
+    { id: 101, name: 'Milk' },                                              // saved in the browser
+    { id: 1, server_id: 101, name: 'Milk (renamed)' },                       // saved on the phone: the server id decides
+    { id: 2, server_id: null, name: 'Made Here' },                           // before its food went up, untagged: same name
+    { id: 2, server_id: null, food_device: 'other', name: 'Made Here' },     // another phone's
+    { id: 9, food_server_id: 101, name: 'Milk' },                            // saved from the diary
+    { id: 1, server_id: 201, is_recipe: 1, name: 'Bowl' },                   // a recipe inside
+    { id: 103, name: 'Not Up' },                                             // its food goes up later
+    { id: 999, name: 'Elsewhere' },                                          // not one of the phone's
+    { id: 101, name: 'Plum' },                                               // the browser's id, another name: left alone
+  ];
+  const { items: out, changed } = relinkIngredients(items, opts);
+  assert.equal(changed, true);
+  assert.deepEqual(out.map(i => [i.id, i.server_id, i.food_server_id, i.food_device]), [
+    [1, 501, undefined, undefined], [1, 501, undefined, undefined], [2, 502, undefined, undefined], [2, null, undefined, 'other'],
+    [1, 501, 501, undefined], [1, 601, undefined, undefined], [3, null, undefined, 'me'], [999, undefined, undefined, undefined],
+    [101, undefined, undefined, undefined],
+  ]);
+  assert.equal(out[7], items[7]);
+  const again = relinkIngredients(out, { ...opts, rows: { foods: [{ id: 1, server_id: 501, name: 'Milk' }, { id: 2, server_id: 502, name: 'Made Here' }, { id: 3, server_id: 103, name: 'Not Up' }], meals: [{ id: 1, server_id: 601, name: 'Bowl' }] } });
+  assert.deepEqual(again.items, out, 'sent twice: the same');
+  // Push all: no new ids yet, so the phone's own until they come back; again, the same.
+  const pushAll = relinkIngredients(items, { ...opts, newIds: {} });
+  assert.deepEqual(pushAll.items.slice(0, 3).map(i => [i.id, i.server_id, i.food_device]), [[1, null, 'me'], [1, null, 'me'], [2, null, 'me']]);
+  assert.equal(relinkIngredients(pushAll.items, { ...opts, newIds: {} }).changed, false);
+  // The split and log_meal read them the same way.
+  assert.match(read('../src/stores/diary.js'), /const food_server_id = \(typeof ing\.food_server_id === 'number' \|\| ing\.food_server_id === null\)/);
+});
+
 test('a note: unchanged keeps its time, an edit with no time is now, an older edit loses', async () => {
   const { resolveNote, clientClock } = await import('../server/lib/sync-clock.js');
   const now = Date.parse('2026-10-06T12:00:00Z');

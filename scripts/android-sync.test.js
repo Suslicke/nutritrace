@@ -762,6 +762,97 @@ test('#280: "same as yesterday" on the phone is the day before the day being log
   assert.deepEqual(r, { day3: ['2026-03-02', ['Day Two Salad']], day2: ['2026-03-01', ['Day One Soup']] });
 });
 
+// #277 follow-up: a saved meal's and recipe's ingredients name their foods
+// (and recipes) by server id too: the id in a meal saved in the browser,
+// server_id in one saved in the Android app. Connect > Upload and Push all
+// send the foods up as new rows; the ingredients kept the ids from before,
+// so logging the meal or splitting the recipe later named no food, or
+// another one. They follow now, a recipe inside a meal too.
+async function ingredientCase(t, mode) {
+  const a = await account(`ingr${mode}a`, A), b = mode === 'upload' ? await account(`ingr${mode}b`, A) : a;
+  const me = async tok => (await http(tok, 'GET', '/api/auth/me')).user;
+  const AU = await me(a), BU = await me(b);
+  const D = mode === 'upload' ? '2026-05-10' : '2026-05-11';
+  const food = (name, extra = {}) => http(a, 'POST', '/api/foods', { name, nutrition: { calories: 50 }, portion: 100, unit: 'g', visibility: 'private', ...extra });
+  const milk = await food(`Ingr Milk ${mode}`, { barcode: `BC-IG-MILK-${mode}`, alt_units: [{ abbr: 'glass', grams: 250 }] });
+  const oats = await food(`Ingr Oats ${mode}`, { barcode: `BC-IG-OATS-${mode}` });
+  // A recipe saved in the browser: the server's ids in `id`.
+  const ing = (f, portion) => ({ id: f.id, name: f.name, portion, unit: 'g', quantity: 1, nutrition: { calories: portion } });
+  const bowl = await http(a, 'POST', '/api/meals', { name: `Ingr Bowl ${mode}`, is_recipe: 1, visibility: 'private', portion: 150, items: [ing(milk, 100), ing(oats, 50)] });
+  const phoneName = `ingr-${mode}`;
+  phone(phoneName, a, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(AU)}, { confirm: async () => true });
+    await p.sync();
+    // A meal saved on the phone (the phone's shape): Milk and the bowl recipe.
+    const milk = await p.food(${milk.id});
+    const bowl = (await p.api.getRecipes()).find(r => r.server_id === ${bowl.id});
+    await p.api.createMeal({ name: 'Ingr Breakfast ${mode}', is_recipe: 0, items: [{ ...milk, quantity: 1 }, { ...bowl, is_recipe: 1, quantity: 1 }] });
+    await p.sync();
+    p.done();`);
+  if (mode === 'upload') {
+    phone(phoneName, '', `
+      const la = await import(p.src + 'lib/local-account.js');
+      await la.setLocalOwner();
+      p.done();`, { NT_SERVER: '' });
+    phone(phoneName, b, `
+      const la = await import(p.src + 'lib/local-account.js');
+      const { uploadLocalToServer } = await import(p.src + 'lib/migrate.js');
+      await uploadLocalToServer({ serverUrl: process.env.NT_SERVER, authToken: process.env.NT_TOKEN });
+      const summary = await uploadLocalToServer({ serverUrl: process.env.NT_SERVER, authToken: process.env.NT_TOKEN });
+      await la.claimForServer(process.env.NT_SERVER, ${BU.id}, { uploaded: summary.uploaded });
+      await la.prepareLocalAccount(${JSON.stringify(BU)}, { confirm: async () => true });
+      await p.sync(); await p.sync();
+      p.done();`);
+  } else {
+    // The server loses the rows made in the browser; Push all, twice.
+    for (const f of [milk, oats]) await http(a, 'DELETE', `/api/foods/${f.id}`);
+    await http(a, 'DELETE', `/api/meals/${bowl.id}`);
+    phone(phoneName, a, `
+      const { pushAllFromDevice } = await import(p.src + 'lib/sync.js');
+      await pushAllFromDevice();
+      await pushAllFromDevice();
+      await p.sync();
+      p.done();`);
+  }
+  const ids = name => q(`SELECT id FROM foods WHERE user_id = ? AND name = ? AND deleted_at IS NULL`, BU.id, name).map(x => x.id);
+  const mealId = name => q(`SELECT id FROM meals WHERE user_id = ? AND name = ? AND deleted_at IS NULL`, BU.id, name).map(x => x.id);
+  const [nMilk] = ids(milk.name), [nOats] = ids(oats.name), [nBowl] = mealId(bowl.name), [nBreakfast] = mealId(`Ingr Breakfast ${mode}`);
+  assert.ok(nMilk && nOats && nBowl && nBreakfast, 'each on the server');
+  assert.notEqual(nMilk, milk.id, 'made again, with a new id');
+  // On the phone: split the recipe in the diary, and log the meal.
+  const r = phone(phoneName, b, `
+    const store = await import(p.src + 'stores/diary.js');
+    const bowl = (await p.api.getRecipes()).find(m => m.name === '${bowl.name}');
+    const breakfast = (await p.api.getMeals()).find(m => m.name === 'Ingr Breakfast ${mode}');
+    await store.addDiaryItem({ ...bowl, is_recipe: 1 }, 0, '${D}');
+    await store.loadEntry('${D}');
+    await store.splitRecipeItem(0);
+    for (const it of breakfast.items) await store.addDiaryItem(it, 1, '${D}');
+    const day = await p.api.getDiaryDate('${D}');
+    p.done({
+      split: day.items[0]._splitItems.map(i => [i.name, i.food_server_id ?? null, i.barcode || null]),
+      logged: day.items.slice(1).map(i => [i.name, i.food_server_id ?? null]),
+      bowl: bowl.items.map(i => i.server_id ?? null), breakfast: breakfast.items.map(i => i.server_id ?? null),
+    });`);
+  assert.deepEqual(r.split, [[milk.name, nMilk, `BC-IG-MILK-${mode}`], [oats.name, nOats, `BC-IG-OATS-${mode}`]], 'the split recipe names its foods');
+  assert.deepEqual(r.logged, [[milk.name, nMilk], [bowl.name, nBowl]], 'the logged meal too');
+  assert.deepEqual([r.bowl, r.breakfast], [[nMilk, nOats], [nMilk, nBowl]], "the phone's copies");
+  // What reached the server: log_meal (MCP and the API) names the foods.
+  const items = id => JSON.parse(q(`SELECT items FROM meals WHERE id = ?`, id)[0].items);
+  const sid = it => (typeof it.food_server_id === 'number' ? it.food_server_id : 'server_id' in it ? it.server_id : it.id);
+  assert.deepEqual(items(nBowl).map(sid), [nMilk, nOats], "the server's recipe");
+  assert.deepEqual(items(nBreakfast).map(sid), [nMilk, nBowl], "the server's meal");
+}
+test("#277: after Connect > Upload a saved meal's and recipe's ingredients follow their foods", async (t) => {
+  if (skip(t)) return;
+  await ingredientCase(t, 'upload');
+});
+test("#277: after Push all a saved meal's and recipe's ingredients follow their foods", async (t) => {
+  if (skip(t)) return;
+  await ingredientCase(t, 'pushall');
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);

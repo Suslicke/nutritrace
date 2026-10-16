@@ -33,7 +33,7 @@
  */
 
 import { dbGetFoods, dbGetMeals, dbGetAllDiary, getDb, dbInstallId, dbOwnInstallIds, createKeyOf } from './db-native.js';
-import { relinkItems } from './item-source.js';
+import { relinkItems, relinkIngredients } from './item-source.js';
 import { DB } from './db.js';
 import { isNative, getServerUrl, getAuthToken } from './platform.js';
 
@@ -125,8 +125,16 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
   }
 
   // Local id -> the server's id for what went up, so diary items logged
-  // from them point at the server's rows.
+  // from them, and meals' and recipes' ingredients, point at the server's
+  // rows (#277).
   const foodIds = new Map(), mealIds = new Map();
+  const linkOpts = {
+    rows: Object.fromEntries(await Promise.all(['foods', 'meals'].map(async t => [t, await _liveRows(t).catch(() => [])]))),
+    newIds: { foods: foodIds, meals: mealIds },
+    install,
+    mine: await dbOwnInstallIds().catch(() => new Set([install])),
+  };
+  const linkIngredients = items => (Array.isArray(items) ? relinkIngredients(items, linkOpts).items : items);
 
   // ── Foods ───────────────────────────────────────────────────────────────────
   const localFoods = await dbGetFoods().catch(() => []);
@@ -155,6 +163,7 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
     ...await dbGetMeals(false).catch(() => []),
     ...await dbGetMeals(true).catch(() => []),
   ];
+  const sent = [];
   for (let i = 0; i < localMeals.length; i++) {
     onProgress?.('meals', i, localMeals.length);
     const meal = localMeals[i];
@@ -163,10 +172,11 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
       const { id, user_id, sync_status, server_id, created_at, updated_at, deleted_at, imgUrl, ...rest } = meal;
       const made = await _post(`${serverUrl}/api/meals`, headers, {
         ...rest,
+        items: linkIngredients(rest.items),
         img_url: imgUrl || null,
         client_key: key('meals', meal),
       });
-      if (made?.id != null) mealIds.set(id, made.id);
+      if (made?.id != null) { mealIds.set(id, made.id); sent.push({ meal, made }); }
       summary.uploaded.meals.push(id);
       if (isRecipe) summary.success.recipes++;
       else          summary.success.meals++;
@@ -179,6 +189,17 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
     }
   }
 
+  // A meal or recipe with a recipe among its ingredients may have gone up
+  // before that recipe did, or (sent again) holds what the first upload
+  // gave it: what the server has is put right now that every new id is
+  // known.
+  for (const { meal, made } of sent) {
+    const items = linkIngredients(meal.items);
+    if (!Array.isArray(items) || JSON.stringify(items) === JSON.stringify(made.items ?? null)) continue;
+    try { await _put(`${serverUrl}/api/meals/${made.id}`, headers, { items }); }
+    catch (e) { summary.errors.push({ stage: meal.is_recipe ? 'recipes' : 'meals', name: meal.name || `meal #${meal.id}`, message: e.message }); }
+  }
+
   // ── Diary (one PUT per date: items + body_stats + water + notes, then
   // the day's and each meal's completion marks) ──────────────────────────
   // #277: each item names its food, meal or recipe by the server id it
@@ -188,12 +209,6 @@ export async function uploadLocalToServer({ serverUrl, authToken, onProgress } =
   // row that didn't go up, to its id here, linked once the sync sends it
   // (item-source.js relinkItems). Items of anything else stay as they are.
   summary.uploaded.serverIds = { foods: [...foodIds], meals: [...mealIds] };
-  const linkOpts = {
-    rows: Object.fromEntries(await Promise.all(['foods', 'meals'].map(async t => [t, await _liveRows(t).catch(() => [])]))),
-    newIds: { foods: foodIds, meals: mealIds },
-    install,
-    mine: await dbOwnInstallIds().catch(() => new Set([install])),
-  };
   const linkItems = items => (Array.isArray(items) ? relinkItems(items, linkOpts).items : []);
   const localDiary = (await dbGetAllDiary().catch(() => [])).filter(d => !d.deleted_at);
   for (let i = 0; i < localDiary.length; i++) {

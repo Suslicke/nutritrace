@@ -93,8 +93,9 @@ export function catalogImgFor(item, { foods = [], meals = [] } = {}, { native = 
  * install: this install's id. mine: this database's install ids (a Set).
  * Returns { items, changed }.
  */
-export function relinkItems(items, { rows = {}, newIds = {}, install = null, mine = new Set() } = {}) {
-  if (!Array.isArray(items)) return { items, changed: false };
+// The phone's rows going up, by the server id they've had and by their id
+// here, and the new server ids known so far (relinkItems, relinkIngredients).
+function _pools(rows, newIds) {
   const pools = {};
   for (const t of ['foods', 'meals']) {
     const byServer = new Map(), byId = new Map();
@@ -105,6 +106,12 @@ export function relinkItems(items, { rows = {}, newIds = {}, install = null, min
     }
     pools[t] = { byServer, byId, next: new Map(newIds[t] || []) };
   }
+  return pools;
+}
+
+export function relinkItems(items, { rows = {}, newIds = {}, install = null, mine = new Set() } = {}) {
+  if (!Array.isArray(items)) return { items, changed: false };
+  const pools = _pools(rows, newIds);
   const sourceRow = it => {
     const p = pools[it.is_recipe ? 'meals' : 'foods'];
     const ref = itemSourceRef(it, { native: true });
@@ -147,4 +154,55 @@ export function relinkItems(items, { rows = {}, newIds = {}, install = null, min
     return out;
   };
   return { items: walk(items), changed };
+}
+
+/**
+ * The same for a saved meal's or recipe's ingredients (meals.items), which
+ * name their food (or recipe) in their own ways: a meal saved in the
+ * browser keeps the server's id in `id`; one saved in the Android app keeps
+ * the phone's own in `id` and the server's in `server_id` (null: not on the
+ * server yet); one saved from the diary keeps the items as they were, with
+ * food_server_id. An ingredient whose row is one of the phone's going up
+ * gets the phone's shape: its id here and its new server id in server_id
+ * (and food_server_id, where it has that), or, until the new id is known,
+ * server_id null and this install as food_device, which the sync fills in
+ * once the row has gone up (db-native.js dbLinkDiaryItems). Anything else
+ * is left as it is. Running it again gives the same ingredients.
+ * Options as relinkItems. Returns { items, changed }.
+ */
+export function relinkIngredients(items, { rows = {}, newIds = {}, install = null, mine = new Set() } = {}) {
+  if (!Array.isArray(items)) return { items, changed: false };
+  const pools = _pools(rows, newIds);
+  const same = (r, ing) => (r && _norm(r.name) === _norm(ing.name) ? r : null);
+  const sourceRow = ing => {
+    const p = pools[ing.is_recipe ? 'meals' : 'foods'];
+    if (typeof ing.food_server_id === 'number') return p.byServer.get(ing.food_server_id) || null;
+    if ('server_id' in ing && typeof ing.server_id === 'number') return p.byServer.get(ing.server_id) || null;
+    if (typeof ing.id !== 'number') return null;
+    const unsent = ('server_id' in ing && ing.server_id == null) || ing.food_server_id === null;
+    if (unsent) {
+      // The phone's own id, before its row went up: this phone's, or of
+      // the same name.
+      if (ing.food_device) return mine.has(ing.food_device) ? p.byId.get(ing.id) || null : null;
+      return same(p.byId.get(ing.id), ing);
+    }
+    // No server_id: the server's id (saved in the browser), or the phone's
+    // (older ingredients): only a row of the same name is taken for it.
+    return same(p.byServer.get(ing.id), ing) || same(p.byId.get(ing.id), ing);
+  };
+  let changed = false;
+  const out = items.map(ing => {
+    if (!ing || typeof ing !== 'object') return ing;
+    const row = sourceRow(ing);
+    if (!row) return ing;
+    const sid = pools[ing.is_recipe ? 'meals' : 'foods'].next.get(row.id) ?? null;
+    const { food_device: _d, ...rest } = ing;
+    const next = { ...rest, id: row.id, server_id: sid };
+    if ('food_server_id' in ing) next.food_server_id = sid;
+    if (sid == null) next.food_device = install;
+    const keys = new Set([...Object.keys(ing), ...Object.keys(next)]);
+    for (const k of keys) if (ing[k] !== next[k]) { changed = true; return next; }
+    return ing;
+  });
+  return { items: changed ? out : items, changed };
 }

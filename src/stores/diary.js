@@ -305,7 +305,9 @@ export async function addDiaryItem(foodItem, meal, date) {
   // Logged on the phone before its food reached the server: `id` is this
   // phone's own. Say which phone, so once the food syncs this phone (and
   // no other) fills in food_server_id, even if the food was renamed.
-  if (isNative && !keepsSource && food_server_id === null && typeof foodItem.id === 'number') {
+  // A saved meal's ingredient may already say which phone's id it is
+  // (#277): that one stays.
+  if (isNative && !keepsSource && food_server_id === null && typeof foodItem.id === 'number' && !foodItem.food_device) {
     try { item.food_device = await (await import('../lib/db-native.js')).dbInstallId(); } catch {}
   }
 
@@ -560,10 +562,23 @@ export async function splitRecipeItem(index) {
   // is rebalanced from the rounded portion so per-gram density stays
   // accurate.
   const _round1 = v => Math.round(v * 10) / 10;
+  // Each ingredient's food by its server id (#277): food_server_id on one
+  // saved from the diary, server_id on one saved in the Android app (null:
+  // not on the server yet), else its id (saved in the browser), the same
+  // rule as log_meal (server/lib/mcp/tools/log-meal.js).
+  const install = isNative ? await import('../lib/db-native.js').then(m => m.dbInstallId()).catch(() => null) : null;
   const splitItems = recipe.items.map(ing => {
-    const food_server_id = ('server_id' in ing)
-      ? ing.server_id
-      : (typeof ing.id === 'number' ? ing.id : null);
+    const food_server_id = (typeof ing.food_server_id === 'number' || ing.food_server_id === null)
+      ? ing.food_server_id
+      : ('server_id' in ing)
+        ? (ing.server_id ?? null)
+        : (typeof ing.id === 'number' ? ing.id : null);
+    // Not on the server yet: which phone's id `id` is. One it says already
+    // stays; one in the phone's own shape (server_id null) is this phone's,
+    // as addDiaryItem has it; one saved from the diary stays untagged.
+    const food_device = food_server_id === null && typeof ing.id === 'number'
+      ? (ing.food_device || ('server_id' in ing && !('food_server_id' in ing) ? install : null) || undefined)
+      : undefined;
     const origPortion  = parseFloat(ing.portion)  || 100;
     const origQuantity = parseFloat(ing.quantity) || 1;
     const exactScaledMass = origPortion * origQuantity * scale;
@@ -578,13 +593,15 @@ export async function splitRecipeItem(index) {
         Object.entries(ing.nutrition).map(([k, v]) => [k, (parseFloat(v) || 0) * nutritionFactor])
       );
     }
+    const { food_device: _fd, ...ingRest } = ing;
     return {
-      ...ing,
+      ...ingRest,
       portion: newPortion,
       quantity: 1,
       nutrition: scaledNutrition,
       addedAt: now,
       food_server_id,
+      ...(food_device ? { food_device } : {}),
     };
   });
 
