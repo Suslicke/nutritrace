@@ -606,9 +606,11 @@ export async function splitRecipeItem(index) {
     };
   });
 
+  // An edit of the item: its own time, so the server's merge keeps it
+  // over an older copy (server/lib/diary-merge.js).
   const updated = {
     ...entry,
-    items: entry.items.map((it, i) => i === index ? { ...item, _splitItems: splitItems } : it),
+    items: entry.items.map((it, i) => i === index ? { ...item, _splitItems: splitItems, updatedAt: now } : it),
   };
   currentEntry.set(await _save(updated));
   return true;
@@ -635,7 +637,7 @@ export async function removeSplitChild(parentIndex, childIndex) {
     newItems = entry.items.filter((_, i) => i !== parentIndex);
   } else {
     newItems = entry.items.map((it, i) =>
-      i === parentIndex ? { ...parent, _splitItems: remaining } : it
+      i === parentIndex ? { ...parent, _splitItems: remaining, updatedAt: new Date().toISOString() } : it
     );
   }
   currentEntry.set(await _save({ ...entry, items: newItems }));
@@ -658,7 +660,7 @@ export async function updateSplitChild(parentIndex, childIndex, changes) {
     i === childIndex ? { ...c, ...changes } : c
   );
   const newItems = entry.items.map((it, i) =>
-    i === parentIndex ? { ...parent, _splitItems: newChildren } : it
+    i === parentIndex ? { ...parent, _splitItems: newChildren, updatedAt: new Date().toISOString() } : it
   );
   currentEntry.set(await _save({ ...entry, items: newItems }));
 }
@@ -692,7 +694,7 @@ export async function moveMealItems(fromMealIdx, toMealIdx) {
     const items = (entry.items || []).map(it => {
       if (Number(it.meal ?? 0) === Number(fromMealIdx)) {
         count++;
-        return { ...it, meal: Number(toMealIdx) };
+        return { ...it, meal: Number(toMealIdx), updatedAt: new Date().toISOString() };
       }
       return it;
     });

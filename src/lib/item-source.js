@@ -114,6 +114,23 @@ export function catalogImgFor(item, { foods = [], meals = [] } = {}, { native = 
  * install: this install's id. mine: this database's install ids (a Set).
  * Returns { items, changed }.
  */
+/**
+ * The updatedAt a diary item gets when it's relinked to its food (#277):
+ * one millisecond after the time it had (updatedAt, else addedAt). The
+ * server's merge (server/lib/diary-merge.js) keeps whichever copy of an
+ * item has the later time, as text, so the relinked copy wins over an
+ * older copy of the day another device sends again, with the old id, and
+ * still loses to a real edit made since anywhere else. An item with no
+ * time at all gets the earliest one there is.
+ */
+export function relinkedAt(item) {
+  const was = String(item?.updatedAt || item?.addedAt || '');
+  const t = Date.parse(was);
+  if (!Number.isFinite(t)) return was ? `${was}1` : '1970-01-01T00:00:00.001Z';
+  const next = new Date(t + 1).toISOString();
+  return next > was ? next : `${was}1`;
+}
+
 // The phone's rows going up, by the server id they've had and by their id
 // here, and the new server ids known so far (relinkItems, relinkIngredients).
 function _pools(rows, newIds) {
@@ -146,7 +163,7 @@ export function relinkItems(items, { rows = {}, newIds = {}, install = null, min
     return same(p.byId.get(ref.localId)) || (ref.unsent ? null : same(p.byServer.get(ref.localId)));
   };
   let changed = false;
-  const walk = list => {
+  const walk = (list, top = true) => {
     let hit = false;
     const out = list.map(it => {
       if (!it || typeof it !== 'object') return it;
@@ -167,10 +184,15 @@ export function relinkItems(items, { rows = {}, newIds = {}, install = null, min
         if (next !== it && _norm(row.name) !== _norm(it.name)) next = { ...next, food_name: row.name };
       }
       if (Array.isArray(next._splitItems)) {
-        const kids = walk(next._splitItems);
+        const kids = walk(next._splitItems, false);
         if (kids !== next._splitItems) next = { ...next, _splitItems: kids };
       }
-      if (next !== it) hit = true;
+      if (next !== it) {
+        hit = true;
+        // A change the merge keeps (relinkedAt); the day merges by its
+        // top-level items, a split recipe's with its parts.
+        if (top) next = { ...next, updatedAt: relinkedAt(it) };
+      }
       return next;
     });
     if (!hit) return list;

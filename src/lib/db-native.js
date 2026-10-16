@@ -10,7 +10,7 @@
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { hydrateWithoutFoods } from './diary-hydration.js';
 import { parseAltUnits } from './units.js';
-import { itemSourceRef, relinkItems, relinkIngredients, itemFoodMatches } from './item-source.js';
+import { itemSourceRef, relinkItems, relinkIngredients, itemFoodMatches, relinkedAt } from './item-source.js';
 
 const LOCAL_USER_ID = 1;
 const DB_NAME = 'nutritrace_local';
@@ -1727,7 +1727,7 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
     const src = _row(await db.query(`SELECT name FROM ${t} WHERE id = ?`, [c.localId]));
     if (src) legacy.set(`${t}:${c.localId}`, { serverId: c.serverId, name: _norm(src.name) });
   }
-  const fix = items => {
+  const fix = (items, top = true) => {
     let hit = false;
     const out = items.map(it => {
       if (!it || typeof it !== 'object') return it;
@@ -1745,9 +1745,11 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
         }
       }
       if (Array.isArray(next._splitItems)) {
-        const kids = fix(next._splitItems);
+        const kids = fix(next._splitItems, false);
         if (kids.hit) { next = { ...next, _splitItems: kids.out }; hit = true; }
       }
+      // A change the server's merge keeps over an older copy (relinkedAt).
+      if (top && next !== it) next = { ...next, updatedAt: relinkedAt(it) };
       return next;
     });
     return { out, hit };

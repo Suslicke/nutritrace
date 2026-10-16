@@ -494,6 +494,71 @@ test("a food lends an item its units and barcode only if it is the item's, the s
   }
 });
 
+// #277 follow-up: a relinked item wins the server's merge over an older
+// copy of itself, and loses to any later edit.
+test('a relinked item is a millisecond newer than the copy it came from, by the merge', async () => {
+  const { relinkedAt, relinkItems } = await import('../src/lib/item-source.js');
+  const { mergeEntries } = await import('../server/lib/diary-merge.js');
+  for (const [was, want] of [
+    [{ updatedAt: '2026-05-30T08:00:00.000Z' }, '2026-05-30T08:00:00.001Z'],
+    [{ addedAt: '2026-05-30T08:00:00.999Z' }, '2026-05-30T08:00:01.000Z'],
+    [{ updatedAt: '2026-05-30T08:00:00Z' }, '2026-05-30T08:00:00Z1'],
+    [{}, '1970-01-01T00:00:00.001Z'],
+  ]) assert.equal(relinkedAt(was), want);
+  const old = { uuid: 'x', food_server_id: 1, name: 'Milk', addedAt: '2026-05-30T08:00:00.000Z' };
+  const [linked] = relinkItems([old], { rows: { foods: [{ id: 5, server_id: 1, name: 'Milk' }] }, newIds: { foods: [[5, 9]] } }).items;
+  assert.equal(linked.updatedAt, '2026-05-30T08:00:00.001Z');
+  assert.equal(mergeEntries([linked], [old], [], []).merged[0].food_server_id, 9, 'the older copy sent again loses');
+  const edit = { ...old, quantity: 2, updatedAt: '2026-05-30T08:00:05.000Z' };
+  assert.equal(mergeEntries([linked], [edit], [], []).merged[0].quantity, 2, 'a later edit wins');
+  assert.equal(mergeEntries([edit], [linked], [], []).merged[0].quantity, 2, 'whichever arrives first');
+  assert.equal(relinkItems([linked], { rows: { foods: [{ id: 5, server_id: 9, name: 'Milk' }] }, newIds: { foods: [[5, 9]] } }).changed, false, 'again: no change, the same time');
+});
+
+// Review round: a food renamed since an item was logged, then made again
+// by Upload or Merge (newer than the item), still lends it units and
+// barcode: the phone keeps the food's name on the item it links (food_name).
+test('a renamed food made again by an upload still lends the items linked to it', async (t) => {
+  const { relinkItems, itemFoodMatches } = await import('../src/lib/item-source.js');
+  const it = { uuid: 'r1', food_server_id: 101, name: 'Chicken Breast', addedAt: '2026-01-01T00:00:00.000Z' };
+  const rows = { foods: [{ id: 1, server_id: 101, name: 'Chicken Breast, Raw' }] };
+  const [linked] = relinkItems([it], { rows, newIds: { foods: [[1, 501]] } }).items;
+  assert.equal(linked.food_name, 'Chicken Breast, Raw');
+  const [same] = relinkItems([{ ...it, name: 'chicken breast, raw ' }], { rows, newIds: { foods: [[1, 501]] } }).items;
+  assert.equal('food_name' in same, false, 'not where the names agree');
+  const madeAgain = { name: 'Chicken Breast, Raw', created_at: '2026-06-01 10:00:00' };
+  assert.equal(itemFoodMatches(madeAgain, it), false, 'without it: newer, another name');
+  assert.equal(itemFoodMatches(madeAgain, linked), true, 'with it');
+  if (helpers) assert.equal(helpers.itemFoodMatches(madeAgain, linked), true, 'the server too');
+  assert.match(read('../src/stores/diary.js'), /'food_name',\s+\/\/ its food's name when linked again/, 'kept when the day is saved');
+  assert.match(read('../src/lib/db-native.js'), /source_url, updated_at, created_at, sync_status\)/, "a pulled food keeps the server's created_at");
+  if (skip(t)) return;
+  const u = user('renamed');
+  const id = Number(db.prepare(`INSERT INTO foods (user_id, name, barcode, created_at) VALUES (?, 'Chicken Breast, Raw', 'BC-CHICKEN', '2026-06-01 10:00:00')`).run(u).lastInsertRowid);
+  const [got] = helpers.hydrateItems([{ ...linked, food_server_id: id }], u);
+  assert.equal(got.barcode, 'BC-CHICKEN');
+});
+
+// Review round: an edit of a split recipe or a move between meals is an
+// edit (its own updatedAt), so a relinked copy never wins over it; a meal's
+// ingredient keeps the phone it names; MCP's get_meal_details names an
+// Android-saved ingredient's food by its server id.
+test('split and move edits carry their time; ingredients keep their phone; get_meal_details reads server_id', async (t) => {
+  const diary = read('../src/stores/diary.js');
+  assert.match(diary, /items: entry\.items\.map\(\(it, i\) => i === index \? \{ \.\.\.item, _splitItems: splitItems, updatedAt: now \}/);
+  assert.equal((diary.match(/_splitItems: (remaining|newChildren), updatedAt: new Date\(\)\.toISOString\(\)/g) || []).length, 2);
+  assert.match(diary, /return \{ \.\.\.it, meal: Number\(toMealIdx\), updatedAt: new Date\(\)\.toISOString\(\) \};/);
+  assert.match(diary, /typeof foodItem\.id === 'number' && !foodItem\.food_device\)/);
+  if (skip(t)) return;
+  const { getMealDetailsCore } = await import('../server/lib/mcp/tools/get-meal-details.js');
+  const u = user('details');
+  const meal = Number(db.prepare(`INSERT INTO meals (user_id, name, items) VALUES (?, 'Details', ?)`).run(u, JSON.stringify([
+    { id: 4, server_id: 77, name: 'Phone Shape' }, { id: 4, server_id: null, name: 'Not Up' }, { id: 88, name: 'Browser Shape' }, { id: 9, food_server_id: 99, name: 'Diary Shape' },
+  ])).lastInsertRowid);
+  const r = getMealDetailsCore(u, { meal_id: meal });
+  assert.deepEqual((r.items || r.meal?.items).map(i => [i.id, i.food_server_id]), [[77, 77], [null, null], [88, 88], [9, 99]]);
+});
+
 test('a note: unchanged keeps its time, an edit with no time is now, an older edit loses', async () => {
   const { resolveNote, clientClock } = await import('../server/lib/sync-clock.js');
   const now = Date.parse('2026-10-06T12:00:00Z');

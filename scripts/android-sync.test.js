@@ -874,6 +874,49 @@ test("#277: on the phone a food lends an item its units and barcode only if it i
   assert.deepEqual(r, [[null, null], ['BC-MILK', 'cup'], ['BC-BANANA', 'cup'], [null, null]]);
 });
 
+// #277 follow-up: a relinked item is a change the server's merge keeps
+// (server/lib/diary-merge.js keeps the copy of an item with the later
+// updatedAt). It kept its old time, so another device sending its older
+// copy of the day again, with the old id, put the old id back. Now the
+// relinked copy wins over that, and still loses to a real edit made
+// elsewhere in the meantime. Two clients: the phone (Push all) and the
+// browser (PUT /api/diary, as the web app saves a day).
+test('#277: a relinked diary item beats an older copy of the day sent again, not a newer edit', async (t) => {
+  if (skip(t)) return;
+  const tok = await account('relinkmerge', A);
+  const U = (await http(tok, 'GET', '/api/auth/me')).user;
+  const D1 = '2026-05-30', D2 = '2026-05-31';
+  const milk = await http(tok, 'POST', '/api/foods', { name: 'Merge Milk', barcode: 'BC-MERGE', nutrition: { calories: 60 }, visibility: 'private' });
+  const at = '2026-05-30T08:00:00.000Z';
+  const item = (uuid, extra = {}) => ({ uuid, id: milk.id, food_server_id: milk.id, name: 'Merge Milk', meal: 0, quantity: 1, portion: 100, unit: 'g', nutrition: { calories: 60 }, addedAt: at, ...extra });
+  // The browser's copy of each day, as it loaded it.
+  const web1 = { items: [item('mm-1')], body_stats: {}, water: [] };
+  const web2 = { items: [item('mm-2')], body_stats: {}, water: [] };
+  await http(tok, 'PUT', `/api/diary/${D1}`, web1);
+  await http(tok, 'PUT', `/api/diary/${D2}`, web2);
+  phone('relinkmerge', tok, `
+    const la = await import(p.src + 'lib/local-account.js');
+    await la.prepareLocalAccount(${JSON.stringify(U)}, { confirm: async () => true });
+    await p.sync();
+    p.done();`);
+  // The server loses Milk. Meanwhile the browser really edits day 2's
+  // item (2 servings), before the phone's Push all goes up.
+  await http(tok, 'DELETE', `/api/foods/${milk.id}`);
+  await http(tok, 'PUT', `/api/diary/${D2}`, { ...web2, items: [item('mm-2', { quantity: 2, updatedAt: new Date().toISOString() })] });
+  const r = phone('relinkmerge', tok, `
+    const { pushAllFromDevice } = await import(p.src + 'lib/sync.js');
+    await pushAllFromDevice();
+    await p.sync();
+    p.done({ milk: (await p.api.getFoods()).find(f => f.name === 'Merge Milk')?.server_id });`);
+  assert.ok(r.milk && r.milk !== milk.id, 'Milk made again');
+  const day = async d => (await http(tok, 'GET', `/api/diary/${d}`)).items.map(i => [i.food_server_id, i.quantity]);
+  assert.deepEqual(await day(D1), [[r.milk, 1]], 'relinked');
+  // The browser sends its older copy of day 1 again (an unrelated save).
+  await http(tok, 'PUT', `/api/diary/${D1}`, { ...web1, notes: 'saved again' });
+  assert.deepEqual(await day(D1), [[r.milk, 1]], 'the older copy does not bring the old id back');
+  assert.deepEqual(await day(D2), [[milk.id, 2]], 'the newer edit made elsewhere still wins');
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);
