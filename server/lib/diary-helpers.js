@@ -120,6 +120,34 @@ const HYDRATE_FIELDS = ['nutrition_basis', 'alt_units', 'density_g_ml', 'categor
 // server: its id is the phone's own, not a server id, so it names no food
 // here. The phone fills food_server_id in once the food goes up.
 const _foodKey = it => (it.food_server_id === null ? null : (it.food_server_id ?? it.id));
+
+// #277: whether the food an item's id names is the food the item came
+// from, before its units and barcode are lent to the item. An id can be
+// out of date: one from another server, after Connect > Upload or Push all
+// from this device, whose food never came along (deleted on the phone),
+// names another food here, or none. So the food has to have the item's
+// name (trimmed, any case, as the photo lookup), or, renamed since, have
+// been here when the item was logged: made at or before its addedAt. A
+// food made again by an upload is newer than every item logged before it;
+// the phone that sent it keeps the food's name on each item it linked to
+// it (food_name) where the names differ.
+// An item with no addedAt (from before it existed) needs the same name.
+// The Android app's twin: src/lib/item-source.js itemFoodMatches.
+const _madeAt = ts => {
+  if (!ts) return NaN;
+  const s = String(ts);
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s.replace(' ', 'T') : `${s.replace(' ', 'T')}Z`);
+};
+export function itemFoodMatches(food, item) {
+  if (!food || !item) return false;
+  if (_norm(food.name) === _norm(item.name)) return true;
+  // Linked again on a phone (after Upload or Merge) to a food renamed
+  // since: the food's name then, kept on the item (food_name).
+  if (item.food_name && _norm(food.name) === _norm(item.food_name)) return true;
+  const logged = Date.parse(item.addedAt || '');
+  const made = _madeAt(food.created_at);
+  return Number.isFinite(logged) && Number.isFinite(made) && made <= logged;
+}
 export function hydrateItems(items, userId = null) {
   if (!Array.isArray(items) || !items.length) return items;
   try {
@@ -131,10 +159,12 @@ export function hydrateItems(items, userId = null) {
         if (typeof id === 'number') foodIds.add(id);
       }
     }
-    if (!foodIds.size) return items;
+    // No food at the top (only recipes, say): a split recipe's parts still
+    // get theirs, as on the phone (db-native.js hydrateWithoutFoods).
+    if (!foodIds.size) return items.map(it => _hydrateSplitChildren(it, userId));
     const scope = foodScope(userId);
     const rows = db.prepare(
-      `SELECT f.id, f.nutrition_basis, f.alt_units, f.density_g_ml, f.category, f.barcode
+      `SELECT f.id, f.name, f.created_at, f.nutrition_basis, f.alt_units, f.density_g_ml, f.category, f.barcode
        FROM foods f WHERE f.id IN (SELECT value FROM json_each(@ids)) AND f.deleted_at IS NULL AND ${scope.sql}`
     ).all({ ...scope.args, ids: JSON.stringify(Array.from(foodIds)) });
     const byId = new Map(rows.map(r => [r.id, r]));
@@ -142,7 +172,7 @@ export function hydrateItems(items, userId = null) {
       if (!it || it.is_recipe) return _hydrateSplitChildren(it, userId);
       const id = _foodKey(it);
       const src = typeof id === 'number' ? byId.get(id) : null;
-      if (!src) return _hydrateSplitChildren(it, userId);
+      if (!src || !itemFoodMatches(src, it)) return _hydrateSplitChildren(it, userId);
       const out = { ...it };
       for (const k of HYDRATE_FIELDS) {
         if (src[k] == null || it[k] != null) continue;

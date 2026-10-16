@@ -93,6 +93,7 @@ const _KEEP_FIELDS = [
   'meal', 'addedAt', 'updatedAt', 'type',           // routing + display + branch
   'id', 'food_server_id', 'is_recipe',              // hydration keys
   'food_device',                                    // which phone's own id `id` is, until it syncs
+  'food_name',                                      // its food's name when linked again, where it differs (#277)
   'name', 'brand', 'portion', 'unit', 'quantity',   // history-protected snapshot
   'nutrition', 'notes',                             // history-protected snapshot
   'imgUrl',                                         // scrubbed by _stripCachedPaths, hydrated on read

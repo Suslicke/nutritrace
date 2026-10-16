@@ -47,7 +47,7 @@ function seed() {
 test("a diary item doesn't take another account's food details", (t) => {
   if (!helpers) return t.skip('better-sqlite3 is not built for this Node');
   const s = seed();
-  const [item] = helpers.hydrateItems([{ id: s.theirs, name: 'Mine, not theirs' }], s.me);
+  const [item] = helpers.hydrateItems([{ id: s.theirs, name: 'Secret' }], s.me);
   assert.equal(item.category, undefined);
   assert.equal(item.barcode, undefined);
   const [own] = helpers.hydrateItems([{ food_server_id: s.mine, name: 'Oats' }], s.me);
@@ -68,7 +68,7 @@ test("a diary item doesn't take another account's photo by name", (t) => {
 test('with user management off, everything is read as before', (t) => {
   if (!helpers) return t.skip('better-sqlite3 is not built for this Node');
   const s = seed();
-  const [item] = helpers.hydrateItems([{ id: s.theirs, name: 'x' }], null);
+  const [item] = helpers.hydrateItems([{ id: s.theirs, name: 'Secret' }], null);
   assert.equal(item.category, 'Their Category');
 });
 

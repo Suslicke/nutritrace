@@ -25,6 +25,27 @@ export function itemSourceRef(item, { native = false } = {}) {
 const _norm = s => String(s || '').trim().toLowerCase();
 
 /**
+ * Whether the food an item's id names is the food the item came from,
+ * before its units and barcode are lent to the item (#277): the same name
+ * (trimmed, any case), or, renamed since, a food that was there when the
+ * item was logged (made at or before its addedAt). An id out of date (from
+ * another server, after Connect > Upload or Push all, whose food never
+ * came along) names a food made later, or one of another name. Twin of
+ * server/lib/diary-helpers.js itemFoodMatches.
+ */
+export function itemFoodMatches(food, item) {
+  if (!food || !item) return false;
+  if (_norm(food.name) === _norm(item.name)) return true;
+  // Linked again (relinkItems, dbLinkDiaryItems) to a food renamed since:
+  // the food's name then, kept on the item.
+  if (item.food_name && _norm(food.name) === _norm(item.food_name)) return true;
+  const logged = Date.parse(item.addedAt || '');
+  const s = String(food.created_at || '');
+  const made = s ? Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s.replace(' ', 'T') : `${s.replace(' ', 'T')}Z`) : NaN;
+  return Number.isFinite(logged) && Number.isFinite(made) && made <= logged;
+}
+
+/**
  * The photo of the food, meal or recipe a diary item (or a meal's
  * ingredient) came from, out of the catalogue this device has loaded
  * (Foods: Yesterday's Meals and a meal's items), found the way the diary
@@ -141,6 +162,9 @@ export function relinkItems(items, { rows = {}, newIds = {}, install = null, min
         } else if (!(it.food_server_id === null && it.id === row.id && it.food_device === install)) {
           next = { ...it, id: row.id, food_server_id: null, food_device: install };
         }
+        // Its food renamed since it was logged: keep the food's name, so
+        // the food still lends it units and barcode (itemFoodMatches).
+        if (next !== it && _norm(row.name) !== _norm(it.name)) next = { ...next, food_name: row.name };
       }
       if (Array.isArray(next._splitItems)) {
         const kids = walk(next._splitItems);

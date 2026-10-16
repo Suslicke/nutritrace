@@ -451,6 +451,49 @@ test("a meal's ingredients follow their food or recipe to its new server id, and
   assert.match(read('../src/stores/diary.js'), /const food_server_id = \(typeof ing\.food_server_id === 'number' \|\| ing\.food_server_id === null\)/);
 });
 
+// #277 follow-up: an item's id can be out of date (another server's, after
+// Connect > Upload or Push all, whose food never came along). The food it
+// names here lends its units and barcode only if it is the item's: the
+// same name, trimmed and any case, or there when the item was logged (a
+// food renamed since). One rule on the server and the phone.
+const FOOD_MATCH_CASES = [
+  // [food name, food made, item name, item addedAt, lends?]
+  ['Banana', '2026-01-02 10:00:00', ' banana ', '2026-01-01T00:00:00.000Z', true],    // the same name, whenever made
+  ['Unrelated', '2026-01-02 10:00:00', 'Banana', '2026-01-01T00:00:00.000Z', false],  // another food, made after: an id out of date
+  ['Whole Milk', '2025-12-01 08:00:00', 'Milk', '2026-01-01T00:00:00.000Z', true],    // renamed since it was logged
+  ['Whole Milk', '2026-01-01 00:00:00', 'Milk', '2026-01-01T00:00:00.000Z', true],    // made the same second
+  ['Whole Milk', '2025-12-01 08:00:00', 'Milk', undefined, false],                    // no addedAt: the name decides
+  ['Whole Milk', null, 'Milk', '2026-01-01T00:00:00.000Z', false],                    // no made time: the name decides
+];
+test("a food lends an item its units and barcode only if it is the item's, the same on the server and the phone", async (t) => {
+  if (!skip(t)) {
+  const u = user('lend');
+  const food = (name, made, barcode) => Number(db.prepare(`INSERT INTO foods (user_id, name, barcode, alt_units, created_at) VALUES (?, ?, ?, '[{"abbr":"cup","grams":200}]', ?)`).run(u, name, barcode, made).lastInsertRowid);
+  const stale = food('Unrelated Lend', '2026-01-02 10:00:00', 'BC-UNRELATED');
+  const renamed = food('Whole Milk Lend', '2025-12-01 08:00:00', 'BC-MILK');
+  const same = food('Banana Lend', '2026-01-02 10:00:00', 'BC-BANANA');
+  const got = helpers.hydrateItems([
+    { food_server_id: stale, name: 'Banana Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+    { food_server_id: renamed, name: 'Milk Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+    { food_server_id: same, name: 'banana lend ', addedAt: '2026-01-01T00:00:00.000Z' },
+    { id: stale, name: 'Banana Lend' },
+  ], u).map(i => [i.barcode || null, i.alt_units?.[0]?.abbr || null]);
+  assert.deepEqual(got, [[null, null], ['BC-MILK', 'cup'], ['BC-BANANA', 'cup'], [null, null]]);
+  // A day of only a split recipe: its parts are filled in too.
+  const [bowl] = helpers.hydrateItems([{ is_recipe: 1, name: 'Bowl Lend', _splitItems: [
+    { food_server_id: same, name: 'Banana Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+    { food_server_id: stale, name: 'Banana Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+  ] }], u);
+  assert.deepEqual(bowl._splitItems.map(i => i.barcode || null), ['BC-BANANA', null]);
+  }
+  const phone = (await import('../src/lib/item-source.js')).itemFoodMatches;
+  for (const [name, created_at, itemName, addedAt, want] of FOOD_MATCH_CASES) {
+    const args = [{ name, created_at }, { name: itemName, addedAt }];
+    assert.equal(phone(...args), want, `phone: ${name} / ${itemName}`);
+    if (helpers) assert.equal(helpers.itemFoodMatches(...args), want, `server: ${name} / ${itemName}`);
+  }
+});
+
 test('a note: unchanged keeps its time, an edit with no time is now, an older edit loses', async () => {
   const { resolveNote, clientClock } = await import('../server/lib/sync-clock.js');
   const now = Date.parse('2026-10-06T12:00:00Z');

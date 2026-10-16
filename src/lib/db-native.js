@@ -10,7 +10,7 @@
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
 import { hydrateWithoutFoods } from './diary-hydration.js';
 import { parseAltUnits } from './units.js';
-import { itemSourceRef, relinkItems, relinkIngredients } from './item-source.js';
+import { itemSourceRef, relinkItems, relinkIngredients, itemFoodMatches } from './item-source.js';
 
 const LOCAL_USER_ID = 1;
 const DB_NAME = 'nutritrace_local';
@@ -998,7 +998,7 @@ async function _hydrateItems(items) {
     if (serverIds.size) { conds.push(`server_id IN (${Array.from(serverIds).map(() => '?').join(',')})`); params.push(...serverIds); }
     if (localIds.size) { conds.push(`id IN (${Array.from(localIds).map(() => '?').join(',')})`); params.push(...localIds); }
     const r = await db.query(
-      `SELECT id, server_id, name, nutrition_basis, alt_units, density_g_ml, category, barcode
+      `SELECT id, server_id, name, created_at, nutrition_basis, alt_units, density_g_ml, category, barcode
        FROM foods WHERE (${conds.join(' OR ')}) AND deleted_at IS NULL`,
       params
     );
@@ -1011,7 +1011,10 @@ async function _hydrateItems(items) {
     const sourceOf = it => {
       const ref = _foodRef(it);
       if (!ref) return null;
-      if (ref.server != null) return byServer.get(ref.server) || null;
+      // By an id that may be out of date: only a food that is the item's
+      // (itemFoodMatches; the server does the same).
+      const match = row => (row && itemFoodMatches(row, it) ? row : null);
+      if (ref.server != null) return match(byServer.get(ref.server));
       // An unsent item's phone id only counts for a food still waiting to
       // go up: on this phone (food_device), or for untagged items, with the
       // same name, since ids renumber when the app is reinstalled.
@@ -1021,7 +1024,7 @@ async function _hydrateItems(items) {
         if (!row || row.server_id != null) return null;
         return it.food_device || _norm(row.name) === _norm(it.name) ? row : null;
       }
-      return byLocal.get(ref.local) || null;
+      return match(byLocal.get(ref.local));
     };
     return Promise.all(items.map(async it => {
       if (!it || it.is_recipe) return await _hydrateSplitChildren(it);
@@ -1710,10 +1713,11 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
   ));
   if (!rows.length && !meals.length) return 0;
   const mine = await dbOwnInstallIds();
-  const serverIdOf = { foods: new Map(), meals: new Map() };
+  const serverIdOf = { foods: new Map(), meals: new Map() }, nameOf = { foods: new Map(), meals: new Map() };
   for (const t of ['foods', 'meals']) {
-    for (const x of _rows(await db.query(`SELECT id, server_id FROM ${t} WHERE server_id IS NOT NULL AND user_id = ?`, [LOCAL_USER_ID]))) {
+    for (const x of _rows(await db.query(`SELECT id, server_id, name FROM ${t} WHERE server_id IS NOT NULL AND user_id = ?`, [LOCAL_USER_ID]))) {
       serverIdOf[t].set(x.id, x.server_id);
+      nameOf[t].set(x.id, x.name);
     }
   }
   const legacy = new Map();
@@ -1729,10 +1733,14 @@ export async function dbLinkDiaryItems(created = [], live = () => true) {
       if (!it || typeof it !== 'object') return it;
       let next = it;
       if (it.food_server_id === null && typeof it.id === 'number') {
-        const sid = linkedId(it.is_recipe ? 'meals' : 'foods', it);
+        const t = it.is_recipe ? 'meals' : 'foods';
+        const sid = linkedId(t, it);
         if (sid != null) {
           const { food_device: _d, ...rest } = it;
           next = { ...rest, food_server_id: sid };
+          // Renamed before it went up: the food's name (itemFoodMatches).
+          const fname = nameOf[t].get(it.id);
+          if (fname && _norm(fname) !== _norm(it.name)) next.food_name = fname;
           hit = true;
         }
       }
@@ -2050,8 +2058,12 @@ export async function dbUpsertFromServer(table, serverRecord) {
     // New from server, insert locally.
     if (table === 'foods') {
       await db.run(
-        `INSERT INTO foods (server_id, user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, favorite, usage_count, last_used_at, nutrition_basis, alt_units, density_g_ml, source_app, source_external_id, source_url, updated_at, sync_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+        // created_at: when the server made it, not when it came down, so
+        // an item logged before then still takes its units after a rename
+        // (item-source.js itemFoodMatches). Only on insert: a row's own
+        // created_at stays as it was (create keys use it).
+        `INSERT INTO foods (server_id, user_id, name, brand, nutrition, portion, unit, img_url, notes, category, barcode, favorite, usage_count, last_used_at, nutrition_basis, alt_units, density_g_ml, source_app, source_external_id, source_url, updated_at, created_at, sync_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), 'synced')`,
         [serverId, LOCAL_USER_ID, data.name, data.brand, typeof data.nutrition === 'string' ? data.nutrition : JSON.stringify(data.nutrition || {}),
          data.portion ?? 100, data.unit || 'g', data.img_url, data.notes, data.category, data.barcode,
          data.favorite ? 1 : 0, data.usage_count || 0, data.last_used_at || null,
@@ -2061,7 +2073,7 @@ export async function dbUpsertFromServer(table, serverRecord) {
            ? Number(data.density_g_ml)
            : null,
          data.source_app || null, data.source_external_id || null, data.source_url || null,
-         data.updated_at]
+         data.updated_at, data.created_at || null]
       );
     } else if (table === 'meals') {
       const importWarnings = data.import_warnings;

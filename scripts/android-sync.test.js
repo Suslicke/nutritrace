@@ -853,6 +853,27 @@ test("#277: after Push all a saved meal's and recipe's ingredients follow their 
   await ingredientCase(t, 'pushall');
 });
 
+// #277 follow-up: the phone's twin of the server's rule above
+// (android-sync-server.test.js): a food its id names lends an item units
+// and barcode only if it is the item's.
+test("#277: on the phone a food lends an item its units and barcode only if it is the item's", async (t) => {
+  if (skip(t)) return;
+  const r = phone('lend', A, `
+    const db = await p.dbn.getDb();
+    const row = (id, sid, name, made, bc) => db.run("INSERT INTO foods (id, server_id, name, barcode, alt_units, created_at) VALUES (?, ?, ?, ?, '[{\\"abbr\\":\\"cup\\",\\"grams\\":200}]', ?)", [id, sid, name, bc, made]);
+    await row(801, 9801, 'Unrelated Lend', '2026-01-02 10:00:00', 'BC-UNRELATED');
+    await row(802, 9802, 'Whole Milk Lend', '2025-12-01 08:00:00', 'BC-MILK');
+    await row(803, 9803, 'Banana Lend', '2026-01-02 10:00:00', 'BC-BANANA');
+    await p.dbn.dbSaveDiaryDate('2026-05-20', { items: [
+      { uuid: 'l1', food_server_id: 9801, name: 'Banana Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+      { uuid: 'l2', food_server_id: 9802, name: 'Milk Lend', addedAt: '2026-01-01T00:00:00.000Z' },
+      { uuid: 'l3', food_server_id: 9803, name: 'banana lend ', addedAt: '2026-01-01T00:00:00.000Z' },
+      { uuid: 'l4', id: 801, name: 'Banana Lend' },
+    ] });
+    p.done((await p.dbn.dbGetDiaryDate('2026-05-20')).items.map(i => [i.barcode || null, i.alt_units?.[0]?.abbr || null]));`);
+  assert.deepEqual(r, [[null, null], ['BC-MILK', 'cup'], ['BC-BANANA', 'cup'], [null, null]]);
+});
+
 test('Clear all data reaches the phone: wellness, workouts and fasts too', async (t) => {
   if (skip(t)) return;
   const cookie = await account('carol', A);
