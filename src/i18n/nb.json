@@ -4,7 +4,7 @@
     "wellness": "Velvære",
     "statistics": "Statistikk",
     "goals": "Mål",
-    "settings": "Instillinger",
+    "settings": "Innstillinger",
     "foods": "Mat"
   },
   "routes": {
@@ -682,7 +682,7 @@
       "status": {
         "today": "Idag",
         "yesterday": "Igår",
-        "progress": "{done} av {total] måltider loggført",
+        "progress": "{done} av {total} måltider loggført",
         "mark_complete": "Marker dag som fullført",
         "closed_headline": "Dag fullført",
         "closed_at": "Lukket {time}",
