@@ -99,7 +99,8 @@
     "same_server_yes": "Derselbe Server",
     "same_server_no": "Anderer Server",
     "account_check_failed_title": "Deine Daten konnten nicht geöffnet werden",
-    "account_check_failed": "Dieses Gerät konnte nicht prüfen, wessen Daten hier gespeichert sind, daher wird noch nichts angezeigt. Versuche es erneut oder melde dich ab."
+    "account_check_failed": "Dieses Gerät konnte nicht prüfen, wessen Daten hier gespeichert sind, daher wird noch nichts angezeigt. Versuche es erneut oder melde dich ab.",
+    "pending_web_changes": "{count, plural, =0 {Offline. Dein Tagebuch funktioniert weiterhin und speichert hier.} one {Offline. # Änderung wartet auf die Synchronisierung.} other {Offline. # Änderungen warten auf die Synchronisierung.}}"
   },
   "settings": {
     "appearance": {
@@ -120,7 +121,13 @@
       "distance": "Distanz",
       "temperature": "Temperatur",
       "time_12h": "12-Stunden (AM/PM)",
-      "time_24h": "24-Stunden"
+      "time_24h": "24-Stunden",
+      "first_day": "Erster Tag der Woche",
+      "first_day_desc": "„Automatisch“ richtet sich nach der Region deines Geräts, die die Woche am {day} beginnt.",
+      "first_day_auto": "Automatisch",
+      "first_day_monday": "Montag",
+      "first_day_sunday": "Sonntag",
+      "first_day_saturday": "Samstag"
     },
     "diary": {
       "section": "Tagebuch",
@@ -302,7 +309,33 @@
       "save_failed_status": "Speichern fehlgeschlagen ({status})",
       "network_error": "Netzwerkfehler",
       "hide": "Ausblenden",
-      "show": "Anzeigen"
+      "show": "Anzeigen",
+      "role_coach": "Coach",
+      "role_coach_display": "Coach",
+      "coach_title": "{name} zur Coach-Rolle ernennen?",
+      "coach_message": "Diese Person kann andere anfragen, ihre Klienten zu werden. Ein Klient muss die Anfrage zuerst annehmen, bevor der Coach Tagebuch, Ziele, Gewicht und Lebensmittel einsehen kann. Überall sonst bleibt ein Coach ein normaler Benutzer.",
+      "coach_confirm": "Zum Coach machen",
+      "uncoach_title": "Coach-Rolle von {name} entfernen?",
+      "uncoach_message": "Die Klientenbeziehungen und alle gesendeten Anfragen werden sofort beendet. Eigene Daten bleiben erhalten.",
+      "uncoach_confirm": "Coach-Rolle entfernen",
+      "toast_coaching_ended": "{name} ist jetzt {role}. Die Coaching-Beziehungen wurden beendet.",
+      "invite_coach": "Coach",
+      "invite_coach_none": "Kein Coach",
+      "invite_coach_hint": "Das neue Konto erhält eine Anfrage dieses Coaches, die angenommen oder abgelehnt werden kann.",
+      "invite_coach_meta": "Coach: {name}",
+      "coaching_heading": "Coaching",
+      "coaching_desc": "Wer wen coacht. Admins können hier jede Verknüpfung beenden, sehen Klientendaten jedoch nur, wenn sie selbst dieser Coach sind.",
+      "coaching_none": "Niemand coacht oder wird gecoacht.",
+      "coaching_pair": "{coach} coacht {client}",
+      "coaching_pending": "Anfrage ausstehend",
+      "coaching_active_since": "Seit {date}",
+      "coaching_end": "Beenden",
+      "coaching_end_aria": "Coaching zwischen {coach} und {client} beenden",
+      "coaching_end_title": "Dieses Coaching beenden?",
+      "coaching_end_message": "{coach} kann Tagebuch, Ziele, Gewicht, Lebensmittel, Mahlzeiten und Rezepte von {client} nicht mehr einsehen.",
+      "coaching_ended": "Coaching beendet",
+      "coach_someone": "Jemanden coachen",
+      "coach_someone_desc": "Sende eine Anfrage in deinem Namen. Dein Klienten-Reiter erscheint unter „Ziele“, sobald du jemanden coachst."
     },
     "email": {
       "section": "E-Mail (SMTP)"
@@ -500,7 +533,9 @@
       "credentials_required": "Gib deine Zugangsdaten ein",
       "browser_open_failed": "Browser zur Anmeldung konnte nicht geöffnet werden",
       "connected": "Mit Server verbunden",
-      "login_failed": "Anmeldung fehlgeschlagen"
+      "login_failed": "Anmeldung fehlgeschlagen",
+      "server_needs_setup": "Dieser Server ist noch nicht eingerichtet. Öffne ihn im Browser, um das erste Konto zu erstellen, und verbinde dich anschließend hier.",
+      "unreachable": "Server konnte nicht erreicht werden"
     }
   },
   "profile": {
@@ -538,7 +573,9 @@
       "save_failed": "Profil konnte nicht gespeichert werden",
       "upload_failed": "Hochladen fehlgeschlagen",
       "password_change_failed": "Passwort konnte nicht geändert werden",
-      "delete_account_failed": "Konto konnte nicht gelöscht werden"
+      "delete_account_failed": "Konto konnte nicht gelöscht werden",
+      "not_kept": "Dieser Browser konnte dein Profil nicht zwischenspeichern. Prüfe, ob genügend freier Speicher vorhanden ist und die Website Daten speichern darf, und versuche es erneut.",
+      "needs_connection": "Das Speichern deines Profils erfordert eine Verbindung. Versuche es erneut, sobald du wieder online bist."
     }
   },
   "wizard": {
@@ -897,7 +934,13 @@
     "food_card": {
       "log_to": "Eintragen in",
       "dont_log": "Nicht eintragen"
-    }
+    },
+    "tools_unsupported": "Dieses Modell unterstützt keine Funktionsaufrufe (Tools): Es kann antworten, aber keine Lebensmittel eintragen oder Daten abfragen. Wähle in den Einstellungen ein Modell mit Tool-Unterstützung.",
+    "tools_unsupported_server": "Dieses Modell unterstützt keine Funktionsaufrufe (Tools): Es kann antworten, aber keine Lebensmittel eintragen oder Daten abfragen. Ein Administrator kann ein Modell mit Tool-Unterstützung festlegen.",
+    "tools_unsupported_routed": "Das antwortende Modell unterstützt keine Funktionsaufrufe (Tools), daher wurde nichts protokolliert oder nachgeschlagen.",
+    "unreachable": "Keine Antwort von {host} erhalten. Überprüfe die Basis-URL in Einstellungen → KI-Assistent. Falls sie stimmt, muss dieser Server Anfragen von {origin} bei jeder Antwort erlauben, auch bei Fehlern (in Nginx: add_header … always), oder Trace kann stattdessen direkt auf dem NutriTrace-Server eingerichtet werden.",
+    "unreachable_insecure": "Diese Seite nutzt HTTPS, daher verweigert der Browser den Aufruf von {host} über unverschlüsseltes HTTP. Gib deinem Anbieter eine https://-Adresse oder richte Trace stattdessen auf dem NutriTrace-Server ein.",
+    "unreachable_official": "{host} hat nicht geantwortet. Überprüfe die Internetverbindung dieses Geräts."
   },
   "goals_page": {
     "adaptive": {
@@ -1954,7 +1997,9 @@
     "toast": {
       "connected": "Trace KI verbunden, Assistent ist bereit",
       "test_failed": "Test fehlgeschlagen",
-      "empty_response": "Keine Antwort von der KI erhalten"
+      "empty_response": "Keine Antwort von der KI erhalten",
+      "fill_fields": "Trage zuerst den API-Schlüssel ein",
+      "fill_fields_custom": "Trage zuerst die Basis-URL und das Modell ein"
     },
     "provider_env_locked": "Über Umgebungsvariablen gesperrt",
     "env_lock_banner": "Über Umgebungsvariablen konfiguriert, Änderungen sind deaktiviert.",
@@ -1995,7 +2040,13 @@
       "activity_estimate": "Aktivitäts-Kalorien schätzen",
       "activity_estimate_desc": "Wenn du ein Training über Trace ohne Kalorienanzahl erfasst („Ich bin 10 km gewandert“), schätzt Trace den Verbrauch anhand deines Körperprofils. Für die Schätzung müssen Gewicht, Größe, Alter und Geschlecht hinterlegt sein; fehlen Angaben, fragt Trace stattdessen nach der Kalorienanzahl.",
       "goal_insights": "Ziel-Erkenntnisse",
-      "goal_insights_desc": "Der Assistent analysiert deine Ernährungstrends und schlägt proaktiv Zielanpassungen vor, wenn sich feste Muster zeigen"
+      "goal_insights_desc": "Der Assistent analysiert deine Ernährungstrends und schlägt proaktiv Zielanpassungen vor, wenn sich feste Muster zeigen",
+      "base_url_desc": "Beliebiger OpenAI-kompatibler /v1/chat/completions-Endpunkt: Ollama, LM Studio, LocalAI, vLLM, llama.cpp-Server, DeepSeek, Groq, Together AI, Mistral La Plateforme usw. Mit oder ohne /v1.",
+      "test_connection": "Verbindung testen",
+      "test_connection_desc": "Prüft, ob Trace deinen KI-Anbieter erreichen kann.",
+      "test_connection_desc_locked": "Prüft, ob Trace den KI-Anbieter des Servers erreichen kann.",
+      "test": "Testen",
+      "testing": "Wird getestet…"
     },
     "voice_langs": {
       "auto": "Automatisch (Gerätesprache verwenden)",
@@ -2213,7 +2264,22 @@
       "day_wed": "Mittwoch",
       "day_thu": "Donnerstag",
       "day_fri": "Freitag",
-      "day_sat": "Samstag"
+      "day_sat": "Samstag",
+      "weekly_desc_push": "Wöchentliche Zusammenfassung mit durchschnittlichen Kalorien, Protein, Schritten, Schlaf, Zielerreichung und Gewichtsveränderung, per Push-Benachrichtigung zugestellt",
+      "weekly_desc_email": "Wöchentliche Zusammenfassung mit durchschnittlichen Kalorien, Protein, Schritten, Schlaf, Zielerreichung und Gewichtsveränderung, per E-Mail zugestellt",
+      "weekly_desc_none": "Wöchentliche Zusammenfassung mit durchschnittlichen Kalorien, Protein, Schritten, Schlaf, Zielerreichung und Gewichtsveränderung. Zustellung erfolgt per Push oder E-Mail: Wähle unten einen Push-Dienst aus"
+    },
+    "coaching": {
+      "heading": "Coaching",
+      "sub": "Wird über deinen unten ausgewählten Push-Dienst gesendet.",
+      "message": "Neue Nachricht",
+      "message_desc": "Wenn dein Coach oder ein Klient dir eine Nachricht sendet. Zeigt an, wer geschrieben hat, nicht den Inhalt.",
+      "email": "Zusätzlich per E-Mail benachrichtigen",
+      "email_desc": "Maximal eine E-Mail pro Unterhaltung alle 30 Minuten mit dem Absender. Erfordert eine hinterlegte E-Mail-Adresse und einen eingerichteten E-Mail-Server.",
+      "recommendation": "Neue Empfehlung",
+      "recommendation_desc": "Wenn ein Coach dich als Klienten anfragt oder dein Coach Ziele, einen Tagesplan, eine Mahlzeit oder ein Rezept empfiehlt.",
+      "answer": "Antwort des Klienten",
+      "answer_desc": "Wenn jemand deine Anfrage annimmt, ablehnt oder das Coaching verlässt."
     }
   },
   "wellness_page": {
@@ -2331,5 +2397,36 @@
     "button": "Foto hinzufügen",
     "camera": "Kamera",
     "gallery": "Galerie"
+  },
+  "plain_http": {
+    "warning_title": "Ohne Verschlüsselung verbinden?",
+    "warning_body": "Dieser Server verwendet unverschlüsseltes HTTP, daher ist die Verbindung nicht verschlüsselt. Jede Person im selben Netzwerk kann die übertragenen Daten mitlesen und manipulieren, einschließlich deines Passworts.",
+    "warning_advice": "Verwende dies nur in deinem Heimnetzwerk oder über ein VPN.",
+    "warning_stored": "Bis du dich verbindest, wird nichts mit diesem Server synchronisiert und die App nutzt weiterhin die Daten auf diesem Telefon. Beim nächsten Öffnen wird erneut gefragt.",
+    "connect_anyway": "Trotzdem verbinden",
+    "refused_title": "HTTPS erforderlich",
+    "refused_body": "Dieser Server verwendet unverschlüsseltes HTTP und befindet sich nicht in deinem eigenen Netzwerk, daher verbindet sich die App nicht mit ihm. Unverschlüsseltes HTTP funktioniert nur mit einem Server unter einer privaten Adresse wie 192.168.1.20 oder einem lokalen Namen wie nutritrace.local. Verwende andernfalls HTTPS.",
+    "refused_stored": "Es wird nichts mit diesem Server synchronisiert und die App nutzt weiterhin die Daten auf diesem Telefon. Um zu einer HTTPS-Adresse zu wechseln, trenne die Verbindung in Einstellungen > Serververbindung und verbinde dich erneut.",
+    "refused_short": "Unverschlüsseltes HTTP funktioniert nur mit einem Server im eigenen Netzwerk. Verwende eine https://-Adresse für diesen Server.",
+    "https_guide": "Anleitung zur HTTPS-Einrichtung",
+    "unreachable": "{url} konnte nicht erreicht werden. Prüfe die Adresse und stelle sicher, dass sich dieses Telefon im selben Netzwerk oder VPN wie der Server befindet.",
+    "not_encrypted": "Nicht verschlüsselt",
+    "invalid_address": "Gib eine Adresse ein, die mit http:// oder https:// beginnt, wie z. B. https://nutritrace.beispiel.de.",
+    "blocked": "Unverschlüsseltes HTTP zu {origin} ist nicht zulässig. Verwende eine https://-Adresse oder einen Server in deinem eigenen Netzwerk."
+  },
+  "share_item": {
+    "button": "Teilen",
+    "title": "Teilen",
+    "intro": "Wer diesen Eintrag sehen kann. Unter „Massenfreigabe“ in den Einstellungen kannst du dies für eine ganze Kategorie festlegen.",
+    "who": "Sichtbar für",
+    "save": "Speichern",
+    "saved": "Freigabe aktualisiert",
+    "failed": "Freigabe konnte nicht aktualisiert werden. Bitte versuche es erneut.",
+    "loading": "Wird geladen…",
+    "needs_connection": "Das Teilen erfordert eine Verbindung zum Server. Versuche es erneut, sobald du wieder online bist.",
+    "not_synced": "Dieser Eintrag wurde noch nicht an deinen Server übertragen oder enthält ungespeicherte Änderungen. Versuche es nach der Synchronisierung erneut.",
+    "off": "Das Teilen ist auf diesem Server deaktiviert.",
+    "people": "Mitglieder mit Zugriff",
+    "no_people": "Noch keine weiteren Mitglieder auf diesem Server vorhanden."
   }
 }
