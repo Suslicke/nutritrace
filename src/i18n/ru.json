@@ -1629,7 +1629,7 @@
       "auth_start_failed": "Не удалось начать авторизацию через Garmin",
       "creds_saved": "Данные Garmin сохранены",
       "synced_count": "Синхронизировано показателей Garmin: {count} за {date}",
-      "sync_failed": "Ошибка синхронизации Garmin: {error} "
+      "sync_failed": "Ошибка синхронизации Garmin: "
     },
     "withings": {
       "enable": "Включить Withings",
@@ -1644,7 +1644,7 @@
       "auth_start_failed": "Не удалось начать авторизацию через Withings",
       "creds_saved": "Учётные данные Withings сохранены",
       "synced_count": "Синхронизировано показателей Withings: {count} за {date}",
-      "sync_failed": "Ошибка синхронизации Withings: {error} ",
+      "sync_failed": "Ошибка синхронизации Withings: ",
       "title": "Withings"
     },
     "hc": {
@@ -1666,7 +1666,7 @@
       "bg_sync_label": "Фоновая синхронизация",
       "bg_sync_desc": "Синхронизация запускается каждый час в фоновом режиме, даже когда NutriTrace закрыт. Поэтому при открытии NutriTrace на другом устройстве данные с носимого устройства за сегодня уже будут на сервере. Если синхронизация перестала работать, откройте Настройки Android → Приложения → NutriTrace → Батарея и выберите «Без ограничений». На некоторых устройствах (Samsung, Xiaomi, OnePlus) также добавьте NutriTrace в список приложений, которым разрешена работа в фоновом режиме или автозапуск.",
       "synced_count": "Синхронизировано показателей Health Connect: {count} за {date}",
-      "sync_failed": "Ошибка синхронизации Health Connect: {error} ",
+      "sync_failed": "Ошибка синхронизации Health Connect: ",
       "title": "Health Connect"
     },
     "lifttrace": {
