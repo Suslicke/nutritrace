@@ -36,6 +36,7 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { foldText } from '../../lib/search-text.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
+  import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
   import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
 
@@ -68,6 +69,23 @@
   //   _commitFoodCatalogOnly  — create food row, no diary write
   //   _commitFoodAndLog       — create food row AND log it to diary
   let _pendingFoodProposal = null; // { name, brand, portion, unit, nutrition, notes }
+  // The last card the user answered ({ key, name, action: added | saved |
+  // discarded }). The model is told about it, and it doesn't come back by
+  // itself until another card is shown (trace-cards.js).
+  let _answeredCard = null;
+  // The card still waiting on the user, if any.
+  function _pendingCardKey() {
+    if (_pendingProposal && !_proposalCommitted) return cardKey('quick', _pendingProposal);
+    if (_pendingFoodProposal && !_foodProposalCommitted) return cardKey('food', _pendingFoodProposal);
+    return '';
+  }
+  // A new card replaces the one waiting; its result says which, so the model
+  // doesn't tell the user to tap a card that is gone.
+  function _replacedCard() {
+    const p = (_pendingProposal && !_proposalCommitted) ? _pendingProposal
+      : (_pendingFoodProposal && !_foodProposalCommitted) ? _pendingFoodProposal : null;
+    return p ? { replaced: p.name } : {};
+  }
   // A draft Trace prepared for a coach (draft_targets / draft_day_plan):
   // only shown here; the coach opens it in the app, reviews it and sends it.
   let _coachDraftCard = null;
@@ -743,7 +761,7 @@
           // Tier 3: nothing matched. Tell the user how to add it.
           return {
             no_match: true,
-            suggestion: `No local food and no Open Food Facts match for "${foodQuery}". The user should add it via the Foods tab — either scan a barcode or tap "+" to enter it manually — then ask again.`,
+            suggestion: `No local food and no Open Food Facts match for "${foodQuery}". Tell the user, and offer to estimate it on a review card (propose_food) or to add it via the Foods tab (scan a barcode or tap "+" to enter it manually).`,
           };
         }
         case 'log_quick_calories': {
@@ -814,13 +832,20 @@
             serving_size:  servingSize,
             nutrition: clean,
           };
+          // The same card again (the one on screen, or the one the user just
+          // added or discarded) is left alone; anything else replaces the
+          // pending card.
+          const repeat = repeatedCard(cardKey('quick', payload), { pendingKey: _pendingCardKey(), answered: _answeredCard });
+          if (repeat) return repeatedCardResult(repeat);
+          const replaced = _replacedCard();
+          _answeredCard = null;
           _pendingProposal = payload;
           _proposalCommitted = false;
           _proposalCommittedKcal = 0;
           // Clear any in-flight food proposal — two cards stacked in one
           // turn would be confusing.
           _pendingFoodProposal = null;
-          return { ok: true, kind: 'quick_calories_proposal', ...payload };
+          return { ok: true, kind: 'quick_calories_proposal', ...payload, ...replaced };
         }
         case 'propose_food': {
           // Does NOT create a food, does NOT log to diary. Surfaces a
@@ -846,12 +871,16 @@
             if (Number.isFinite(n) && n >= 0) clean[k] = Math.round(n * 10) / 10;
           }
           const payload = { name, brand, portion, unit, nutrition: clean, notes };
+          const repeat = repeatedCard(cardKey('food', payload), { pendingKey: _pendingCardKey(), answered: _answeredCard });
+          if (repeat) return repeatedCardResult(repeat);
+          const replaced = _replacedCard();
+          _answeredCard = null;
           _pendingFoodProposal = payload;
           _foodProposalCommitted = false;
           _foodProposalCommittedKind = '';
           _foodProposalCommittedMealIdx = null;
           _pendingProposal = null;
-          return { ok: true, kind: 'food_proposal', ...payload };
+          return { ok: true, kind: 'food_proposal', ...payload, ...replaced };
         }
         default: {
           // Coaching: a client's summary and catalog, drafts for a coach,
@@ -1658,6 +1687,11 @@
 
   function buildSystemPrompt(ctx) {
     const name = $aiAssistantName;
+    const cardLine = cardContext(_pendingProposal && !_proposalCommitted
+      ? { pending: _pendingProposal, pendingKind: 'quick' }
+      : _pendingFoodProposal && !_foodProposalCommitted
+        ? { pending: _pendingFoodProposal, pendingKind: 'food' }
+        : { answered: _answeredCard });
     return `You are ${name}, a friendly and knowledgeable AI nutrition and fitness coach built into NutriTrace.
 
 You have FULL ACCESS to the user's complete health data through tools. ALWAYS use tools to look up data — NEVER guess or make up numbers. Available data:
@@ -1691,17 +1725,18 @@ LOGGING A REAL FOOD — When the user wants to add a NAMED food to their diary (
 - For "1 apple", "a banana" — just pass food + meal; portion defaults to the food's stored serving size.
 - For "200g of X" — pass portion=200, unit="g". For "two apples" — pass quantity=2 (and leave portion/unit as defaults).
 - If the tool returns \`candidates\`, present the names back to the user and ask which one; then call log_food again with the chosen name as the \`food\` field.
-- If the tool returns \`no_match\`, tell the user to add it via the Foods tab (barcode scan or manual entry) and then try again.
+- If the tool returns \`no_match\`, nothing was found. Say so in one sentence and offer to estimate it on a review card, or to add it via the Foods tab (barcode scan or manual entry). If they want your estimate, call propose_food.
 - If the tool returns \`no_nutrition\`, Open Food Facts has the product but no "as sold" values, so nothing was logged. Relay its message. Do not use log_quick_calories or any other tool to force the food in.
-- DO NOT use log_quick_calories when the user names a food. Quick Calories is ONLY for kcal-number asks.
+- DO NOT use log_quick_calories when the user names a food. log_quick_calories is ONLY for kcal-number asks.
 - When the tool returns ok:true, confirm using the \`meal_name\` and \`food_name\` from the tool result — do not assume the meal name from the index you passed. This is how you avoid telling the user "I added X to snacks" when it actually went to a different meal.
-- MANUAL ESTIMATE PATH: if the user EXPLICITLY asks you to estimate ("don't search, just estimate it", "skip the database, estimate it yourself", "you estimate it and log it"), skip log_food and use propose_food instead. Pass a full nutrition estimate you're confident about. The user gets a review card and picks the meal and Save & Add to Diary. This is the ONLY sanctioned bypass — do not use it when the user hasn't explicitly opted out of the search.
+- MANUAL ESTIMATE PATH: if the user EXPLICITLY asks you to estimate ("don't search, just estimate it", "skip the database, estimate it yourself", "you estimate it and log it"), skip log_food and use propose_food instead. Pass a full nutrition estimate you're confident about. The user gets a review card and picks the meal and Save & Add to Diary, and the full nutrition is kept. Use propose_quick_calories only when they ask for quick calories. This is the ONLY sanctioned bypass — do not use it when the user hasn't explicitly opted out of the search.
 
 LOGGING QUICK CALORIES — When the user gives a kcal number WITH NO FOOD NAME ("log 200 calories for lunch", "punch in 1200 kJ for dinner", "add 350 quick calories"), use log_quick_calories. This is the Fitbit-style quick-add path; no food row is created. Rules:
 - If the user gave kJ, convert to kcal yourself: kcal = kj / 4.184. Pass the kcal number.
 - Pass the meal index per YOUR MEALS above.
 - Optional name field: if the user said "for office snack" or similar, pass that as name (max 60 chars).
 - If the user named a food ("apple", "banana", "chicken breast"), use log_food NOT log_quick_calories.
+- The kcal (and any macros) must be numbers the user gave you. Never pass a number you estimated or looked up: an estimate goes on a review card (REVIEW CARDS below), so the user confirms it.
 - Tool refuses kcal=0 and refuses if the user has disabled Quick Calories in Settings — relay any error message verbatim.
 
 CREATING A FOOD WITHOUT LOGGING IT (no photo): when the user asks you to add a food to their FOODS LIBRARY rather than to their diary ("create a food called X", "add X to my foods", "save X as a food but don't log it", "make a food entry for my protein shake"), call propose_food. Rules:
@@ -1710,15 +1745,25 @@ CREATING A FOOD WITHOUT LOGGING IT (no photo): when the user asks you to add a f
 - Pass the user's own numbers when they give them. If they describe the food instead, estimate it under the honesty rules below and say the numbers are an estimate they can correct on the card.
 - Ask for the serving size when the user has not said one and you cannot infer it. A food row saved against the wrong portion basis is worse than one more question.
 
-PHOTO MEAL HANDLING — When the user attaches a MEAL PHOTO, never write to the diary directly. The user's intent decides which of these four paths you take:
+REVIEW CARDS (text or photo): numbers you estimate reach the diary only through a review card the user confirms, never through log_quick_calories or another write tool. Show a card when:
+- the user attaches a meal photo and wants it logged or saved;
+- the user asks you to estimate a food, or to skip the search (MANUAL ESTIMATE PATH above);
+- log_food found nothing and the user wants your estimate.
+A named food the user just wants logged, without asking you to estimate, goes to log_food first. A kcal number the user gave you goes to log_quick_calories.
 
-1. INFO ONLY ("what is this?", "how many calories in this?", "is this healthy?", "tell me about this"): do NOT call any propose_* or log_* tool. Just describe what you see and give a brief nutrition estimate in plain text. The user is asking a question, not logging anything.
+Which card depends on what the user wants:
 
-2. QUICK CALORIES PROPOSAL ("log this", "add this as quick calories", "throw this in for lunch", "just kcal it"): call propose_quick_calories. This surfaces an editable card. The food does NOT get saved as a reusable food row, just a kcal+macros diary entry for that day.
+1. INFO ONLY ("what is this?", "how many calories in this?", "how much protein is in a bagel?", "is this healthy?"): do NOT call any propose_* or log_* tool. Answer in plain text with a brief estimate. The user is asking a question, not logging anything; if they then want it logged, show the card.
 
-3. FOOD CATALOG PROPOSAL ("save this as a food", "add to my foods", "remember this for later", "create a food entry"): call propose_food. The card has a "Save to Foods" button. No diary write unless the user picks "Save & Add to Diary" on the same card.
+2. QUICK CALORIES (with a photo: "log this", "throw this in for lunch"; with or without one: "add this as quick calories", "just kcal it"): call propose_quick_calories. The card has the meal and Add to Diary. No food row is saved, and only kcal, protein, carbs and fat are kept.
 
-4. FOOD + DIARY ("add this as a food entry to lunch", "save this and log it", "log this as a real food, not quick calories"): also call propose_food. The user picks the meal on the card and taps "Save & Add to Diary".
+3. SAVE AS A FOOD ("save this as a food", "add to my foods", "remember this for later", "create a food entry"): call propose_food. The card has a "Save to Foods" button. No diary write unless the user picks "Save & Add to Diary" on the same card.
+
+4. FOOD + DIARY ("add this as a food entry to lunch", "save this and log it", "log this as a real food, not quick calories"), and any estimate in text the user wants logged without asking for quick calories (MANUAL ESTIMATE PATH, or log_food found nothing): call propose_food. The user picks the meal on the card and taps "Save & Add to Diary"; the full nutrition is kept.
+
+If propose_quick_calories says Quick Calories is turned off, use propose_food instead.
+
+One card shows at a time: a new card replaces the one on screen (the tool result names the card it replaced). When the user wants several foods logged in one message, put them on one card with a combined name and totals. A card stays on screen until the user answers it (REVIEW CARD at the end, when there is one). Do not propose the same card again; changed numbers, serving or date get a new card.
 
 CRITICAL RULES for propose_quick_calories and propose_food:
 - These tools DO NOT WRITE anything. They only surface a review card.
@@ -1728,7 +1773,7 @@ CRITICAL RULES for propose_quick_calories and propose_food:
 NUTRITION HONESTY RULES (applies to BOTH propose tools):
 - The nutrition numbers you pass MUST be internally consistent with the serving you claim. If you say "350 kcal per 250 g of Chicken Pot Pie", those 350 kcal must actually correspond to ~250 g of that specific food based on real nutrition data — NOT a plausible-sounding number you invented to fill the schema.
 - If you genuinely don't have a reliable basis (the food is unrecognizable, lighting is bad, the portion is impossible to gauge), DO NOT GUESS. Say so explicitly: "I can't reliably estimate this from the photo — what is it, and roughly how much (in grams or a familiar measure)?" The user prefers an honest "I don't know" over a fabricated 400 kcal that's actually 700.
-- Always estimate serving_grams (for quick) or portion+unit (for food) from the photo whenever possible. "Per serving" is meaningless without a weight; without it the user has nothing to sanity-check against.
+- Always estimate serving_grams (for quick) or portion+unit (for food) from the photo or the description whenever possible. "Per serving" is meaningless without a weight; without it the user has nothing to sanity-check against.
 
 NUTRITION COVERAGE — populate the full profile:
 - The nutrition object is keyed by NutriTrace nutriment IDs. The complete list of supported keys is: ${NUTRIMENT_ID_LIST}.
@@ -1772,7 +1817,8 @@ Water: ${ctx.waterText}
 Diary logging streak: ${ctx.streakText || '(unknown)'}`
          + (ctx.statsText    ? `\nBody stats: ${ctx.statsText}` : '')
          + (ctx.wellnessText ? `\nWellness: ${ctx.wellnessText}` : '')
-         + `\n\nFor any "what's my streak / how long have I been logging / when did I start logging" question, the answer is in the "Diary logging streak" line above — quote it directly, do not call any tool, do not estimate or guess.`;
+         + `\n\nFor any "what's my streak / how long have I been logging / when did I start logging" question, the answer is in the "Diary logging streak" line above — quote it directly, do not call any tool, do not estimate or guess.`
+         + (cardLine ? `\n\nREVIEW CARD: ${cardLine}` : '');
   }
 
   function fmtTime() {
@@ -1810,9 +1856,9 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     // a new message. The "Logged X kcal to Lunch" / "Saved to Foods"
     // indicators were sticking around past the turn that committed them,
     // so subsequent messages still rendered them under the card slot
-    // and read as "the card keeps coming back" to the user. Leaving the
-    // pending-but-uncommitted state alone so a user who's mid-review
-    // can't lose their unconfirmed card by sending an aside.
+    // and read as "the card keeps coming back" to the user. A card still
+    // waiting stays, so an aside doesn't lose it; only a new card the
+    // model proposes replaces it.
     if (_proposalCommitted)     { _pendingProposal = null;     _proposalCommitted = false; _proposalCommittedKcal = 0; }
     if (_foodProposalCommitted) { _pendingFoodProposal = null; _foodProposalCommitted = false; _foodProposalCommittedKind = ''; }
     await tick();
@@ -1842,32 +1888,14 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
         apiMessages[lastIdx] = _buildImageMessage(imgProvider, content || 'What is this?', image);
       }
       const onToolCall = (toolName) => { _toolStatus = `Fetching ${toolName.replace(/_/g, ' ')}…`; };
-      // Photo turn: REMOVE the silent-write tool (log_quick_calories) so
-      // the photo path is forced through propose_quick_calories /
-      // propose_food, which both surface a review card. Mini-class
-      // models (gpt-4o-mini and friends) cannot be trusted to honor
-      // "use propose_X instead of log_X" prose in the system prompt
-      // when the user's verb matches a write tool's purpose.
-      //
-      // Text-only turn: propose_quick_calories is the photo estimate
-      // path, and log_quick_calories covers "log 200 kcal" in text, so
-      // it stays out. propose_food must stay IN. Stripping it left no
-      // tool that can create a food without writing to the diary, so
-      // "save this as a food, don't log it" fell through to log_food and
-      // the user got a diary entry they had explicitly refused.
-      //
-      // It comes out only while an uncommitted card is still on screen.
-      // That is the case the blanket strip was for: a mini model that saw
-      // a propose_* call in chat history re-called it on the next text
-      // question, and the card appeared to keep coming back. Stripping the
-      // tool from the schema is bulletproof, because the model physically
-      // cannot call a tool that isn't there this round, but it has to be
-      // aimed at that case alone.
-      const _cardAwaitingUser = !!_pendingProposal || !!_pendingFoodProposal;
-      const toolsForRound = [...(image
-        ? TOOLS.filter(t => t.name !== 'log_quick_calories')
-        : TOOLS.filter(t => t.name !== 'propose_quick_calories'
-                         && !(t.name === 'propose_food' && _cardAwaitingUser))), ...coachingTools(_coaching)];
+      // Both review-card tools are offered on every turn, text or photo:
+      // they never write, the user taps Add to Diary or Save to Foods. A
+      // photo turn also leaves out log_quick_calories, so an estimate from
+      // a photo reaches the diary only through a card. A card the model
+      // proposes again while it is still on screen (or after the user
+      // discarded it) is caught in the propose handlers, not by taking the
+      // tools away: that blocked every new card until the user tapped one.
+      const toolsForRound = [...traceToolsForTurn(TOOLS, { image: !!image }), ...coachingTools(_coaching)];
       // The model can't use tools and answered without them: a note in the
       // conversation says so, once (#259). routed: the gateway picked a
       // model for this request that can't, another pick may well.
@@ -1959,6 +1987,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     _foodProposalCommitted = false;
     _foodProposalCommittedKind = '';
     _foodProposalCommittedMealIdx = null;
+    _answeredCard = null;
     _coachDraftCard = null;
   }
 
@@ -1967,6 +1996,9 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
   /** User reviewed the AI's photo-log estimate and tapped Discard. Clears
    *  the card from the chat without writing to the diary. */
   function _discardProposal() {
+    if (_pendingProposal && !_proposalCommitted) {
+      _answeredCard = { key: cardKey('quick', _pendingProposal), name: _pendingProposal.name, action: 'discarded' };
+    }
     _pendingProposal = null;
     _proposalCommitted = false;
     _proposalCommittedKcal = 0;
@@ -2001,8 +2033,12 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
         carbohydrates: optMacro(p.nutrition?.carbohydrates),
         fat:           optMacro(p.nutrition?.fat),
       });
-      _proposalCommittedKcal = kcal;
-      _proposalCommitted = true;
+      _answeredCard = { key: cardKey('quick', p), name: p.name, action: 'added' };
+      // A card that arrived while this saved is not the one that was logged.
+      if (_pendingProposal === p) {
+        _proposalCommittedKcal = kcal;
+        _proposalCommitted = true;
+      }
     } catch (e) {
       showError($_('common.errors.save_failed') + ': ' + (e?.message || String(e)));
     }
@@ -2016,6 +2052,9 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
   //                              meal the user picked on the card
 
   function _discardFoodProposal() {
+    if (_pendingFoodProposal && !_foodProposalCommitted) {
+      _answeredCard = { key: cardKey('food', _pendingFoodProposal), name: _pendingFoodProposal.name, action: 'discarded' };
+    }
     _pendingFoodProposal = null;
     _foodProposalCommitted = false;
     _foodProposalCommittedKind = '';
@@ -2024,10 +2063,14 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
   /** Save the proposed food to /api/foods only. No diary write. */
   async function _commitFoodCatalogOnly() {
     if (!_pendingFoodProposal) return;
+    const p = _pendingFoodProposal;
     try {
-      await _saveProposedFood();
-      _foodProposalCommittedKind = 'catalog';
-      _foodProposalCommitted = true;
+      await _saveProposedFood(p);
+      _answeredCard = { key: cardKey('food', p), name: p.name, action: 'saved' };
+      if (_pendingFoodProposal === p) {
+        _foodProposalCommittedKind = 'catalog';
+        _foodProposalCommitted = true;
+      }
     } catch (e) {
       showError($_('common.errors.save_failed') + ': ' + (e?.message || String(e)));
     }
@@ -2040,9 +2083,10 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     // No meal chosen means Don't Log; the button is disabled then, and this
     // guard keeps a stray call from logging to a meal nobody picked.
     if (!_pendingFoodProposal || _foodProposalCommittedMealIdx == null) return;
+    const p = _pendingFoodProposal;
+    const mealIdx = _foodProposalCommittedMealIdx;
     try {
-      const food = await _saveProposedFood();
-      const p    = _pendingFoodProposal;
+      const food = await _saveProposedFood(p);
       const { addDiaryItem } = await import('../../stores/diary.js');
       // Log one full portion (the nutrition values are per-portion as
       // saved on the food row, so portion=1 here means "one serving").
@@ -2050,9 +2094,12 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
         ...food,
         portion: p.portion,
         unit:    p.unit,
-      }, _foodProposalCommittedMealIdx, localDateStr());
-      _foodProposalCommittedKind = 'logged';
-      _foodProposalCommitted = true;
+      }, mealIdx, localDateStr());
+      _answeredCard = { key: cardKey('food', p), name: p.name, action: 'added' };
+      if (_pendingFoodProposal === p) {
+        _foodProposalCommittedKind = 'logged';
+        _foodProposalCommitted = true;
+      }
     } catch (e) {
       showError($_('common.errors.save_failed') + ': ' + (e?.message || String(e)));
     }
@@ -2062,8 +2109,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
    *  server's response so the caller can chain a diary write off it.
    *  notes goes into the food's notes column; gets surfaced in the
    *  diary when "Show item notes" is enabled. */
-  async function _saveProposedFood() {
-    const p = _pendingFoodProposal;
+  async function _saveProposedFood(p) {
     return NtApi.createFood({
       name:      p.name,
       brand:     p.brand || null,
