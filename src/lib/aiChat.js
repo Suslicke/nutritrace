@@ -13,6 +13,19 @@ import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 import { getOpenAIChatParams, openAIBase } from './openai-chat-params.js';
 import { createToolSupportMemory, sendWithToolFallback } from './tool-support.js';
+import { REPLY_MAX_TOKENS, sendWithLengthFallback, stoppedShort, stoppedShortError } from './trace-reply.js';
+
+// A reply that stopped short, said in the app's language (trace-reply.js).
+function _inLanguage(e) {
+  if (!/^trace_stopped_/.test(e?.code || '')) return e;
+  try {
+    const t = get(_);
+    const said = typeof t === 'function' ? t(`trace_reply.${e.code.slice('trace_'.length)}`) : null;
+    if (said && !said.startsWith('trace_reply.')) e.message = said;
+  } catch { /* i18n not ready: the English line */ }
+  return e;
+}
+const _stoppedShort = (why) => _inLanguage(stoppedShortError(why));
 
 // Nutrition schema for the propose_* tools — generated from the canonical
 // NUTRIMENTS list so adding a new nutrient anywhere in the app automatically
@@ -350,7 +363,7 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 401) throw new Error('Not signed in — sign in again to use AI features.');
-      throw new Error(data.error || `AI proxy error ${res.status}`);
+      throw _inLanguage(Object.assign(new Error(data.error || `AI proxy error ${res.status}`), { code: data.code }));
     }
 
     // No tools fired — final reply, return it.
@@ -460,24 +473,30 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const body = {
       model: model || AI_DEFAULT_MODELS.claude,
-      max_tokens: 4096,
+      max_tokens: REPLY_MAX_TOKENS,
       system: systemPrompt,
       messages: currentMessages,
     };
     if (claudeTools.length) body.tools = claudeTools;
 
-    const res = await fetchProvider('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify(body),
+    // A model that can't write that many is asked again as before (trace-reply.js).
+    const res = await sendWithLengthFallback(body, async (b) => {
+      const r = await fetchProvider('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify(b),
+      });
+      return { ok: r.ok, status: r.status, data: await r.json() };
     });
-    const data = await res.json();
+    const data = res.data;
     if (!res.ok) throw new Error(data.error?.message || `Claude API error ${res.status}`);
+    const short = stoppedShort('claude', data);
+    if (short) throw _stoppedShort(short);
 
     // Check if response contains tool use
     const toolUses = (data.content || []).filter(b => b.type === 'tool_use');
@@ -528,6 +547,7 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
         baseUrl,
         model: selectedModel,
         hasTools: openaiTools.length > 0,
+        maxTokens: REPLY_MAX_TOKENS,
       }),
     };
     if (openaiTools.length) body.tools = openaiTools;
@@ -538,18 +558,22 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     if (apiKey && apiKey !== 'no-key') headers['Authorization'] = `Bearer ${apiKey}`;
 
-    const send = async (b) => {
+    // A server that won't take the longer reply is asked again as before.
+    const send = (body) => sendWithLengthFallback(body, async (b) => {
       const res = await fetchProvider(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers,
         body: JSON.stringify(b),
       });
       return { ok: res.ok, status: res.status, data: await res.json() };
-    };
+    });
     // A model that can't use tools gets the request again without them.
     const { ok, status, data, toolsDropped, toolsRouted } = await sendWithToolFallback(body, send, { memory: toolSupport, baseUrl, model: selectedModel });
     if (!ok) throw new Error(data.error?.message || `AI API error ${status}`);
     if (toolsDropped) onToolsUnsupported?.({ routed: toolsRouted });
+    // Cut off, an answer would be half of one and a tool call half its arguments.
+    const short = stoppedShort('openai', data);
+    if (short) throw _stoppedShort(short);
 
     const choice = data.choices[0];
     const msg = choice.message;
@@ -630,6 +654,8 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || `Gemini API error ${res.status}`);
+    const short = stoppedShort('gemini', data);
+    if (short) throw _stoppedShort(short);
 
     const candidate = data.candidates?.[0];
     const parts = candidate?.content?.parts || [];

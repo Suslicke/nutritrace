@@ -1,4 +1,8 @@
 {
+  "trace_reply": {
+    "stopped_length": "The reply was cut off before the end, so it wasn't used. Try again, or ask for less at once.",
+    "stopped_thinking": "The model gave its reasoning but no answer. Try again, or turn its reasoning down."
+  },
   "nav": {
     "diary": "Diary",
     "foods": "Foods",
