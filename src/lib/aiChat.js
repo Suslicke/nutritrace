@@ -6,7 +6,9 @@
  * Tool use flow:
  * 1. Send messages + tool definitions to AI
  * 2. If AI responds with tool_use, execute the tool and send result back
- * 3. Repeat until AI responds with text (max 5 tool rounds)
+ * 3. Repeat until AI responds with text, up to TOOL_ROUNDS; when they run
+ *    out, one last request with the tools off asks for an answer from what
+ *    was found
  */
 import { NUTRIMENTS } from './nutrition.js';
 import { get } from 'svelte/store';
@@ -26,6 +28,16 @@ function _inLanguage(e) {
   return e;
 }
 const _stoppedShort = (why) => _inLanguage(stoppedShortError(why));
+
+// The last round's answer, or, when a model gave none at all, why there's none.
+function _finalAnswer(text) {
+  if (String(text || '').trim()) return text;
+  try {
+    const said = get(_)('trace_reply.out_of_rounds');
+    if (said && !said.startsWith('trace_reply.')) return said;
+  } catch { /* i18n not ready: the English line */ }
+  return 'That took more steps than one answer allows, and nothing came back. Ask for less at once, such as a shorter date range.';
+}
 
 // Nutrition schema for the propose_* tools — generated from the canonical
 // NUTRIMENTS list so adding a new nutrient anywhere in the app automatically
@@ -91,22 +103,24 @@ export const TOOLS = [
   },
   {
     name: 'get_diary',
-    description: 'Get the food diary for ONE specific date only. Returns meals + food items (portions, quantities, brand, per-item notes), nutrition breakdown (calories, protein, carbs, fat), body stats (with explicit `weight_unit` / `length_unit` so you don\'t guess), water intake (ml), any free-text "day notes" the user wrote (sleep, energy, cravings, context), and any manually-logged activities for that day (name, kcal burned, duration, distance, source). DO NOT use this tool for streak questions, "how many days have I been logging", "when did I start tracking", consecutive-day counts, or any multi-day aggregate — for those use get_logging_streak (streak) or get_diary_averages (averages over a window). This tool is for a single calendar date only.',
+    description: 'Get the food diary for one date, or for every day from `date` to `to` (up to 31 days a call; days with nothing logged are only counted, and next_from says where the rest starts). Use a range to go through days, such as "what did I eat last week" or "which days did I have pizza". Returns meals + food items (portions, quantities, brand, per-item notes), nutrition breakdown (calories, protein, carbs, fat), body stats (with explicit `weight_unit` / `length_unit` so you don\'t guess), water intake (ml), any free-text "day notes" the user wrote (sleep, energy, cravings, context), and any manually-logged activities for that day (name, kcal burned, duration, distance, source). DO NOT use this tool for streak questions, "how many days have I been logging", "when did I start tracking", consecutive-day counts, or any multi-day aggregate: for those use get_logging_streak (streak) or get_diary_averages (averages over a window). This tool is for reading what was logged on the days themselves.',
     parameters: {
       type: 'object',
       properties: {
-        date: { type: 'string', description: 'Date (YYYY-MM-DD)' },
+        date: { type: 'string', description: 'Date (YYYY-MM-DD), or the first day of a range.' },
+        to:   { type: 'string', description: 'Optional last day of a range (YYYY-MM-DD), inclusive.' },
       },
       required: ['date'],
     },
   },
   {
     name: 'get_meals',
-    description: 'Get the user\'s saved Meals and Recipes from their library. Returns each one with its items (portions, quantities, per-item notes), totals (calories, macros), and any meal-level notes. Useful when the user refers to a saved meal by name ("my usual breakfast") or wants ideas based on meals they\'ve logged before.',
+    description: 'Get the user\'s saved Meals and Recipes from their library. Returns each one with its items (portions, quantities, per-item notes), totals (calories, macros), and any meal-level notes. Useful when the user refers to a saved meal by name ("my usual breakfast") or wants ideas based on meals they\'ve logged before. Returns count (every match) and a page of up to 50; next_offset is where the next page starts (null on the last).',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Optional case-insensitive name filter. Omit to return all (capped at 50).' },
+        query:  { type: 'string', description: 'Optional case-insensitive name filter. Omit for the whole library.' },
+        offset: { type: 'integer', description: 'Where the page starts: 0 first, then the next_offset of the page before.' },
       },
     },
   },
@@ -331,8 +345,8 @@ export async function callAI({ provider, apiKey, model, messages, systemPrompt, 
  * Tool execution stays client-side — tools touch local DB + UI state the
  * server doesn't have. This function runs the multi-round loop: send
  * messages → if proxy returns toolCalls, execute them locally, append
- * the assistant message + tool result messages, loop. Up to 5 rounds,
- * matching the direct-call cap in _callOpenAIWithTools.
+ * the assistant message + tool result messages, loop. Up to TOOL_ROUNDS,
+ * as the direct calls, then one last request with the tools off.
  *
  * Auth: PWA uses cookies + CSRF; native server mode uses a Bearer token
  * (cookies don't persist across the Android WebView's reloads). Matches
@@ -343,9 +357,13 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
   const { apiUrl, isNative, getServerUrl, getAuthToken } = await import('./platform.js');
 
   let currentMessages = [...messages];
-  const MAX_ROUNDS = _maxRounds(tools);
+  const startBytes = _bytes(currentMessages);
+  const dropped = [];
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round <= TOOL_ROUNDS; round++) {
+    // The server takes 60 messages in one request: Trace wraps up while a
+    // round of several tool calls still fits (PROXY_WRAP_MESSAGES).
+    const last = _lastRound(round, currentMessages, startBytes) || (round > 0 && currentMessages.length > PROXY_WRAP_MESSAGES);
     const headers = { 'Content-Type': 'application/json' };
     if (isNative && getServerUrl()) {
       const token = getAuthToken();
@@ -358,7 +376,11 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
       method: 'POST',
       credentials: 'include',
       headers,
-      body: JSON.stringify({ messages: currentMessages, systemPrompt, tools }),
+      // Out of rounds: told to answer in the system prompt, and the server
+      // turns the tools off (one that doesn't yet still gets the prompt).
+      body: JSON.stringify(last && tools?.length
+        ? { messages: currentMessages, systemPrompt: `${systemPrompt}\n\n${OUT_OF_ROUNDS}${dropped.length ? `\n\n${TOOLS_DROPPED} ${dropped.join(', ')}.` : ''}`, tools, toolChoice: 'none' }
+        : { messages: currentMessages, systemPrompt, tools }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -369,16 +391,34 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
     // No tools fired — final reply, return it.
     // The server's model can't use tools and answered without them.
     if (data.toolsUnsupported) onToolsUnsupported?.({ routed: !!data.toolsRouted });
+    // A server or model that still asks for a tool: its text, if any, is the answer.
+    if (last && tools?.length) return _finalAnswer(data.text || data.assistantMessage?.content);
     if (!data.toolCalls || data.toolCalls.length === 0) {
       return data.text || '';
     }
 
     // Tools fired: append assistant message verbatim, execute each tool
-    // locally, append tool result messages, loop for next round.
-    currentMessages.push(data.assistantMessage);
-    for (const tc of data.toolCalls) {
+    // locally, append tool result messages, loop for next round. Calls past
+    // what the next request can hold are dropped from it; the model sees
+    // what came back and can ask again.
+    const room = PROXY_MAX_MESSAGES - currentMessages.length - 1;
+    if (room < 1) return _finalAnswer(data.text || data.assistantMessage?.content);
+    const toolCalls = data.toolCalls.slice(0, room);
+    // Cut by position (the server keeps both lists in the same order), so a
+    // server that sends no ids or the same id twice still pairs up.
+    const assistant = toolCalls.length < data.toolCalls.length && Array.isArray(data.assistantMessage?.tool_calls)
+      ? { ...data.assistantMessage, tool_calls: data.assistantMessage.tool_calls.slice(0, toolCalls.length) }
+      : data.assistantMessage;
+    // Calls left out are named in the next (last) request, so the model
+    // doesn't say they ran.
+    dropped.push(...data.toolCalls.slice(room).map(tc => tc.name));
+    // Measured before the model's own message: only what the tools answer
+    // counts, so calls whose arguments are already sent aren't skipped for nothing.
+    const budget = _budget(currentMessages, startBytes);
+    currentMessages.push(assistant);
+    for (const tc of toolCalls) {
       if (onToolCall) onToolCall(tc.name);
-      const result = await _executeTool(tc.name, tc.args || {});
+      const result = await _runTool(tc.name, tc.args || {}, budget);
       currentMessages.push({
         role: 'tool',
         tool_call_id: tc.id,
@@ -390,7 +430,7 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
     }
   }
 
-  throw new Error('Too many tool call rounds');
+  return _finalAnswer(''); // not reached: the last round always answers
 }
 
 // ── Default models per provider ───────────────────────────────────────────────
@@ -468,16 +508,21 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
   }));
 
   let currentMessages = [...messages];
-  const MAX_ROUNDS = _maxRounds(tools);
+  const startBytes = _bytes(currentMessages);
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round <= TOOL_ROUNDS; round++) {
+    const last = _lastRound(round, currentMessages, startBytes);
     const body = {
       model: model || AI_DEFAULT_MODELS.claude,
       max_tokens: REPLY_MAX_TOKENS,
-      system: systemPrompt,
+      // Out of rounds: told to answer in the system prompt, so the
+      // conversation itself stays in the order the provider expects.
+      system: last ? `${systemPrompt}\n\n${OUT_OF_ROUNDS}` : systemPrompt,
       messages: currentMessages,
     };
     if (claudeTools.length) body.tools = claudeTools;
+    // The tools stay declared (the history has tool calls in it), but can't be called.
+    if (last && claudeTools.length) body.tool_choice = { type: 'none' };
 
     // A model that can't write that many is asked again as before (trace-reply.js).
     const res = await sendWithLengthFallback(body, async (b) => {
@@ -501,6 +546,7 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
     // Check if response contains tool use
     const toolUses = (data.content || []).filter(b => b.type === 'tool_use');
     const textBlocks = (data.content || []).filter(b => b.type === 'text');
+    if (last) return _finalAnswer(textBlocks.map(b => b.text).join('\n'));
 
     if (toolUses.length === 0 || data.stop_reason !== 'tool_use') {
       // No tool calls — return text
@@ -508,17 +554,18 @@ async function _callClaudeWithTools(apiKey, model, messages, systemPrompt, tools
     }
 
     // Execute tool calls
+    const budget = _budget(currentMessages, startBytes); // before the model's message (see callAIProxy)
     currentMessages.push({ role: 'assistant', content: data.content });
     const toolResults = [];
     for (const tu of toolUses) {
       if (onToolCall) onToolCall(tu.name);
-      const result = await _executeTool(tu.name, tu.input);
+      const result = await _runTool(tu.name, tu.input, budget);
       toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) });
     }
     currentMessages.push({ role: 'user', content: toolResults });
   }
 
-  throw new Error('Too many tool call rounds');
+  return _finalAnswer(''); // not reached: the last round always answers
 }
 
 // ── OpenAI (with function calling) ──────────────────────────────────────────
@@ -536,13 +583,15 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
     { role: 'system', content: systemPrompt },
     ...messages,
   ];
-  const MAX_ROUNDS = _maxRounds(tools);
+  const startBytes = _bytes(currentMessages);
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round <= TOOL_ROUNDS; round++) {
+    const last = _lastRound(round, currentMessages, startBytes);
     const selectedModel = model || AI_DEFAULT_MODELS.openai;
     const body = {
       model: selectedModel,
-      messages: currentMessages,
+      // Out of rounds: told to answer in the system prompt (see Claude above).
+      messages: last ? [{ role: 'system', content: `${systemPrompt}\n\n${OUT_OF_ROUNDS}` }, ...currentMessages.slice(1)] : currentMessages,
       ...getOpenAIChatParams({
         baseUrl,
         model: selectedModel,
@@ -551,6 +600,7 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
       }),
     };
     if (openaiTools.length) body.tools = openaiTools;
+    if (last && openaiTools.length) body.tool_choice = 'none';
 
     // Some self-hosted endpoints (Ollama in particular) reject the
     // Authorization header when it carries a placeholder key. Only send
@@ -568,7 +618,13 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
       return { ok: res.ok, status: res.status, data: await res.json() };
     });
     // A model that can't use tools gets the request again without them.
-    const { ok, status, data, toolsDropped, toolsRouted } = await sendWithToolFallback(body, send, { memory: toolSupport, baseUrl, model: selectedModel });
+    let sent = await sendWithToolFallback(body, send, { memory: toolSupport, baseUrl, model: selectedModel });
+    // A server that refuses tool_choice "none" is asked once more without it.
+    if (last && !sent.ok && (sent.status === 400 || sent.status === 422) && body.tool_choice) {
+      delete body.tool_choice;
+      sent = await sendWithToolFallback(body, send, { memory: toolSupport, baseUrl, model: selectedModel });
+    }
+    const { ok, status, data, toolsDropped, toolsRouted } = sent;
     if (!ok) throw new Error(data.error?.message || `AI API error ${status}`);
     if (toolsDropped) onToolsUnsupported?.({ routed: toolsRouted });
     // Cut off, an answer would be half of one and a tool call half its arguments.
@@ -577,22 +633,26 @@ async function _callOpenAIWithTools(apiKey, model, messages, systemPrompt, tools
 
     const choice = data.choices[0];
     const msg = choice.message;
+    // A server that ignores tool_choice may still ask for a tool on the last
+    // round: its text, if any, is the answer.
+    if (last) return _finalAnswer(msg.content);
 
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
       return msg.content || '';
     }
 
     // Execute tool calls
+    const budget = _budget(currentMessages, startBytes); // before the model's message (see callAIProxy)
     currentMessages.push(msg);
     for (const tc of msg.tool_calls) {
       if (onToolCall) onToolCall(tc.function.name);
       const args = JSON.parse(tc.function.arguments || '{}');
-      const result = await _executeTool(tc.function.name, args);
+      const result = await _runTool(tc.function.name, args, budget);
       currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
     }
   }
 
-  throw new Error('Too many tool call rounds');
+  return _finalAnswer(''); // not reached: the last round always answers
 }
 
 // ── Google Gemini (with function calling) ────────────────────────────────────
@@ -638,14 +698,17 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     return { role: msg.role === 'assistant' ? 'model' : 'user', parts };
   });
 
-  const MAX_ROUNDS = _maxRounds(tools);
+  const startBytes = _bytes(contents);
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round <= TOOL_ROUNDS; round++) {
+    const last = _lastRound(round, contents, startBytes);
     const body = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
+      // Out of rounds: told to answer in the system prompt (see Claude above).
+      systemInstruction: { parts: [{ text: last ? `${systemPrompt}\n\n${OUT_OF_ROUNDS}` : systemPrompt }] },
       contents,
     };
     if (geminiTools) body.tools = geminiTools;
+    if (last && geminiTools) body.toolConfig = { functionCallingConfig: { mode: 'NONE' } };
 
     const res = await fetchProvider(url, {
       method: 'POST',
@@ -661,31 +724,62 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     const parts = candidate?.content?.parts || [];
     const functionCalls = parts.filter(p => p.functionCall);
     const textParts = parts.filter(p => p.text);
+    if (last) return _finalAnswer(textParts.map(p => p.text).join('\n'));
 
     if (functionCalls.length === 0) {
       return textParts.map(p => p.text).join('\n') || '';
     }
 
     // Execute function calls
+    const budget = _budget(contents, startBytes); // before the model's message (see callAIProxy)
     contents.push({ role: 'model', parts });
     const responseParts = [];
     for (const fc of functionCalls) {
       if (onToolCall) onToolCall(fc.functionCall.name);
-      const result = await _executeTool(fc.functionCall.name, fc.functionCall.args || {});
+      const result = await _runTool(fc.functionCall.name, fc.functionCall.args || {}, budget);
       responseParts.push({ functionResponse: { name: fc.functionCall.name, response: result } });
     }
     contents.push({ role: 'user', parts: responseParts });
   }
 
-  throw new Error('Too many tool call rounds');
+  return _finalAnswer(''); // not reached: the last round always answers
 }
 
 // ── Tool execution ───────────────────────────────────────────────────────────
 
-// Tool rounds per answer. Coaching drafts need a few more (find the client,
-// read their days, search their foods, draft); everyone else keeps 5.
-const _COACHING_TOOL = /^(get_coaching_clients|get_client_summary|get_client_foods|draft_targets|draft_day_plan|get_coach_recommendations)$/;
-function _maxRounds(tools) { return (tools || []).some(t => _COACHING_TOOL.test(t?.name)) ? 8 : 5; }
+// Rounds of tool calls in one answer. Going through a month of diary days,
+// a meals library or a client's weeks takes more than a handful
+// (TraceApps/notetrace#34), coaching drafts included; a model that loops
+// forever still stops.
+export const TOOL_ROUNDS = 12;
+// Said to the model when the rounds run out: the answer comes from what it has.
+export const OUT_OF_ROUNDS = "You can't call more tools for this request. Answer now from what you found. If you couldn't go through everything you needed to, say so plainly: what you covered and what's left, so the user can ask for the rest or narrow it down.";
+// What the tool calls and their answers may add to the conversation, in
+// bytes, before Trace wraps up early the same way: in tokens about what a
+// 128k-token model can hold, Japanese or Chinese included. A photo the user
+// attached is already there and doesn't count.
+export const HISTORY_MAX_BYTES = 300000;
+const _bytes = (x) => new TextEncoder().encode(JSON.stringify(x)).length;
+// The last request: out of rounds, or the tools have added as much as they should.
+const _lastRound = (round, history, start) => round === TOOL_ROUNDS || (round > 0 && _bytes(history) - start > HISTORY_MAX_BYTES);
+// Said for a tool call left unrun because one round's answers already passed
+// HISTORY_MAX_BYTES: a model that asks for many at once can't pass it by much.
+export const TOOL_SKIPPED = "Not run: this answer has already gathered as much as it can hold. Answer from what you have, and say what's left.";
+// Said in the last request for calls left out to stay under the server's 60 messages.
+export const TOOLS_DROPPED = "These tool calls you asked for weren't run, for lack of room:";
+const _budget = (history, start) => ({ left: HISTORY_MAX_BYTES - (_bytes(history) - start) });
+async function _runTool(name, args, budget) {
+  if (budget.left <= 0) return { error: TOOL_SKIPPED };
+  const result = await _executeTool(name, args);
+  budget.left -= _bytes(JSON.stringify(result)); // as it's sent: a JSON string inside the request
+  return result;
+}
+// The server takes 60 messages in one request (AI_MAX_MESSAGES in
+// server/routes/ai.js). A round adds the model's message and one per tool it
+// calls, so Trace wraps up past 48, and runs only the calls that fit when a
+// model asks for more at once.
+const PROXY_MAX_MESSAGES = 60;
+const PROXY_WRAP_MESSAGES = 48;
 
 let _toolHandler = null;
 

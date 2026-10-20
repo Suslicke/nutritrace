@@ -79,9 +79,10 @@ workout maps.
 The assistant (default name "Trace") uses function calling across all
 providers (Claude, OpenAI, Gemini). Seven tools: `get_wellness_data`,
 `get_body_composition`, `get_diary` (items + day notes + per-item
-notes + brand), `get_workouts`, `get_goals`, `get_diary_averages`,
-`get_meals` (saved Meals/Recipes library, cap 50). Execution loop
-runs up to 5 rounds. System prompt instructs the AI to always use
+notes + brand; one day, or up to 31 a call), `get_workouts`, `get_goals`,
+`get_diary_averages`, `get_meals` (saved Meals/Recipes library, 50 a
+page). Execution loop runs up to 12 rounds, then one last request with
+the tools off answers from what was found. System prompt instructs the AI to always use
 tools to fetch real data rather than relying on context. See
 `src/lib/aiChat.js`.
 

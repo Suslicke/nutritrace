@@ -34,7 +34,7 @@
   import { createToolsNotice, forModel } from '../../lib/tool-support.js';
   import { isNative, getServerUrl, getAuthToken, apiUrl } from '../../lib/platform.js';
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
-  import { foldText } from '../../lib/search-text.js';
+  import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
   import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
@@ -234,12 +234,12 @@
             return _convertWellnessUnits(data);
           } catch { return {}; }
         }
-        case 'get_diary': {
+        case 'get_diary': return diaryRange(args, async (date) => {
           try {
-            const entry = await NtApi.getDiaryDate(args.date);
+            const entry = await NtApi.getDiaryDate(date);
             // Manual activity is its own table — fetch alongside the diary
             // row so the AI sees the full picture for the day, not just food.
-            const activities = await NtApi.getActivity(args.date).catch(() => []);
+            const activities = await NtApi.getActivity(date).catch(() => []);
             const hasItems = entry?.items?.length > 0;
             const notes = (entry?.notes || '').trim();
             const totals = hasItems ? Nutrition.sum(entry.items.map(i => Nutrition.calculate(i))) : {};
@@ -276,7 +276,7 @@
             }
             if (LENGTH_KEYS.some(k => k in bodyStats)) bodyStats.length_unit = lu;
             const result = {
-              date: args.date, meals,
+              date, meals,
               totals: hasItems ? { calories: Math.round(totals.calories || 0), protein: Math.round(totals.proteins || 0), carbs: Math.round(totals.carbohydrates || 0), fat: Math.round(totals.fat || 0) } : null,
               body_stats: bodyStats,
               water_ml: (entry?.water || []).reduce((s, l) => s + (l.amount || 0), 0),
@@ -292,8 +292,8 @@
               }));
             }
             return result;
-          } catch { return { date: args.date, error: 'Could not load diary' }; }
-        }
+          } catch { return { date, error: 'Could not load diary' }; }
+        });
         case 'get_meals': {
           try {
             const [rawMeals, rawRecipes] = await Promise.all([
@@ -320,13 +320,10 @@
               if (typeof m.notes === 'string' && m.notes.trim()) out.notes = m.notes.trim();
               return out;
             };
-            const q = foldText(args.query).trim();
-            let list = [
+            return mealsPage([
               ...rawMeals.map(m => shape(m, 'meal')),
               ...rawRecipes.map(m => shape(m, 'recipe')),
-            ];
-            if (q) list = list.filter(m => foldText(m.name).includes(q));
-            return { count: list.length, meals: list.slice(0, 50) };
+            ], args);
           } catch { return { error: 'Could not load meals library' }; }
         }
         case 'get_workouts': {
@@ -1705,6 +1702,8 @@ You have FULL ACCESS to the user's complete health data through tools. ALWAYS us
 - **Nutrition goals**: calorie and macro targets — use get_goals
 
 When the user asks about their data (steps, sleep, weight, food log, etc.) for ANY date or date range, USE THE APPROPRIATE TOOL to fetch the real data. Do not estimate or hallucinate numbers.
+
+To go through many days of the diary ("what did I eat last week", "which days did I have pizza"), read them with get_diary's to (31 days a call) and go on from next_from until complete is true. get_meals comes a page at a time the same way (offset). Say whether you covered everything.
 
 LOGGING STREAK — When the user asks about their food-logging streak in any phrasing ("how long have I been logging", "what's my streak", "when did I start logging", "first day I logged", "days in a row", "consecutive days"), you MUST call get_logging_streak FIRST and report the exact streak_days + streak_start values from its response. NEVER guess streak length or first-logged dates from context or memory. NEVER use get_diary_averages as a substitute. If the user pushes back ("that's wrong", "actually it's longer"), call get_logging_streak again and quote the streak_start + streak_days verbatim — do not adjust the number based on the user's claim, because the tool walks the actual diary table.
 
