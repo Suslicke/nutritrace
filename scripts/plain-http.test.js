@@ -248,11 +248,12 @@ test('wiring: both connect screens check the address before any request', () => 
   for (const f of ['../src/routes/NativeSetup.svelte', '../src/routes/settings/ServerConnection.svelte']) {
     const src = read(f);
     const check = src.indexOf('serverAddressCheck(url)');
-    const first = src.indexOf('NativeHttp.get(');
+    // The first request is the server check (lib/server-signin.js, #36).
+    const first = src.indexOf('await checkServer(url)');
     assert.ok(check > 0 && first > check, `${f}: the check comes first`);
-    assert.match(src, /plain === 'invalid'\) \{ showError\(\$_\('plain_http\.invalid_address'\)\); return; \}/);
-    assert.match(src, /plain === 'refuse'\) \{ await askPlainHttp\(url, \{ kind: 'refuse' \}\); return; \}/);
-    assert.match(src, /if \(!\(await askPlainHttp\(url\)\)\) return;\s*confirmPlainHttp\(url\);/);
+    assert.match(src, /plain === 'invalid'\) \{ showError\(\$_\('plain_http\.invalid_address'\)\); return( false)?; \}/);
+    assert.match(src, /plain === 'refuse'\) \{ await askPlainHttp\(url, \{ kind: 'refuse' \}\); return( false)?; \}/);
+    assert.match(src, /if \(!\(await askPlainHttp\(url\)\)\) return( false)?;\s*confirmPlainHttp\(url\);/);
   }
 });
 

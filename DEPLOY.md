@@ -281,6 +281,10 @@ If you use Cloudflare Tunnel for external access, no special NutriTrace configur
 
 ---
 
+## Behind a Sign-In Proxy
+
+Behind a sign-in proxy (an Authentik or Authelia outpost, VoidAuth, Cloudflare Access), let `/api/*` through to NutriTrace without it. The Android and Wear apps can't sign in to the proxy; NutriTrace signs people in itself, with SSO when OIDC is set up (its callback is under `/api/auth/oidc/`). If the proxy answers the app instead, the app says that something other than NutriTrace answered with a web page. Examples: [The Android app behind a sign-in proxy](https://traceapps.github.io/docs/getting-started/reverse-proxy/#android-behind-a-login).
+
 ## Reverse Proxy with Subpath
 
 To run NutriTrace behind a reverse proxy at a subpath (e.g. `https://example.com/nutritrace/`), set the `BASE_URL` environment variable to the path prefix:

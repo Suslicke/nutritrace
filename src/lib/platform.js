@@ -152,8 +152,14 @@ export function healthNeedsSetup(res) {
  * refused before a request is made. So a plain-HTTP failure is either that
  * refusal, or a local server the phone can't reach (a wrong address, or not
  * on the same network or VPN), and the message says which.
+ *
+ * lib/server-signin.js marks the answers that weren't the server's own:
+ * a fresh install, and a web page in its place (a sign-in proxy, or not
+ * the server's address, #36).
  */
 export function explainConnectError(rawError, serverUrl, t) {
+  if (rawError?.webPage) return t('server_signin.web_page');
+  if (rawError?.code === 'needs_setup') return t('native_setup.errors.server_needs_setup');
   const fallback = rawError?.message || t('native_setup.errors.unreachable');
   if (!isNative) return fallback;
   const kind = classifyServerAddress(serverUrl);

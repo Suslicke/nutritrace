@@ -112,5 +112,9 @@ test('the connect screens tell a fresh server from one that is down', () => {
   assert.equal(healthNeedsSetup({ status: 200, data: { ok: true } }), false);
   assert.equal(healthNeedsSetup({ status: 502, data: '<html>Bad Gateway</html>' }), false);
   assert.equal(healthNeedsSetup(undefined), false);
-  for (const f of CONNECT_FILES) assert.match(read(f), /if \(healthNeedsSetup\([^\n]*\)\) \{ showError\(\$_\('[a-z_.]+'\)\); return; \}/, f);
+  // Both connect screens check through lib/server-signin.js, whose code
+  // explainConnectError turns into this message (#36).
+  assert.match(read('../src/lib/server-signin.js'), /if \(healthNeedsSetup\(res\)\) throw Object\.assign\(new Error\('Server needs setup'\), \{ code: 'needs_setup' \}\);/);
+  assert.match(src, /if \(rawError\?\.code === 'needs_setup'\) return t\('native_setup\.errors\.server_needs_setup'\);/);
+  for (const f of CONNECT_FILES) assert.match(read(f), /await checkServer\(url\);/, f);
 });

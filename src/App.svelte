@@ -199,6 +199,9 @@
 
   // Show native setup wizard before anything else on first Android launch
   let showNativeSetup = needsNativeSetup();
+  // The first screen has been chosen (onMount): a Settings SSO link can go
+  // straight to Server Connection from then on.
+  let _setupRouted = false;
 
   import Diary      from './routes/Diary.svelte';
   import Foods      from './routes/Foods.svelte';
@@ -480,43 +483,42 @@
             if (host === 'oidc-callback') {
               const errMsg = params.get('error');
               const linked = params.get('linked');
-              let token = params.get('token');
-              let idTokenHint = params.get('id_token_hint');
-              let providerId  = params.get('provider_id');
-              const code = params.get('code');
-              if (code && !errMsg) {
-                try {
-                  const { redeemHandoff } = await import('./lib/oidc-app-handoff.js');
-                  const data = await redeemHandoff(code);
-                  token = data.token;
-                  idTokenHint = data.id_token_hint || null;
-                  providerId = data.provider_id != null ? String(data.provider_id) : null;
-                } catch (e) {
-                  import('./stores/toast.js').then(({ showError }) => showError(e?.message || 'Sign-in failed'));
-                  return;
-                }
-              }
-              if (errMsg) {
+              // Signed in from Settings > Server Connection, with the phone
+              // still in local mode: the token goes back to that screen, which
+              // moves the phone's data over as a password sign-in does (#36).
+              // That sign-in takes only the single-use code it asked for, never
+              // a bare token another app could hand over, and never ends in the
+              // app's own sign-in below (lib/server-signin.js).
+              const { routeSsoCallback, ssoConnectResult, keepSsoLogoutHint } = await import('./lib/server-signin.js');
+              const { redeemHandoff, challengeSent } = await import('./lib/oidc-app-handoff.js');
+              const routed = await routeSsoCallback({
+                code: params.get('code'), token: params.get('token'), error: errMsg,
+                idTokenHint: params.get('id_token_hint'), providerId: params.get('provider_id'),
+              }, { nativeMode: getNativeMode(), challengeSent: challengeSent(), redeem: redeemHandoff });
+              const token = routed.token;
+              if (routed.to === 'settings') {
+                ssoConnectResult.set({ url: routed.url, token, idTokenHint: routed.idTokenHint, providerId: routed.providerId });
+                // Once the first screen is chosen (a cold start from this link
+                // goes there itself, after the setup check in onMount).
+                if (_setupRouted) (await import('svelte-spa-router')).push('/settings/serverConnection');
+              } else if (routed.to === 'refused') {
+                import('./stores/toast.js').then(({ showError }) => showError(getStore(_)('server_signin.token_refused')));
+              } else if (routed.to === 'failed') {
+                import('./stores/toast.js').then(({ showError }) => showError(routed.message));
+              } else if (errMsg) {
                 import('./stores/toast.js').then(({ showError }) => showError(decodeURIComponent(errMsg)));
               } else if (linked) {
                 import('./stores/toast.js').then(({ showSuccess }) => showSuccess('Linked'));
                 await loadAuthState();
-              } else if (token) {
-                const { setAuthToken } = await import('./lib/platform.js');
-                setAuthToken(token);
-                // Stash the OIDC session hint so logout() can ask the IdP to
+              } else if (routed.to === 'app') {
+                // Keep the OIDC session hint so logout() can ask the IdP to
                 // end the session via RP-initiated logout. The PWA stores
                 // this in an httpOnly cookie at the same point, but native
                 // can't reach that jar so we keep the equivalent in
-                // localStorage here.
-                if (idTokenHint && providerId) {
-                  try {
-                    localStorage.setItem('nt:oidc_logout_hint', JSON.stringify({
-                      providerId,
-                      idTokenHint,
-                    }));
-                  } catch {}
-                }
+                // localStorage here (none: an old hint is dropped).
+                keepSsoLogoutHint({ providerId: routed.providerId, idTokenHint: routed.idTokenHint });
+                const { setAuthToken } = await import('./lib/platform.js');
+                setAuthToken(token);
                 import('./stores/toast.js').then(({ showSuccess }) => showSuccess('Signed in'));
                 await loadAuthState();
                 // Re-evaluate the NativeSetup gate. Without this the user
@@ -634,6 +636,13 @@
     } else if (_isNativeLocal && !DB.getSetting('setupComplete', false)) {
       // Native local: show wizard for goals/units/profile setup
       window.location.hash = '#/wizard';
+    }
+    _setupRouted = true;
+    // Opened by a Settings SSO sign-in's link (the appUrlOpen listener):
+    // Server Connection finishes it, whatever first screen was chosen meanwhile.
+    if (isNative) {
+      const { ssoConnectResult } = await import('./lib/server-signin.js');
+      if (getStore(ssoConnectResult)) (await import('svelte-spa-router')).push('/settings/serverConnection');
     }
 
     // Issues #69 + #70 — one-shot migration for the showUnitMetadata
