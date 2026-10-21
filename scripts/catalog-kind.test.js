@@ -180,3 +180,27 @@ test('the diary asks countsUseHere before counting a use', () => {
   assert.match(diaryStore, /export async function addDiaryItem\(foodItem, meal, date, \{ kind = null, shared = false \} = \{\}\)/);
   assert.match(diaryStore, /if \(countsUseHere\(item, \{ native: isNative, shared \}\)\) \{\s+markCatalogItemUsed\(/);
 });
+
+// The pane's Add to Diary logged a saved meal as one row; everywhere else a
+// saved meal is added (the Diary's pick mode), it logs its ingredients.
+test('the pane logs a saved meal as its ingredients, like the Diary does, and a recipe as one row', () => {
+  const onAdd = foods.match(/async function onDetailAddToDiary\(e\) \{[\s\S]*?\n  \}/)[0];
+  const expand = onAdd.indexOf("if (kind === 'meal' && food.items && food.items.length > 0) {");
+  assert.ok(expand > 0, 'meals with ingredients are expanded');
+  assert.ok(expand < onAdd.indexOf('if ($diaryPromptQuantity)'), 'before the quantity prompt, as in pick mode');
+  assert.match(onAdd, /await _expandMealToDiary\(food, \{ stay: true, shared: food\._shared_by != null \}\);\s+return;/);
+  // Pick mode's own rule, which the pane follows.
+  assert.match(foods, /if \(activeTab === 1 && food\.items && food\.items\.length > 0\) \{\s+await _expandMealToDiary\(food\);/);
+});
+
+test('adding from the pane stays on the Foods page and handles a shared meal', () => {
+  const fn = foods.match(/async function _expandMealToDiary\(meal, \{ stay = false, shared = false \} = \{\}\) \{[\s\S]*?\n  \}/);
+  assert.ok(fn, '_expandMealToDiary takes stay and shared');
+  const body = fn[0];
+  assert.match(body, /if \(!stay\) history\.back\(\);/);
+  assert.doesNotMatch(body.replace('if (!stay) history.back();', ''), /history\.back\(\)/);
+  assert.match(body, /countsUseHere\(meal, \{ native: isNative, shared \}\)/);
+  assert.match(body, /markCatalogItemUsed\(NtApi, 'meal', meal, pickDate \|\| undefined\)/);
+  assert.match(body, /pickDate \|\| undefined,\s+\{ shared \}\s+\);/);
+  assert.match(body, /const stale = shared \? \[\] : _staleIngredientNames\(meal\);/);
+});

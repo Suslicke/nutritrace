@@ -11,7 +11,7 @@
   import Dialog      from '../components/ui/Dialog.svelte';
   import Sheet       from '../components/ui/Sheet.svelte';
   import FoodDetailSheet from '../components/ui/FoodDetailSheet.svelte';
-  import { deleteCatalogItem, catalogKindForTab } from '../lib/catalog-kind.js';
+  import { deleteCatalogItem, catalogKindForTab, markCatalogItemUsed, countsUseHere } from '../lib/catalog-kind.js';
   import UnitPicker  from '../components/ui/UnitPicker.svelte';
   import { portal } from '../lib/portal.js';
   import { decimalInput, parseDecimal } from '../lib/decimal-input.js';
@@ -1074,6 +1074,13 @@
     const kind = e.detail.kind || 'food';
     pickMeal = String(chosenMeal);
     pickDate = localDateStr();
+    // A saved meal logs its ingredients at their saved portions, with no
+    // quantity prompt, as it does when added from the Diary (pick mode).
+    // A recipe logs as one row, as it does there too (#282).
+    if (kind === 'meal' && food.items && food.items.length > 0) {
+      await _expandMealToDiary(food, { stay: true, shared: food._shared_by != null });
+      return;
+    }
     if ($diaryPromptQuantity) {
       promptFood = food;
       promptKind = kind;
@@ -1222,7 +1229,10 @@
     return staleIngredientNames(meal?.items, [localFoods, localMeals, localRecipes]);
   }
 
-  async function _expandMealToDiary(meal) {
+  // stay: added from the Foods page's own pane (#282), which stays put and
+  // names the meal it went to. shared: someone else's shared meal, whose
+  // ingredients are not in this user's foods.
+  async function _expandMealToDiary(meal, { stay = false, shared = false } = {}) {
     if (_addingToDiary) return;
     _addingToDiary = true;
     try {
@@ -1232,8 +1242,8 @@
       // so without this the saved meal's own counter would never move and
       // "Most Used" on the Meals tab would stay at zero. Fire-and-forget;
       // counter inaccuracy isn't worth blocking the user's add.
-      if (typeof meal.id === 'number') {
-        NtApi.markMealUsed(meal.id, pickDate || undefined).catch(() => {});
+      if (countsUseHere(meal, { native: isNative, shared })) {
+        markCatalogItemUsed(NtApi, 'meal', meal, pickDate || undefined).catch(() => {});
       }
       // One failed ingredient used to abort the loop and leave the rest of
       // the meal unlogged, with no toast and no navigation, so the user saw
@@ -1245,7 +1255,8 @@
           await addDiaryItem(
             { ...item, quantity: item.quantity || 1 },
             Number(pickMeal) || 0,
-            pickDate || undefined
+            pickDate || undefined,
+            { shared }
           );
         } catch (e) {
           console.error('[foods] ingredient failed to log:', item?.name, e);
@@ -1259,7 +1270,9 @@
       }
       // One toast, not two. The stale notice already says the meal was
       // added, and it gets a longer dwell because it asks for an action.
-      const stale = _staleIngredientNames(meal);
+      // A shared meal's ingredients are its owner's foods, never this
+      // user's, so they'd all read as missing.
+      const stale = shared ? [] : _staleIngredientNames(meal);
       if (failed.length) {
         showError($_('foods.toast.meal_partly_added', {
           values: { names: failed.filter(Boolean).join(', ') },
@@ -1268,11 +1281,14 @@
         showToast($_('foods.toast.meal_stale_ingredients', {
           values: { names: stale.join(', ') },
         }), 6000, 'info');
+      } else if (stay) {
+        const names = mealNames.get() || ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
+        showSuccess($_('foods.detail.added_to', { values: { meal: names[Number(pickMeal) || 0] || 'meal' } }));
       } else {
         showSuccess($_('foods.toast.added_to_diary'));
       }
       editorState.lastMealAdded = Number(pickMeal) || 0;
-      history.back();
+      if (!stay) history.back();
     } finally {
       _addingToDiary = false;
     }
