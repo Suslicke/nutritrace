@@ -4,7 +4,7 @@ import { Nutrition } from '../lib/nutrition.js';
 import { localDateStr, DB } from '../lib/db.js';
 import { resolveAssetUrl, isNative } from '../lib/platform.js';
 import { itemSourceRef } from '../lib/item-source.js';
-import { markCatalogItemUsed } from '../lib/catalog-kind.js';
+import { markCatalogItemUsed, countsUseHere } from '../lib/catalog-kind.js';
 
 function todayStr() {
   return localDateStr();
@@ -275,8 +275,9 @@ async function _save(entry) {
 }
 
 // kind: 'food' | 'meal' | 'recipe' when the caller knows what it logs (the
-// Foods page does), so the right row's usage is counted (#282).
-export async function addDiaryItem(foodItem, meal, date, { kind = null } = {}) {
+// Foods page does), so the right row's usage is counted (#282). shared: an
+// ingredient of someone else's shared meal (its own item doesn't say so).
+export async function addDiaryItem(foodItem, meal, date, { kind = null, shared = false } = {}) {
   let viewDate = null;
   currentDate.subscribe(v => viewDate = v)();
   const targetDate = date || viewDate || todayStr();
@@ -327,7 +328,7 @@ export async function addDiaryItem(foodItem, meal, date, { kind = null } = {}) {
   // meals, and recipes can rise in their "Most Used" / "Recently Used"
   // sort modes. Fire-and-forget; a failed bump shouldn't block the diary
   // save the user already saw succeed.
-  if (typeof item.id === 'number') {
+  if (countsUseHere(item, { native: isNative, shared })) {
     markCatalogItemUsed(NtApi, kind, item, targetDate).catch(() => {});
   }
 }

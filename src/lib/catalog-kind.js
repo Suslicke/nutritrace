@@ -40,3 +40,16 @@ export function markCatalogItemUsed(api, kind, item, date) {
   if (k === 'meal' || k === 'recipe') return api.markMealUsed(item.id, date);
   return Promise.reject(new Error(`Unknown item kind: ${k}`));
 }
+
+/**
+ * Whether this device can count a use of what an item was logged from.
+ * Someone else's shared item (or an ingredient of one, `shared`) carries the
+ * server's id. The web sends it to the server, which is right. The Android
+ * app reads an id as one of its own rows', so it would count a use of
+ * whichever of the user's own rows has that number (#282); it skips these.
+ */
+export function countsUseHere(item, { native = false, shared = false } = {}) {
+  if (typeof item?.id !== 'number') return false;
+  if (native && (shared || item._shared_by != null)) return false;
+  return true;
+}

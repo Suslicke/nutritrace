@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { deleteCatalogItem, catalogKindForTab, markCatalogItemUsed } from '../src/lib/catalog-kind.js';
+import { deleteCatalogItem, catalogKindForTab, markCatalogItemUsed, countsUseHere } from '../src/lib/catalog-kind.js';
 
 const read = p => readFileSync(new URL(p, import.meta.url), 'utf8');
 const sheet = read('../src/components/ui/FoodDetailSheet.svelte');
@@ -139,8 +139,7 @@ test("a logged meal or recipe counts a use of itself, a food of the food", async
 });
 
 test('the diary counts the use by the kind its caller logged', () => {
-  assert.match(diaryStore, /export async function addDiaryItem\(foodItem, meal, date, \{ kind = null \} = \{\}\)/);
-  assert.match(diaryStore, /markCatalogItemUsed\(NtApi, kind, item, targetDate\)\.catch\(/);
+    assert.match(diaryStore, /markCatalogItemUsed\(NtApi, kind, item, targetDate\)\.catch\(/);
   assert.doesNotMatch(diaryStore, /NtApi\.markFoodUsed\(item\.id/);
 });
 
@@ -159,4 +158,25 @@ test("the pane's Add to Diary says what it logs, on every path", () => {
   const sets = [...foods.matchAll(/\bpromptFood = (?!null)[^;]+;\n\s*(.*)/g)];
   assert.ok(sets.length >= 3);
   for (const m of sets) assert.match(m[1], /^promptKind = /, m[0]);
+});
+
+// In the Android app (server mode) a shared item's id is the server's, read
+// as one of the phone's own rows: logging someone else's shared meal counted
+// a use of the user's own meal with that number.
+test("the phone doesn't count a use of someone else's shared item by its server id", () => {
+  const shared = { id: 3, _shared_by: 'bob' };
+  const own = { id: 3 };
+  assert.equal(countsUseHere(shared, { native: true }), false);
+  assert.equal(countsUseHere(own, { native: true, shared: true }), false, 'ingredient of a shared meal');
+  assert.equal(countsUseHere(own, { native: true }), true);
+  // The web's ids are the server's: a shared item is counted there.
+  assert.equal(countsUseHere(shared, { native: false }), true);
+  assert.equal(countsUseHere(own, { native: false, shared: true }), true);
+  assert.equal(countsUseHere({ id: 'x' }, { native: false }), false);
+  assert.equal(countsUseHere(null), false);
+});
+
+test('the diary asks countsUseHere before counting a use', () => {
+  assert.match(diaryStore, /export async function addDiaryItem\(foodItem, meal, date, \{ kind = null, shared = false \} = \{\}\)/);
+  assert.match(diaryStore, /if \(countsUseHere\(item, \{ native: isNative, shared \}\)\) \{\s+markCatalogItemUsed\(/);
 });
