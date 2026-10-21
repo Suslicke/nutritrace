@@ -46,6 +46,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Security
 
 - **Pages on lookalike addresses can no longer read or change your account.** The server let any web page whose address contained its own name call it with your sign-in and read the answer: `nutrition.example.com.attacker.example`, `xnutrition.example.com`, any subdomain of it, the same name on another port, or on a home network `:30011` for a server on `:3001`. Such a page under your own domain or on your server's machine could read and change your account while you were signed in; a page anywhere else got nothing, unless the server runs without accounts (single-user mode), where it could read what your browser can reach. Someone would need a page on such an address and you to open it. Only the Android app's own addresses and `PUBLIC_URL` are allowed now, compared exactly; the Android app, older versions included, works as before.
+- **vite** bumped 6.4.3 to 6.4.5, closes [GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm) (high), [GHSA-698v-4r3x-3vcv](https://github.com/advisories/GHSA-698v-4r3x-3vcv) and [GHSA-r825-w8mm-5pxw](https://github.com/advisories/GHSA-r825-w8mm-5pxw) (moderate), all three through the development server's open-in-editor link, where a crafted file path could run a command on the developer's computer on Windows (WSL included). Only the development server (`npm run dev`) has that link; the app and server people install never include it.
+- **hono** bumped 4.13.8 to 4.13.13 on the server (through the MCP library), closes [GHSA-5r4p-p66f-jhc7](https://github.com/advisories/GHSA-5r4p-p66f-jhc7) (moderate: `serveStatic` could serve a file without running the middleware on its path). NutriTrace wasn't exposed: it never uses `serveStatic`, the MCP library uses hono only to read requests, and Express serves its files.
+- `npm audit` reports 0 vulnerabilities for the app and the server.
 
 ---
 
