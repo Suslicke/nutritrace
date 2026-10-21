@@ -4,6 +4,7 @@ import { Nutrition } from '../lib/nutrition.js';
 import { localDateStr, DB } from '../lib/db.js';
 import { resolveAssetUrl, isNative } from '../lib/platform.js';
 import { itemSourceRef } from '../lib/item-source.js';
+import { markCatalogItemUsed } from '../lib/catalog-kind.js';
 
 function todayStr() {
   return localDateStr();
@@ -273,7 +274,9 @@ async function _save(entry) {
   return result;
 }
 
-export async function addDiaryItem(foodItem, meal, date) {
+// kind: 'food' | 'meal' | 'recipe' when the caller knows what it logs (the
+// Foods page does), so the right row's usage is counted (#282).
+export async function addDiaryItem(foodItem, meal, date, { kind = null } = {}) {
   let viewDate = null;
   currentDate.subscribe(v => viewDate = v)();
   const targetDate = date || viewDate || todayStr();
@@ -325,10 +328,7 @@ export async function addDiaryItem(foodItem, meal, date) {
   // sort modes. Fire-and-forget; a failed bump shouldn't block the diary
   // save the user already saw succeed.
   if (typeof item.id === 'number') {
-    const usageUpdate = item.is_recipe
-      ? NtApi.markMealUsed(item.id, targetDate)
-      : NtApi.markFoodUsed(item.id, targetDate);
-    usageUpdate.catch(() => {});
+    markCatalogItemUsed(NtApi, kind, item, targetDate).catch(() => {});
   }
 }
 

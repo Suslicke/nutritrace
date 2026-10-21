@@ -11,7 +11,7 @@
   import Dialog      from '../components/ui/Dialog.svelte';
   import Sheet       from '../components/ui/Sheet.svelte';
   import FoodDetailSheet from '../components/ui/FoodDetailSheet.svelte';
-  import { deleteCatalogItem, catalogKindForTab } from '../lib/catalog-delete.js';
+  import { deleteCatalogItem, catalogKindForTab } from '../lib/catalog-kind.js';
   import UnitPicker  from '../components/ui/UnitPicker.svelte';
   import { portal } from '../lib/portal.js';
   import { decimalInput, parseDecimal } from '../lib/decimal-input.js';
@@ -504,6 +504,9 @@
     if (!_addingToDiary) confirmQtyPrompt();
   }
   let promptFood = null;
+  // What promptFood is ('food' | 'meal' | 'recipe'), when known, so its own
+  // row's usage is counted (#282). null: addDiaryItem's own rule.
+  let promptKind = null;
   let promptServings = 1;
   let promptPortion = 100;
   // Phase 2 of the NutritionFactsBox rollout: tap a food on the Foods tab
@@ -1068,10 +1071,12 @@
     // is on still works the same way — the picked meal rides into the
     // existing pickMeal slot so confirmQtyPrompt uses it.
     const chosenMeal = Number(e.detail.meal) || 0;
+    const kind = e.detail.kind || 'food';
     pickMeal = String(chosenMeal);
     pickDate = localDateStr();
     if ($diaryPromptQuantity) {
       promptFood = food;
+      promptKind = kind;
       promptServings = 1;
       promptPortion = food.portion || 100;
       promptUnit = food.unit || 'g';
@@ -1083,9 +1088,11 @@
     // visible confirmation.
     const { addDiaryItem } = await import('../stores/diary.js');
     let savedFood = food;
+    let savedKind = kind;
     if (!food.id || typeof food.id !== 'number') {
       const { id: _drop, ...rest } = food;
       savedFood = await NtApi.createFood({ ...rest, created_at: food.dateTime || new Date().toISOString() });
+      savedKind = 'food';
     }
     const item = {
       ...savedFood,
@@ -1094,7 +1101,7 @@
       quantity: 1,
       nutrition: savedFood.nutrition,
     };
-    await addDiaryItem(item, chosenMeal);
+    await addDiaryItem(item, chosenMeal, undefined, { kind: savedKind });
     editorState.lastMealAdded = chosenMeal;
     const names = mealNames.get() || ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
     showSuccess($_('foods.detail.added_to', { values: { meal: names[chosenMeal] || 'meal' } }));
@@ -1189,15 +1196,17 @@
       return;
     }
     // Foods & Recipes: prompt for quantity if setting enabled
+    const pickedKind = catalogKindForTab(currentStore);
     if ($diaryPromptQuantity) {
       promptFood = food;
+      promptKind = pickedKind;
       promptServings = 1;
       promptPortion = food.portion || 100;
       promptUnit = food.unit || 'g';
       showQtyPrompt = true;
       return;
     }
-    await _addFoodToDiary(food, 1);
+    await _addFoodToDiary(food, 1, pickedKind);
   }
 
   // Ingredients of a saved meal whose source food is no longer in the
@@ -1273,12 +1282,13 @@
   let _planSource = null;
   $: if (!showQtyPrompt) _planSource = null;
 
-  async function _addFoodToDiaryNoNav(food, qty) {
+  async function _addFoodToDiaryNoNav(food, qty, kind = null) {
     const { addDiaryItem } = await import('../stores/diary.js');
     let savedFood = food;
     if (!food.id || typeof food.id !== 'number') {
       const { id: _drop, ...rest } = food;
       savedFood = await NtApi.createFood({ ...rest, created_at: food.dateTime || new Date().toISOString() });
+      kind = 'food';
     }
     const item = {
       ...savedFood,
@@ -1288,14 +1298,14 @@
       nutrition: savedFood.nutrition
     };
     if (_planSource) item.source = _planSource;
-    await addDiaryItem(item, Number(pickMeal) || 0, pickDate || undefined);
+    await addDiaryItem(item, Number(pickMeal) || 0, pickDate || undefined, { kind });
   }
 
-  async function _addFoodToDiary(food, qty) {
+  async function _addFoodToDiary(food, qty, kind = null) {
     if (_addingToDiary) return;
     _addingToDiary = true;
     try {
-      await _addFoodToDiaryNoNav(food, qty);
+      await _addFoodToDiaryNoNav(food, qty, kind);
       import('../stores/toast.js').then(m => m.showSuccess($_('foods.toast.added_to_diary')));
       editorState.lastMealAdded = Number(pickMeal) || 0;
       history.back();
@@ -1396,7 +1406,7 @@
       unit: newUnit,
       nutrition: scaledNutrition
     };
-    await _addFoodToDiary(food, parseDecimal(promptServings) || 1);
+    await _addFoodToDiary(food, parseDecimal(promptServings) || 1, promptKind);
   }
 
   async function deleteItem(item) {
@@ -1858,6 +1868,7 @@
       editorState.planLog = null;
       if (pickMode) {
         promptFood = plan.food;
+        promptKind = null;
         promptServings = plan.quantity || 1;
         promptPortion = plan.food.portion || 100;
         promptUnit = plan.food.unit || 'g';

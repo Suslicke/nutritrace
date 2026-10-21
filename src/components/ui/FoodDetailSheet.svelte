@@ -47,7 +47,7 @@
   import { energyUnit, mealNames, disableAnimations } from '../../stores/settings.js';
   import { NtApi } from '../../lib/api.js';
   import { confirmDialog } from '../../stores/confirmDialog.js';
-  import { deleteCatalogItem } from '../../lib/catalog-delete.js';
+  import { deleteCatalogItem } from '../../lib/catalog-kind.js';
   import { showSuccess, showError } from '../../stores/toast.js';
 
   export let open = false;
@@ -153,7 +153,8 @@
     if (_transitioning) return;
     _transitioning = true;
     open = false;
-    dispatch('addToDiary', { food: _displayFood, meal });
+    // kind rides along so the right row's usage is counted (#282).
+    dispatch('addToDiary', { food: _displayFood, meal, kind });
     setTimeout(() => { _transitioning = false; }, 250);
   }
 

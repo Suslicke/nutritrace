@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { deleteCatalogItem, catalogKindForTab } from '../src/lib/catalog-delete.js';
+import { deleteCatalogItem, catalogKindForTab, markCatalogItemUsed } from '../src/lib/catalog-kind.js';
 
 const read = p => readFileSync(new URL(p, import.meta.url), 'utf8');
 const sheet = read('../src/components/ui/FoodDetailSheet.svelte');
@@ -104,4 +104,59 @@ test('meal and recipe wording exists in English', () => {
   }
   assert.match(d.delete_meal_confirm_title, /meal/);
   assert.match(d.delete_recipe_confirm_title, /recipe/);
+});
+
+// Add to Diary from the pane on a saved meal counted a use of the food that
+// shared the meal's number (POST /api/foods/<mealId>/used).
+const diaryStore = read('../src/stores/diary.js');
+
+function usageApi() {
+  const calls = [];
+  return {
+    calls,
+    markFoodUsed: async (id, date) => { calls.push(['food', id, date]); return { ok: true }; },
+    markMealUsed: async (id, date) => { calls.push(['meal', id, date]); return { ok: true }; },
+  };
+}
+
+test("a logged meal or recipe counts a use of itself, a food of the food", async () => {
+  const cases = [
+    ['meal', { id: 1 }, 'meal'],
+    ['recipe', { id: 1, is_recipe: 1 }, 'meal'],
+    ['food', { id: 1 }, 'food'],
+    // No kind given: what the diary item says about itself, as before.
+    [null, { id: 1, is_recipe: 1 }, 'meal'],
+    [null, { id: 1 }, 'food'],
+  ];
+  for (const [kind, item, table] of cases) {
+    const api = usageApi();
+    await markCatalogItemUsed(api, kind, item, '2026-10-21');
+    assert.deepEqual(api.calls, [[table, 1, '2026-10-21']], `${kind} ${JSON.stringify(item)}`);
+  }
+  const api = usageApi();
+  await assert.rejects(markCatalogItemUsed(api, 'meals', { id: 1 }));
+  assert.deepEqual(api.calls, []);
+});
+
+test('the diary counts the use by the kind its caller logged', () => {
+  assert.match(diaryStore, /export async function addDiaryItem\(foodItem, meal, date, \{ kind = null \} = \{\}\)/);
+  assert.match(diaryStore, /markCatalogItemUsed\(NtApi, kind, item, targetDate\)\.catch\(/);
+  assert.doesNotMatch(diaryStore, /NtApi\.markFoodUsed\(item\.id/);
+});
+
+test("the pane's Add to Diary says what it logs, on every path", () => {
+  assert.match(sheet, /dispatch\('addToDiary', \{ food: _displayFood, meal, kind \}\)/);
+  const onAdd = foods.match(/async function onDetailAddToDiary\(e\) \{[\s\S]*?\n  \}/)[0];
+  assert.match(onAdd, /const kind = e\.detail\.kind \|\| 'food';/);
+  assert.match(onAdd, /promptKind = kind;/);
+  assert.match(onAdd, /addDiaryItem\(item, chosenMeal, undefined, \{ kind: savedKind \}\)/);
+  const noNav = foods.match(/async function _addFoodToDiaryNoNav\(food, qty, kind = null\) \{[\s\S]*?\n  \}/)[0];
+  assert.match(noNav, /addDiaryItem\(item, Number\(pickMeal\) \|\| 0, pickDate \|\| undefined, \{ kind \}\)/);
+  assert.match(foods, /_addFoodToDiaryNoNav\(food, qty, kind\)/);
+  assert.match(foods, /_addFoodToDiary\(food, parseDecimal\(promptServings\) \|\| 1, promptKind\)/);
+  assert.match(foods, /_addFoodToDiary\(food, 1, pickedKind\)/);
+  // Every item put in the quantity prompt says what it is.
+  const sets = [...foods.matchAll(/\bpromptFood = (?!null)[^;]+;\n\s*(.*)/g)];
+  assert.ok(sets.length >= 3);
+  for (const m of sets) assert.match(m[1], /^promptKind = /, m[0]);
 });
