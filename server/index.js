@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { rememberAdminOrigin } from './lib/public-url.js';
+import { corsOrigin } from './lib/cors.js';
 // Forward-proxy support (#177). Self-installs an undici
 // EnvHttpProxyAgent as the global fetch dispatcher when
 // HTTP_PROXY / HTTPS_PROXY / NO_PROXY (or lowercase equivalents)
@@ -128,22 +129,15 @@ router.use('/api/coaching', express.json({ limit: '5mb' }));
 router.use(express.json({ limit: '1mb' }));
 router.use(cookieParser());
 
-// CORS — allow cross-origin requests from the Android app and same-origin.
-// Capacitor WebView origins we accept:
-//   https://localhost                — legacy default before the hostname flip
-//   http://localhost                 — legacy http scheme
-//   https://app.nutritrace.local     — current app identity (see
-//                                      capacitor.config.ts for why)
-// Same-host origins are always allowed (PWA served from this instance).
+// CORS: the Android app's WebView (https://app.nutritrace.local, see
+// capacitor.config.ts, and https://localhost from versions before it) and
+// PUBLIC_URL, each compared exactly (lib/cors.js). The web app calls its own
+// address and needs none. The answer depends on Origin, so caches are told.
 router.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    const host = req.headers.host;
-    const isCapacitor = origin === 'https://localhost'
-      || origin === 'http://localhost'
-      || origin === 'https://app.nutritrace.local';
-    const isSameHost = host && origin.includes(host);
-    if (isCapacitor || isSameHost) {
+  res.vary('Origin');
+  if (req.headers.origin) {
+    const origin = corsOrigin(req, { appOrigins: ['https://app.nutritrace.local', 'https://localhost'] });
+    if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');

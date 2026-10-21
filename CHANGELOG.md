@@ -43,6 +43,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Test Connection is always in Settings > AI Assistant.** It was only in the status line, which showed nothing until every setting was filled in, and never for OpenAI Compatible without a key. A setting filled in last tests on its own once everything it needs is there, and a test only counts for the settings it tested.
 - **When Trace gets no answer from your provider, it says what to check** instead of "Failed to fetch": the Base URL, or a server that has to allow this site on every answer, errors included, or an https:// address for a page on HTTPS. A reverse proxy that adds CORS headers only to successful answers hid the provider's real error, such as a model that can't use tools.
 
+### Security
+
+- **Pages on lookalike addresses can no longer read or change your account.** The server let any web page whose address contained its own name call it with your sign-in and read the answer: `nutrition.example.com.attacker.example`, `xnutrition.example.com`, any subdomain of it, the same name on another port, or on a home network `:30011` for a server on `:3001`. Such a page under your own domain or on your server's machine could read and change your account while you were signed in; a page anywhere else got nothing, unless the server runs without accounts (single-user mode), where it could read what your browser can reach. Someone would need a page on such an address and you to open it. Only the Android app's own addresses and `PUBLIC_URL` are allowed now, compared exactly; the Android app, older versions included, works as before.
+
 ---
 
 ## [1.5.0-dev01] - 2026-10-14 (pre-release)

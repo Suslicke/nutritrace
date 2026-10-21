@@ -199,6 +199,16 @@ of the way (dialogs, sheets, menus, Trace) off the crease; a diary,
 chart or photo may cross it. Wide layouts gate on `html.wide-content`
 (720px of content beside the sidebar), not on the viewport width.
 
+### Only the app's own addresses get CORS
+
+`server/lib/cors.js` (identical in all four Trace apps) decides which pages
+on another address may call the API with the person's sign-in. Allowed: the
+Android app's WebView (`https://app.nutritrace.local`, and
+`https://localhost` from versions before it) and the address in
+`PUBLIC_URL`, each compared whole: scheme, host and port. Anything else gets
+no CORS headers. The web app calls its own address, which needs none;
+the API, MCP and calls from other servers send no Origin.
+
 ## Android Local Mode
 
 NutriTrace on Android runs **standalone (offline-only)** or
