@@ -141,8 +141,8 @@ services:
 | `SMTP_FROM` | No | — | From address, e.g. `"NutriTrace" <noreply@example.com>` |
 | `AI_PROVIDER` | No | — | `claude` \| `openai` \| `gemini` \| `oai-compat`. If set, AI calls are proxied server-side and the provider/model/key fields are locked in Settings for all users. |
 | `AI_API_KEY` | No | — | API key for the chosen provider. Server-only, never reaches the browser. Optional when `AI_PROVIDER=oai-compat`. |
-| `AI_MODEL` | No | provider default | Optional model override (e.g. `claude-haiku-4-5-20251001`, `llama3.1:8b`). Required when `AI_PROVIDER=oai-compat`. |
-| `AI_BASE_URL` | No | — | Required when `AI_PROVIDER=oai-compat`. Base URL of your OpenAI-compatible endpoint, e.g. `http://ollama:11434`. Reached from the server container, not the browser — Docker Compose sidecars on internal networks work. |
+| `AI_MODEL` | No | provider default | Optional model override (e.g. `claude-haiku-5-5`, `llama3.1:8b`). Required when `AI_PROVIDER=oai-compat`. |
+| `AI_BASE_URL` | No | — | Required when `AI_PROVIDER=oai-compat`. Base URL of your OpenAI-compatible endpoint, e.g. `http://ollama:11434`, with or without `/v1` on the end, or the whole `/v1/chat/completions` address. Reached from the server container, not the browser, so Docker Compose sidecars on internal networks work. |
 | `AI_ENABLED` | No | — | If `true`, auto-enables the AI Assistant for all users. |
 | `MCP_ENABLED` | No | `0` | Set to `1` to expose the Model Context Protocol endpoint at `/api/mcp`. Off by default. See [the MCP setup guide](https://traceapps.github.io/docs/nutritrace/mcp/) for Claude Desktop / Cursor / Codex config. |
 | `MCP_WRITE_ENABLED` | No | `0` | Set to `1` to allow MCP write tools (`log_food`, `log_water`, `log_meal`, `log_body_stat`) to be registered. Also requires the calling token to hold `mcp:write`. |
