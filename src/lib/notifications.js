@@ -441,6 +441,9 @@ export async function sendNtfy(url, topic, token, title, message, priority = 5) 
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   if (isNative) {
+    // Android's CapacitorHttp sends no body at all without a Content-Type,
+    // and ntfy then shows "triggered" in place of the message.
+    headers['Content-Type'] = 'text/plain; charset=utf-8';
     const { NativeHttp } = await import('./native-http.js');
     const resp = await NativeHttp.post({ url: endpoint, headers, data: message });
     if (resp.status < 200 || resp.status >= 300) throw new Error(`ntfy ${resp.status}`);

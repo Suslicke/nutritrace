@@ -32,7 +32,12 @@ async function http(method, o) {
   const headers = { ...(o.headers || {}) };
   const kept = readJar()[host];
   if (kept && Object.keys(kept).length) headers.Cookie = Object.entries(kept).map(([k, v]) => `${k}=${v}`).join('; ');
-  const body = o.data == null ? undefined : (typeof o.data === 'string' ? o.data : JSON.stringify(o.data));
+  // The body as Capacitor's Android HTTP sends it: none at all without a
+  // Content-Type, a string as it is, anything else as JSON
+  // (CapacitorHttpUrlConnection.setRequestBody).
+  const type = Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1];
+  const body = o.data == null || method === 'GET' || method === 'HEAD' || !type ? undefined
+    : (typeof o.data === 'string' ? o.data : JSON.stringify(o.data));
   const r = await fetch(o.url, { method, headers, body });
   const jar = readJar();
   for (const c of r.headers.getSetCookie?.() || []) {
@@ -69,4 +74,10 @@ export const CapacitorCookies = {
   _all: async () => readJar(),
 };
 export const App = { addListener() {} };
+// The phone's own notifications (lib/notifications.js), shown nowhere.
+export const LocalNotifications = {
+  schedule: async () => ({}), cancel: async () => {}, getPending: async () => ({ notifications: [] }),
+  checkPermissions: async () => ({ display: 'granted' }), requestPermissions: async () => ({ display: 'granted' }),
+  createChannel: async () => {}, addListener: async () => ({ remove() {} }),
+};
 export default {};
