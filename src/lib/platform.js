@@ -81,6 +81,9 @@ export function needsNativeSetup() {
 export function setAuthToken(token) {
   if (token) localStorage.setItem('nt:authToken', token);
   else localStorage.removeItem('nt:authToken');
+  // A sign-in means the server has accounts: the next launch knows it
+  // before the server answers (stores/auth.js). Signing out keeps it.
+  if (token) localStorage.setItem('nt:cachedUserMgmt', '1');
   _mirrorAuthToSyncMeta();
 }
 

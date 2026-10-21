@@ -522,7 +522,10 @@
     "options_failed": "Couldn't load this server's sign-in options. Retry, or sign in with your password if the server allows it.",
     "token_refused": "This sign-in couldn't be checked, so it was stopped. If your server is older than NutriTrace 1.4, update it, or connect with your password.",
     "retry": "Retry",
-    "checking": "Checking sign-in options…"
+    "checking": "Checking sign-in options…",
+    "unreachable": "Can't reach your server right now. Check that it's running, then Retry.",
+    "proxy_web": "Something in front of your server is asking you to sign in. Sign in there, then reload this page.",
+    "server_error": "Your server answered with an error. Try again in a moment."
   },
   "native_setup": {
     "subtitle": "Trace Every Bite",

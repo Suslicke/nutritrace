@@ -340,7 +340,8 @@ test('wiring: every connect screen uses the shared discovery and says what it co
 
   const login = read('../src/routes/Login.svelte');
   assert.match(login, /if \(isNative\) data = \(await discoverSignIn\(getServerUrl\(\)\)\)\.status;/, 'the app reads it natively');
-  assert.match(login, /\{#if optionsError\}[\s\S]*?on:click=\{loadSignInOptions\}/);
+  assert.match(login, /optionsError = serverProblem\(e\);/);
+  assert.match(login, /\{#if problem\}[\s\S]*?on:click=\{\$authUnreachable \? retryServer : loadSignInOptions\}/);
   assert.match(login, /try \{ data = await responseJson\(res\); \} catch \(e\) \{ showError\(e\.message\); return; \}/);
   assert.match(read('../src/lib/oidc-app-handoff.js'), /export function challengeSent\(\)/);
 });

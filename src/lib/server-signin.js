@@ -93,6 +93,30 @@ export function _useHttpForTests(http) { _httpImpl = http; }
 const _ok = (res) => res.status >= 200 && res.status < 300;
 
 /**
+ * The error for a reply the server's JSON says failed: its own error (a 5xx,
+ * or 429 when busy) is the server answering; anything else, or nothing to
+ * read, is it out of reach.
+ */
+export function statusError(status, data) {
+  const own = data && typeof data === 'object' && Object.keys(data).length > 0 && (status >= 500 || status === 429);
+  return own ? Object.assign(new Error(`server error ${status}`), { status, serverError: true }) : _unreachable(status);
+}
+
+/**
+ * Why the server couldn't be read, one word every screen turns into its line,
+ * so a sign-in page says one reason: 'proxy' (something in front answered
+ * with a page), 'server_error' (the server's own error), 'unreachable' (no
+ * answer, too slow, or a gateway's error page), or 'options' (any other
+ * reply that couldn't be read).
+ */
+export function serverProblem(e) {
+  if (e?.webPage) return 'proxy';
+  if (e?.serverError) return 'server_error';
+  if (e?.unreachable || e instanceof TypeError || e?.name === 'TimeoutError' || e?.name === 'AbortError') return 'unreachable';
+  return 'options';
+}
+
+/**
  * Whether this is a NutriTrace server the app can sign in to: throws with
  * code 'needs_setup' (a fresh install), a web page error (something else
  * answered), or "can't reach" otherwise.
@@ -113,11 +137,15 @@ export async function checkServer(url) {
  */
 export async function discoverSignIn(url) {
   const http = await _http();
-  const res = await http.get({ url: `${url}/api/auth/status` });
+  let res;
+  // No answer at all (the server off, no network, too slow): out of reach.
+  try { res = await http.get({ url: `${url}/api/auth/status` }); } catch (e) {
+    throw Object.assign(_unreachable(0), { cause: e });
+  }
   const data = serverJson(res);
   if (!_ok(res)) {
     console.warn('[server-signin] sign-in options: status', res.status);
-    throw _unreachable(res.status);
+    throw statusError(res.status, data);
   }
   return {
     providers: Array.isArray(data?.oidc?.providers) ? data.oidc.providers : [],

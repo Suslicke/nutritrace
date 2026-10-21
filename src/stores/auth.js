@@ -1,7 +1,8 @@
-import { writable } from 'svelte/store';
+import { writable, get as getStore } from 'svelte/store';
 import { loadServerSettings } from './settings.js';
 import { isNative, getServerUrl, getAuthToken, apiUrl as _apiUrl } from '../lib/platform.js';
 import { setCoachingFromServer, loadCachedCoaching, clearCoaching } from './coaching.js';
+import { responseJson, webPageError, statusError, serverProblem } from '../lib/server-signin.js';
 
 function _authHeaders() {
   const h = {};
@@ -17,6 +18,38 @@ export const currentUser = writable(null);
 
 /** Whether user management is enabled on the server */
 export const userMgmtActive = writable(false);
+
+/** Why the server couldn't say who is signed in at startup, or null:
+ *  'unreachable', 'server_error' (it answered with its own error) or
+ *  'proxy' (something in front of it asked to sign in).
+ *  The sign-in page says it with Retry, never the app with nobody signed in. */
+export const authUnreachable = writable(null);
+// Whoever signs in (any path) is past it: a later sign-out never shows it again.
+currentUser.subscribe((u) => { if (u) authUnreachable.set(null); });
+
+// Whether the server has accounts, as it last said: '1' yes, '0' single-user,
+// none when never heard from. Decides the first screen when it can't be asked.
+const MGMT_KEY = 'nt:cachedUserMgmt';
+const _lastMgmt = () => localStorage.getItem(MGMT_KEY);
+
+// A browser used with a single-user server before this was remembered: its
+// settings sit under the bare `wl_` prefix (setup done), and nobody ever
+// signed in here (no `wl_u<id>_` settings, no wl:userId).
+function _singleUserBrowser() {
+  if (localStorage.getItem('wl:userId')) return false;
+  let setUp = false;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (/^wl_u\d+(@[^_]*)?_/.test(k)) return false;
+    if (k === 'wl_setupComplete') setUp = true;
+  }
+  return setUp;
+}
+
+// No answer at all (offline, the connection refused, too slow), as opposed
+// to an answer that isn't the server's (a proxy's page, a gateway's 5xx).
+const _noAnswer = (e) => e instanceof TypeError || e?.name === 'TimeoutError' || e?.name === 'AbortError'
+  || (typeof navigator !== 'undefined' && navigator.onLine === false);
 
 /** True when the server has no users yet — PWA must show setup screen */
 export const setupRequired = writable(false);
@@ -109,11 +142,17 @@ export async function loadAuthState() {
       try {
         const user = JSON.parse(cached);
         currentUser.set(user);
-        userMgmtActive.set(localStorage.getItem('nt:cachedUserMgmt') === '1');
+        userMgmtActive.set(_lastMgmt() === '1');
         localStorage.setItem('wl:userId', String(user.id));
         loadCachedCoaching(user.id);
       } catch {}
     }
+    // No account on the phone (signed out, or another's was cleared): the
+    // sign-in page until the server says otherwise, never the app with
+    // nobody. Only a server last known to be single-user opens the app.
+    // A stored session (just connected, the account not fetched yet) opens the
+    // app as before, and the refresh fills in the account.
+    if (getStore(currentUser) == null && !getAuthToken() && _lastMgmt() !== '0') userMgmtActive.set(true);
     // Refresh auth from server in the background (non-blocking)
     _refreshAuthFromServer();
     return;
@@ -126,16 +165,29 @@ export async function loadAuthState() {
 /** Fetch auth state from server — used by PWA (blocking) and as background refresh for native */
 async function _fetchAuthFromServer() {
   try {
+    // redirect 'manual': the server never redirects these, so a redirect is
+    // something in front of it sending this browser to its own sign-in.
     const [statusRes, meRes] = await Promise.all([
-      fetch(_apiUrl('/api/auth/status'), { credentials: 'include', headers: _authHeaders(), signal: AbortSignal.timeout(8000) }),
-      fetch(_apiUrl('/api/auth/me'),     { credentials: 'include', headers: _authHeaders(), signal: AbortSignal.timeout(8000) }),
+      fetch(_apiUrl('/api/auth/status'), { credentials: 'include', redirect: 'manual', headers: _authHeaders(), signal: AbortSignal.timeout(8000) }),
+      fetch(_apiUrl('/api/auth/me'),     { credentials: 'include', redirect: 'manual', headers: _authHeaders(), signal: AbortSignal.timeout(8000) }),
     ]);
-    const statusData = await statusRes.json();
-    const meData     = await meRes.json();
+    if (statusRes.type === 'opaqueredirect' || meRes.type === 'opaqueredirect') throw webPageError();
+    // A sign-in proxy's page or a gateway's error page isn't the server's
+    // answer (lib/server-signin.js): the catch below says which.
+    const statusData = await responseJson(statusRes);
+    const meData     = await responseJson(meRes);
+    // The server's own error (5xx, 429) is it answering; anything else is it out of reach.
+    if (!statusRes.ok) throw statusError(statusRes.status, statusData);
+    if (!meRes.ok) throw statusError(meRes.status, meData);
+    // Every NutriTrace says whether it has accounts: an empty or other answer
+    // is something else in the way, never taken for a single-user server.
+    if (typeof statusData.active !== 'boolean') throw webPageError();
     const user       = meData.user || null;
     const active     = !!statusData.active;
     userMgmtActive.set(active);
     setupRequired.set(!!statusData.setup_required);
+    authUnreachable.set(null);
+    localStorage.setItem(MGMT_KEY, active ? '1' : '0');
     if (meData.features) _setFeatures(meData.features);
 
     // PWA single-user mode (server reachable, user mgmt off): hydrate the
@@ -161,26 +213,43 @@ async function _fetchAuthFromServer() {
     if (meData.csrf) localStorage.setItem('nt:csrf', meData.csrf);
     else             localStorage.removeItem('nt:csrf');
     // Cache for offline fallback
-    if (user) {
-      localStorage.setItem('nt:cachedUser', JSON.stringify(user));
-      localStorage.setItem('nt:cachedUserMgmt', active ? '1' : '0');
-    }
+    if (user) localStorage.setItem('nt:cachedUser', JSON.stringify(user));
     if (user) await loadServerSettings();
-  } catch {
+  } catch (e) {
     // Offline fallback for PWA (native uses cached auth above)
     const cached = localStorage.getItem('nt:cachedUser');
     if (cached) {
       try {
         const user = JSON.parse(cached);
         currentUser.set(user);
-        userMgmtActive.set(localStorage.getItem('nt:cachedUserMgmt') === '1');
+        userMgmtActive.set(_lastMgmt() === '1');
         localStorage.setItem('wl:userId', String(user.id));
         loadCachedCoaching(user.id);
         return;
       } catch {}
     }
-    userMgmtActive.set(false);
+    // Nobody signed in on this browser, and the server can't say who may
+    // be: a server known to be single-user opens as it would online; any
+    // other gets the sign-in page saying why, with Retry. Never the app
+    // with nobody signed in.
+    const last = _lastMgmt();
+    if (last === '0' || (last == null && _singleUserBrowser())) {
+      userMgmtActive.set(false);
+      await _hydrateLocalUser({ setUserId: false });
+      return;
+    }
+    // Never heard from and simply no answer (a browser from before this was
+    // remembered, opened offline): as it always was, remembering nothing.
+    if (last == null && _noAnswer(e)) {
+      userMgmtActive.set(false);
+      currentUser.set(null);
+      return;
+    }
+    console.warn('[auth] server state unreadable:', e?.status || e?.message);
+    userMgmtActive.set(true);
     currentUser.set(null);
+    const why = serverProblem(e);
+    authUnreachable.set(why === 'options' ? 'unreachable' : why);
   }
 }
 
@@ -204,7 +273,7 @@ async function _refreshAuthFromServer() {
           const sd = await statusRes.json();
           active = !!sd.active;
           userMgmtActive.set(active);
-          localStorage.setItem('nt:cachedUserMgmt', active ? '1' : '0');
+          localStorage.setItem(MGMT_KEY, active ? '1' : '0');
           coachingSupportedNow = sd.coaching ?? 0;
         } catch {}
       }
