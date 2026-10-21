@@ -11,6 +11,7 @@
   import Dialog      from '../components/ui/Dialog.svelte';
   import Sheet       from '../components/ui/Sheet.svelte';
   import FoodDetailSheet from '../components/ui/FoodDetailSheet.svelte';
+  import { deleteCatalogItem, catalogKindForTab } from '../lib/catalog-delete.js';
   import UnitPicker  from '../components/ui/UnitPicker.svelte';
   import { portal } from '../lib/portal.js';
   import { decimalInput, parseDecimal } from '../lib/decimal-input.js';
@@ -516,6 +517,9 @@
   // populates this pane instead of opening the modal FoodDetailSheet.
   // The pane is sticky-positioned in the third column of .foods-body.
   let _paneFood = null;
+  // What the pane shows, set with _paneFood so Delete reaches the right
+  // table (#282).
+  let _paneKind = 'food';
   let _foodsViewportPane = false;
   $: _foodsPaneMode = _foodsViewportPane && !$forceMobileLayout;
   // Phase D — keyboard shortcut plumbing. bind:this from the search
@@ -1151,17 +1155,18 @@
       // on mobile, drop straight into the MealEditor since there's
       // no pane to preview into.
       if (activeTab === 1) {
-        if (_foodsPaneMode) { _paneFood = food; return; }
+        if (_foodsPaneMode) { _paneKind = 'meal'; _paneFood = food; return; }
         return openMealEditor(food, false);
       }
       if (activeTab === 2) {
-        if (_foodsPaneMode) { _paneFood = food; return; }
+        if (_foodsPaneMode) { _paneKind = 'recipe'; _paneFood = food; return; }
         return openMealEditor(food, true);
       }
       detailSheetFood = food;
       if (_foodsPaneMode) {
         // Desktop wide: populate the right-pane preview instead of
         // opening the modal sheet.
+        _paneKind = 'food';
         _paneFood = food;
       } else {
         detailSheetOpen = true;
@@ -1395,8 +1400,12 @@
   }
 
   async function deleteItem(item) {
-    if (currentStore === 'foodList') await NtApi.deleteFood(item.id);
-    else await NtApi.deleteMeal(item.id);
+    try {
+      await deleteCatalogItem(NtApi, catalogKindForTab(currentStore), item.id);
+    } catch (e) {
+      showError(e?.message || $_('common.errors.delete_failed'));
+      return;
+    }
     await load();
     showSuccess($_('foods.toast.deleted'));
   }
@@ -1449,8 +1458,7 @@
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
-        if (store === 'foodList') await NtApi.deleteFood(id);
-        else await NtApi.deleteMeal(id);
+        await deleteCatalogItem(NtApi, catalogKindForTab(store), id);
         ok++;
       } catch (e) {
         console.error('[foods] bulk delete failed for', id, e);
@@ -2667,6 +2675,7 @@
       <FoodDetailSheet
         embedded={true}
         food={_paneFood}
+        kind={_paneKind}
         offStatus={_paneOffStatus}
         onDismiss={() => _paneFood = null}
         on:edit={onDetailEdit}

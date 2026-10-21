@@ -919,7 +919,15 @@
       "delete_aria": "Delete food",
       "delete_confirm_title": "Delete this food?",
       "delete_confirm_body": "\"{name}\" will be removed from your foods. Existing diary entries that reference this food are kept.",
-      "deleted": "Food deleted"
+      "deleted": "Food deleted",
+      "delete_meal_aria": "Delete meal",
+      "delete_meal_confirm_title": "Delete this meal?",
+      "delete_meal_confirm_body": "\"{name}\" will be removed from your meals. Existing diary entries that reference this meal are kept.",
+      "meal_deleted": "Meal deleted",
+      "delete_recipe_aria": "Delete recipe",
+      "delete_recipe_confirm_title": "Delete this recipe?",
+      "delete_recipe_confirm_body": "\"{name}\" will be removed from your recipes. Existing diary entries that reference this recipe are kept.",
+      "recipe_deleted": "Recipe deleted"
     },
     "sources": {
       "local": "Local",
