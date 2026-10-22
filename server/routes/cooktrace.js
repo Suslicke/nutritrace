@@ -14,6 +14,7 @@
  */
 import { Router } from 'express';
 import { wrap, logger } from '../logger.js';
+import { redactUrl } from '../lib/redact-url.js';
 import { requireAuth, userMgmtActive } from '../middleware/auth.js';
 import db from '../db.js';
 import { fetchChecked, serviceBase, readBody } from '../lib/ssrf-guard.js';
@@ -50,7 +51,7 @@ function _getStoredBase(userId) {
 router.post('/proxy', async (req, res) => {
   const rid = Math.random().toString(36).slice(2, 8);
   try {
-    logger.info(`[cooktrace-proxy ${rid}] start user=${req.user?.id ?? 'null'} path=${req.body?.path}`);
+    logger.info(`[cooktrace-proxy ${rid}] start user=${req.user?.id ?? 'null'} path=${redactUrl(req.body?.path)}`);
     const { baseUrl, token, path, method } = req.body || {};
     if (!baseUrl || !token || !path) {
       return res.status(400).json({ error: 'baseUrl, token and path required' });
@@ -64,7 +65,7 @@ router.post('/proxy', async (req, res) => {
         return res.status(400).json({ error: 'No CookTrace URL configured. Set it in Settings > Connected Services first.' });
       }
       if (allowedBase !== requestedBase) {
-        logger.warn(`[cooktrace-proxy ${rid}] baseUrl mismatch saved=${allowedBase} requested=${requestedBase}`);
+        logger.warn(`[cooktrace-proxy ${rid}] baseUrl mismatch saved=${redactUrl(allowedBase)} requested=${redactUrl(requestedBase)}`);
         return res.status(403).json({ error: 'CookTrace URL must match the one saved in Settings.' });
       }
     }
@@ -74,7 +75,7 @@ router.post('/proxy', async (req, res) => {
       return res.status(400).json({ error: 'Not a CookTrace request this app makes' });
     }
     const url = requestedBase + apiPath;
-    logger.info(`[cooktrace-proxy ${rid}] fetching ${url}`);
+    logger.info(`[cooktrace-proxy ${rid}] fetching ${redactUrl(url)}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
 

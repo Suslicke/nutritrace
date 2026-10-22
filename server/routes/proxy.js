@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { logger } from '../logger.js';
+import { redactUrl } from '../lib/redact-url.js';
 import { fetchChecked, readBody } from '../lib/ssrf-guard.js';
 import { frameAncestorsDirective } from '../lib/frame-ancestors.js';
 import { makeRateLimiter } from '../middleware/rate-limit.js';
@@ -53,7 +54,7 @@ router.get('/', async (req, res) => {
       }
       // local returned undefined → not an OFF request shape we handle, fall through to remote
       if (isLocalOffOnly()) {
-        logger.warn(`[proxy] OFF_LOCAL_ONLY set but local mirror returned no shape match for ${url} — refusing remote per air-gap policy`);
+        logger.warn(`[proxy] OFF_LOCAL_ONLY set but local mirror returned no shape match for ${redactUrl(url)} — refusing remote per air-gap policy`);
         return res.status(503).json({ error: 'Local OFF mirror has no answer; remote disabled (OFF_LOCAL_ONLY)' });
       }
     }
@@ -68,7 +69,7 @@ router.get('/', async (req, res) => {
     }, { maxRedirects: 3 });
 
     if (!response.ok) {
-      logger.warn(`[proxy] upstream ${response.status} for ${url}`);
+      logger.warn(`[proxy] upstream ${response.status} for ${redactUrl(url)}`);
       return res.status(response.status).json({ error: `Upstream ${response.status}` });
     }
 
@@ -98,7 +99,7 @@ router.get('/', async (req, res) => {
     clearTimeout(timer);
     res.json(body);
   } catch(e) {
-    logger.error('[proxy] fetch error:', e.message, 'url:', url);
+    logger.error('[proxy] fetch error:', e.message, 'url:', redactUrl(url));
     res.status(503).json({ error: 'Could not reach that service' });
   }
 });

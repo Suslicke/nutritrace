@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { logger } from '../logger.js';
+import { redactUrl } from './redact-url.js';
 import { detectImageTypeFromBuffer } from './image-magic.js';
 import { fetchChecked, readBody } from './ssrf-guard.js';
 
@@ -58,7 +59,7 @@ export async function localizeImage(img_url, opts = {}) {
   }
   // Reject non-http(s) protocols outright
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    logger.warn(`[image-localizer] Refusing non-http(s) URL: ${img_url.substring(0, 80)}`);
+    logger.warn(`[image-localizer] Refusing non-http(s) URL: ${redactUrl(img_url).substring(0, 80)}`);
     return img_url;
   }
   // Through the address check (server/lib/ssrf-guard.js): never cloud
@@ -91,7 +92,7 @@ export async function localizeImage(img_url, opts = {}) {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NutriTrace/1.0)' },
       }, guard);
       if (!response.ok) {
-        logger.debug(`[image-localizer] Failed to download (${response.status}): ${img_url.substring(0, 80)}`);
+        logger.debug(`[image-localizer] Failed to download (${response.status}): ${redactUrl(img_url).substring(0, 80)}`);
         try { await response.body?.cancel(); } catch {}
         return img_url; // Keep original URL, might work sometimes
       }
@@ -99,14 +100,14 @@ export async function localizeImage(img_url, opts = {}) {
       buffer = await readBody(response, MAX_IMAGE_BYTES);
     } finally { clearTimeout(timer); }
     if (buffer.length < 100) {
-      logger.debug(`[image-localizer] Image too small (${buffer.length}b), skipping: ${img_url.substring(0, 80)}`);
+      logger.debug(`[image-localizer] Image too small (${buffer.length}b), skipping: ${redactUrl(img_url).substring(0, 80)}`);
       return img_url;
     }
     // Only an image is kept: anything else stays out of /uploads, where it
     // could be read back.
     const detected = detectImageTypeFromBuffer(buffer);
     if (!detected) {
-      logger.warn(`[image-localizer] Not an image, not stored: ${img_url.substring(0, 80)}`);
+      logger.warn(`[image-localizer] Not an image, not stored: ${redactUrl(img_url).substring(0, 80)}`);
       return img_url;
     }
 
@@ -117,10 +118,10 @@ export async function localizeImage(img_url, opts = {}) {
     fs.writeFileSync(filePath, buffer);
 
     const localPath = `/uploads/${filename}`;
-    logger.debug(`[image-localizer] Downloaded: ${img_url.substring(0, 60)} → ${localPath}`);
+    logger.debug(`[image-localizer] Downloaded: ${redactUrl(img_url).substring(0, 60)} → ${localPath}`);
     return localPath;
   } catch (e) {
-    logger.debug(`[image-localizer] Error: ${e.message} — ${img_url.substring(0, 80)}`);
+    logger.debug(`[image-localizer] Error: ${e.message} — ${redactUrl(img_url).substring(0, 80)}`);
     return img_url; // Keep original on failure
   }
 }
