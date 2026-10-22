@@ -141,6 +141,7 @@ Pre-release testers can grab the rolling `dev-latest` APK; occasional milestone 
 | `TRACE_REQUEST_PATHS` | No | `/api/diary,/api/sync/push` | Comma-separated body-trace path prefixes; `*` traces all and `none` traces no request bodies. |
 | `TRACE_BODY_MAX_BYTES` | No | `32768` | Maximum serialized bytes emitted for one traced request body. |
 | `INSECURE_COOKIES` | If on plain HTTP | `0` | Set `1` to send the sign-in cookie over plain HTTP too. The cookie is HTTPS-only by default, so at a plain `http://` address other than `localhost` (a LAN IP, an Unraid WebUI link) the browser drops it and signing in loops back to the sign-in page; the sign-in and setup screens say so. Use `1` only on a trusted LAN, and leave it `0` behind HTTPS. See [Plain-HTTP LAN](https://traceapps.github.io/docs/getting-started/lan-http/). |
+| `TZ` | No | `UTC` | The server's time zone, such as `America/New_York` (needs no tzdata). Names backups and runs a backup schedule that has no time zone of its own, `BACKUP_TIME` included. Set it in the container's environment and restart. |
 | `MAX_SESSION_HOURS` | No | `8760` (1 year) | Cap on the auth cookie lifetime. |
 | `RECOVERY_TOKEN` | No |  | Passphrase to disable user management from the login page (lockout recovery). |
 | `OFF_LOCAL_DB` | No |  | Path to an Open Food Facts Parquet snapshot (or legacy DuckDB file) for an air-gap mirror. |

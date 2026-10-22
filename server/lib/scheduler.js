@@ -12,6 +12,7 @@
 import db from '../db.js';
 import { linkBase } from './public-url.js';
 import { logger } from '../logger.js';
+import { isBackupDue } from './backup-schedule.js';
 
 function _getUserSetting(userId, key) {
   const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
@@ -620,30 +621,14 @@ async function _tick() {
 // interval-since-last-run gating handles re-tick safety so a 15-min tick
 // can't accidentally fire two backups in the same window.
 
-const _BACKUP_INTERVAL_MS = {
-  daily:   22 * 60 * 60 * 1000,           // 22h (DST + tick buffer)
-  weekly:  6.5 * 24 * 60 * 60 * 1000,     // 6.5 days
-  monthly: 28 * 24 * 60 * 60 * 1000,      // 28 days
-};
-
 async function _checkBackupSchedule() {
   const { getScheduleConfig, runScheduledBackup } = await import('../routes/full-backup.js');
   const cfg = getScheduleConfig();
   if (cfg.schedule === 'off') return;
-  const intervalMs = _BACKUP_INTERVAL_MS[cfg.schedule];
-  if (!intervalMs) return;
+  // The time is on the clock of whoever set it, in the zone saved with it (TraceApps/notetrace#44).
+  if (!isBackupDue(cfg)) return;
 
-  const [hh, mm] = cfg.time.split(':').map(n => parseInt(n, 10));
-  const now = new Date();
-  const scheduledMs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0).getTime();
-  if (now.getTime() < scheduledMs) return; // not yet scheduled time today
-
-  if (cfg.lastAutoRun) {
-    const lastMs = new Date(cfg.lastAutoRun).getTime();
-    if (Number.isFinite(lastMs) && now.getTime() - lastMs < intervalMs) return;
-  }
-
-  logger.info(`[backup] auto-backup due (schedule=${cfg.schedule}, time=${cfg.time}, retention=${cfg.retention}, last=${cfg.lastAutoRun || 'never'})`);
+  logger.info(`[backup] auto-backup due (schedule=${cfg.schedule}, time=${cfg.time} ${cfg.runsIn}, retention=${cfg.retention}, last=${cfg.lastAutoRun || 'never'})`);
   try { await runScheduledBackup(); }
   catch (e) { /* runScheduledBackup logs + stores the error itself */ }
 }

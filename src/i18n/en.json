@@ -2192,6 +2192,8 @@
       "schedule_monthly": "Monthly",
       "time": "Time",
       "keep_last": "Keep Last",
+      "zone_differs": "Backups run at {time} in {zone}, which is {local} where you are. Use My Time Zone runs them at {time} on your clock.",
+      "use_my_zone": "Use My Time Zone",
       "last_failed": "Last auto-backup failed: {error}",
       "last_success": "Last auto-backup: {when}",
       "next": "Next: {when}",
