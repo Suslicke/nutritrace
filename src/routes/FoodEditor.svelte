@@ -143,6 +143,9 @@
   let showAllNutrients = false;
   let contributing = false;
   let offSuccess = false;
+  // No Open Food Facts login in Settings: say so and link there (#284).
+  let offNeedsAccount = false;
+  let offPhotoFailed = false;
   // Off by default — proportional scaling can surprise users editing a single
   // value (e.g. correcting a typo'd protein gram). User opts in via the link
   // toggle next to the unit selector.
@@ -273,6 +276,8 @@
       await _openOffPage();
       return;
     }
+    offNeedsAccount = false; offPhotoFailed = false;
+    if (!String($offUsername || '').trim() || !$offPassword) { offNeedsAccount = true; return; }
     contributing = true; offSuccess = false; offVerified = null;
     try {
       const { API } = await import('../lib/api.js');
@@ -288,9 +293,18 @@
       await _doUploadToOFF(API);
       offProductExists = true; // we just contributed it, mark as present
     } catch(e) {
-      showError($_('food_editor.toast.off_upload_failed', { values: { error: e.message } }));
+      if (e?.kind === 'no_account') offNeedsAccount = true;
+      else showError(_offShareError(e));
       contributing = false;
     }
+  }
+
+  // Open Food Facts' answer in plain words, never a parse error (#284).
+  function _offShareError(e) {
+    if (e?.kind === 'login') return $_('food_editor.off_share.login');
+    if (e?.kind === 'refused') return e.detail ? $_('food_editor.off_share.refused', { values: { detail: e.detail } }) : $_('food_editor.off_share.refused_plain');
+    if (e?.kind === 'unreachable') return $_('food_editor.off_share.unreachable');
+    return $_('food_editor.toast.off_upload_failed', { values: { error: e?.message || '' } });
   }
 
   async function _doUploadToOFF(API) {
@@ -301,12 +315,13 @@
       if (v !== undefined && v !== '' && v !== null && !isNaN(parseFloat(v)))
         nutrition[n.id] = parseFloat(v);
     }
-    await API.contributeToOFF(
+    const sent = await API.contributeToOFF(
       { name: food.name, barcode: food.barcode, brand: food.brand,
-        portion: food.portion, unit: food.unit, nutrition },
+        portion: food.portion, unit: food.unit, nutrition, imgUrl: food.imgUrl },
       { offUsername: $offUsername, offPassword: $offPassword,
         offUploadCountry: $offUploadCountry }
     );
+    offPhotoFailed = sent?.photo === 'failed';
     offSuccess = true;
     contributing = false;
     // Give OFF a few seconds to index, then verify the product is live
@@ -1125,6 +1140,21 @@
               {downloading ? 'Loading…' : downloadSuccess ? 'Updated!' : 'Refresh from OFF'}
             </button>
           </div>
+          {#if offNeedsAccount}
+            <div class="off-prepared-notice" role="status">
+              <span class="material-symbols-rounded" aria-hidden="true">info</span>
+              <div class="off-prepared-body">
+                <p>{$_('food_editor.off_share.need_account')}</p>
+                <a class="btn btn-secondary btn-sm" href={`#/settings/connectedServices?q=${encodeURIComponent($_('settings.connected_services.off.account_note'))}`}>{$_('food_editor.off_share.open_settings')}</a>
+              </div>
+            </div>
+          {/if}
+          {#if offPhotoFailed}
+            <div class="off-prepared-notice" role="status">
+              <span class="material-symbols-rounded" aria-hidden="true">info</span>
+              <div class="off-prepared-body"><p>{$_('food_editor.off_share.photo_failed')}</p></div>
+            </div>
+          {/if}
           {#if _offNotice}
             <div class="off-prepared-notice" role="status">
               <span class="material-symbols-rounded" aria-hidden="true">info</span>

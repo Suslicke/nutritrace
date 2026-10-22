@@ -5,6 +5,7 @@ import { settingPrefix } from './setting-key.js';
 import { rankOFFResults } from './off-rank.js';
 import { offProductName } from './off-name.js';
 import { asSoldNutriments } from './off-nutrition-sets.js';
+import { shareWithOff, OffShareError } from './off-contribute.js';
 
 // In native mode, call external APIs directly (no CORS in WebView).
 // In web mode, go through the server proxy to avoid CORS.
@@ -395,32 +396,28 @@ const API = {
       // Store/import lookup failed for some unrelated reason — don't block
       // the upload over an envLocks fetch glitch.
     }
-    const username = (settings && settings.offUsername) || "nutritrace-app";
-    const password = (settings && settings.offPassword) || "nutritrace";
+    // Only the person's own Open Food Facts login (#284). The shared
+    // "nutritrace-app" login it used to fall back to is refused by OFF.
+    const username = String((settings && settings.offUsername) || '').trim();
+    const password = (settings && settings.offPassword) || '';
+    if (!username || !password) throw new OffShareError('no_account');
     const uploadCountry = (settings && settings.offUploadCountry) || "Auto";
-    const lang = (navigator.language || "en").substring(0, 2);
+    const lang = (navigator.language || "en").substring(0, 2).toLowerCase();
     // If the food's portion is 100g exactly, our nutrition values are
     // per-100g and we send them as such. For any other portion size, our
     // values are per-that-portion, so we send them with nutrition_data_per
-    // = serving and tell OFF the serving size. Previously the function
-    // unconditionally claimed per-100g even when the values were per a
-    // different portion, which corrupted the OFF record.
+    // = serving and tell OFF the serving size.
     const portionVal = parseFloat(portion) || 0;
     const unitVal    = unit || 'g';
     const isPer100g  = portionVal === 100 && unitVal === 'g';
-    const perKey     = isPer100g ? '100g' : 'serving';
-    let params = "code=" + encodeURIComponent(barcode);
-    params += "&user_id=" + encodeURIComponent(username);
-    params += "&password=" + encodeURIComponent(password);
-    params += "&lang=" + lang;
-    params += "&product_name_" + lang + "=" + encodeURIComponent(name);
-    if (brand) params += "&brands=" + encodeURIComponent(brand);
-    params += "&nutrition_data_per=" + perKey;
-    if (!isPer100g) {
-      params += "&serving_size=" + encodeURIComponent(portionVal + " " + unitVal);
-    }
-    if (uploadCountry && uploadCountry !== "Auto")
-      params += "&countries=" + encodeURIComponent(uploadCountry);
+    const fields = {
+      code: barcode, lang, app_name: 'NutriTrace',
+      ['product_name_' + lang]: name,
+      nutrition_data_per: isPer100g ? '100g' : 'serving',
+    };
+    if (brand) fields.brands = brand;
+    if (!isPer100g) fields.serving_size = portionVal + " " + unitVal;
+    if (uploadCountry && uploadCountry !== "Auto") fields.countries = uploadCountry;
     // Per the official OFF spec (docs/api/ref/requestBodies/
     // add_or_edit_a_product.yaml): nutriment field naming is
     // `nutriment_<nutrient_id>` regardless of whether the values are
@@ -435,38 +432,47 @@ const API = {
     const nut = nutrition || {};
     for (const [key, field] of Object.entries(nutMap)) {
       if (nut[key] !== undefined && nut[key] !== "" && !isNaN(parseFloat(nut[key])))
-        params += "&nutriment_" + field + "=" + nut[key];
+        fields["nutriment_" + field] = nut[key];
     }
-    const res = await fetch("https://world.openfoodfacts.org/cgi/product_jqm2.pl?" + params);
-    const json = await res.json();
-    if (json.status !== 1) throw new Error(json.status_verbose || "Upload failed");
+    // The photo goes up after the product, as a multipart POST.
+    let image = imgUrl ? await this._fetchImageBlob(imgUrl) : null;
+    // Over the server's 10 MB cap: the product goes without it.
+    const photoTooBig = !!image && image.size > 10 * 1024 * 1024;
+    if (photoTooBig) image = null;
 
-    // Best-effort image upload as a separate multipart POST. Failure here
-    // doesn't roll back the data upload — the product record is already
-    // created, the image is just an enhancement. Previously the picture
-    // was silently dropped. Image upload uses cgi/product_image_upload.pl
-    // with imagefield=front_<lang> + imgupload_<imagefield>=<file>.
-    if (imgUrl) {
-      try {
-        const blob = await this._fetchImageBlob(imgUrl);
-        if (blob) {
-          const fd = new FormData();
-          fd.append('code', barcode);
-          fd.append('user_id', username);
-          fd.append('password', password);
-          const imagefield = 'front_' + lang;
-          fd.append('imagefield', imagefield);
-          // Field name encodes the slot per OFF's docs.
-          fd.append('imgupload_' + imagefield, blob, 'front.jpg');
-          await fetch('https://world.openfoodfacts.org/cgi/product_image_upload.pl', {
-            method: 'POST', body: fd,
-          });
-        }
-      } catch (e) {
-        console.warn('[OFF] image upload failed (data was still submitted):', e?.message || e);
-      }
+    // The Android app with no server sends to Open Food Facts itself (it
+    // allows any origin). Everything else goes through this app's server,
+    // which POSTs with the login in the body and names the app.
+    if (isNative && !getServerUrl()) {
+      const sent = await shareWithOff({ fetchImpl: fetch, userId: username, password, fields, image });
+      return photoTooBig ? { ...sent, photo: 'failed' } : sent;
     }
-    return true;
+    const fd = new FormData();
+    fd.append('user_id', username);
+    fd.append('password', password);
+    fd.append('fields', JSON.stringify(fields));
+    if (image) fd.append('image', image, 'front.jpg');
+    const headers = {};
+    if (isNative) {
+      const token = getAuthToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      const csrf = localStorage.getItem('nt:csrf');
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
+    let res;
+    try {
+      res = await fetch(apiUrl('/api/off/contribute'), { method: 'POST', headers, body: fd, credentials: 'include', cache: 'no-store' });
+    } catch {
+      throw new Error('Could not reach the NutriTrace server.');
+    }
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (out.kind && out.kind !== 'off_local_only') throw new OffShareError(out.kind, out.detail || '');
+      throw new Error(out.error || `API error ${res.status}`);
+    }
+    if (out.ok !== true) throw new OffShareError('unreachable');
+    return photoTooBig ? { ...out, photo: 'failed' } : out;
   },
 
   // Fetch any imgUrl (relative server path, absolute URL, or data: URI)
@@ -475,9 +481,10 @@ const API = {
   async _fetchImageBlob(imgUrl) {
     if (!imgUrl) return null;
     try {
-      const res = await fetch(imgUrl, { credentials: 'include' });
+      const res = await fetch(resolveAssetUrl(imgUrl), { credentials: 'include' });
       if (!res.ok) return null;
-      return await res.blob();
+      const blob = await res.blob();
+      return blob && blob.size && /^image\//.test(blob.type || 'image/') ? blob : null;
     } catch {
       return null;
     }

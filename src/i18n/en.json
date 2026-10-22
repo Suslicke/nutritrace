@@ -182,7 +182,7 @@
         "import_portion_desc": "When the scanned product has serving data, prefill the food with per-serving values instead of per-100g. Products without serving data on OFF always fall back to per-100g.",
         "account_username": "Account Username",
         "account_password": "Account Password",
-        "account_note": "Optional, only needed to upload edits.",
+        "account_note": "Needed to share products with Open Food Facts. An account is free.",
         "account_create_link": "Create an OFF account →",
         "username_placeholder": "OFF account username",
         "password_placeholder": "OFF account password",
@@ -1460,6 +1460,15 @@
       "implausible": "Open Food Facts only lists this product \"as prepared\", and those values can't be right ({kcal} kcal per 100 {unit}). Enter the values from the label.",
       "none": "Open Food Facts has no nutrition values for this product. Enter them from the label.",
       "note": "Nutrition values are \"as prepared\" (from Open Food Facts)."
+    },
+    "off_share": {
+      "need_account": "Add your Open Food Facts account in Settings to share.",
+      "open_settings": "Open Settings",
+      "login": "Open Food Facts did not accept your username or password. Check them in Settings.",
+      "refused": "Open Food Facts did not accept the product: {detail}",
+      "refused_plain": "Open Food Facts did not accept the product.",
+      "unreachable": "Open Food Facts could not be reached. Try again later.",
+      "photo_failed": "The product was shared, but Open Food Facts did not take the photo."
     },
     "name_placeholder": "Food name",
     "brand_placeholder": "Brand (optional)",
