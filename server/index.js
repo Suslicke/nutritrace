@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { rememberAdminOrigin } from './lib/public-url.js';
 import { corsOrigin } from './lib/cors.js';
 import { crossSiteGuard } from './lib/cross-site.js';
+import { framingHeaders, parseFrameAncestors } from './lib/frame-ancestors.js';
 // Forward-proxy support (#177). Self-installs an undici
 // EnvHttpProxyAgent as the global fetch dispatcher when
 // HTTP_PROXY / HTTPS_PROXY / NO_PROXY (or lowercase equivalents)
@@ -93,6 +94,13 @@ if (BASE_URL && !BASE_URL.startsWith('/')) {
 // Using a sub-router keeps `req.path` in middleware (e.g. csrf.js skip lists)
 // relative to the mount point so existing path checks keep working.
 const router = express.Router();
+
+// Only NutriTrace itself, and the addresses in FRAME_ANCESTORS, may show it
+// in a frame (lib/frame-ancestors.js), so no other site can frame it to
+// trick a click. First, so every answer has it, a refused body included.
+const FRAMING = framingHeaders(process.env.FRAME_ANCESTORS);
+for (const w of parseFrameAncestors(process.env.FRAME_ANCESTORS).warnings) console.warn(`[nutritrace] FRAME_ANCESTORS: ${w}`);
+router.use((req, res, next) => { res.set(FRAMING); next(); });
 
 // Start API request diagnostics before consuming the body so rejected or
 // interrupted requests still have an ID, observed byte count, and outcome.
