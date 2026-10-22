@@ -15,6 +15,7 @@ import { get } from 'svelte/store';
 import { _ } from 'svelte-i18n';
 import { getOpenAIChatParams, openAIBase } from './openai-chat-params.js';
 import { createToolSupportMemory, sendWithToolFallback } from './tool-support.js';
+import { geminiToolResponse } from './gemini-tool-response.js';
 import { REPLY_MAX_TOKENS, sendWithLengthFallback, stoppedShort, stoppedShortError } from './trace-reply.js';
 
 // A reply that stopped short, said in the app's language (trace-reply.js).
@@ -737,7 +738,7 @@ async function _callGeminiWithTools(apiKey, model, messages, systemPrompt, tools
     for (const fc of functionCalls) {
       if (onToolCall) onToolCall(fc.functionCall.name);
       const result = await _runTool(fc.functionCall.name, fc.functionCall.args || {}, budget);
-      responseParts.push({ functionResponse: { name: fc.functionCall.name, response: result } });
+      responseParts.push({ functionResponse: { name: fc.functionCall.name, response: geminiToolResponse(result) } });
     }
     contents.push({ role: 'user', parts: responseParts });
   }

@@ -39,6 +39,11 @@ const endpoint = http.createServer((req, res) => {
   req.on('end', () => {
     const b = JSON.parse(raw || '{}');
     seen.push({ path: req.url, body: b });
+    // Gemini takes only a JSON object as a tool's answer (TraceApps/lifttrace#147).
+    const notObject = (r) => r === null || typeof r !== 'object' || Array.isArray(r);
+    if (req.url.startsWith('/gemini') && (b.contents || []).some((c) => c.parts?.some((p) => p.functionResponse && notObject(p.functionResponse.response)))) {
+      return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { code: 400, message: 'functionResponse.response must be a JSON object.', status: 'INVALID_ARGUMENT' } }));
+    }
     const n = toolRounds(b, req.url);
     let out;
     if (req.url.startsWith('/claude')) {
@@ -290,4 +295,21 @@ test('through the server: three long answers in a minute go through', async (t) 
     fresh({ samePerson: true });
     assert.equal(await askProxy(), 'answer after 12', `answer ${i + 1}`);
   }
+});
+
+test('a tool that answers with a list reaches Gemini in an object, in the app and through the server (TraceApps/lifttrace#147)', async (t) => {
+  const list = [{ date: '2026-10-01', name: 'Run', calories: 300 }];
+  const answers = () => seen.at(-1).body.contents.flatMap((c) => c.parts.filter((p) => p.functionResponse)).map((p) => p.functionResponse.response);
+  fresh({ perRound: 3, stopAfter: 1, toolResult: list });
+  assert.equal(await ask('gemini'), 'answer after 1');
+  assert.deepEqual(answers(), [{ result: list }, { result: list }, { result: list }]);
+  if (!db) return t.skip('better-sqlite3 is not built for this Node: the server half');
+  envLock('gemini');
+  fresh({ perRound: 3, stopAfter: 1, toolResult: list });
+  assert.equal(await askProxy(), 'answer after 1', 'server gemini');
+  assert.deepEqual(answers(), [{ result: list }, { result: list }, { result: list }]);
+  // An object, a failed tool's { error } too, goes as it is.
+  fresh({ perRound: 2, stopAfter: 1, toolResult: { error: 'No diary for that day' } });
+  assert.equal(await askProxy(), 'answer after 1');
+  assert.deepEqual(answers(), [{ error: 'No diary for that day' }, { error: 'No diary for that day' }]);
 });
