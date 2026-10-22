@@ -1007,14 +1007,16 @@ async function _fullSync(silent, forceCheck, showFailureBanner, signal, gen) {
       return { ok: false, reason: 'other_account' };
     }
 
-    // Read Health Connect data (if enabled) before push so it's included
+    // Read Health Connect data (if enabled) before push so it's included.
+    // The 30-second sync reads today; a full one also catches up on the
+    // last days, at most once an hour (#294, health-connect.js).
     try {
       const { DB } = await import('./db.js');
       if (DB.getSetting('healthConnectEnabled', false)) {
         if (!silent) syncState.update(s => ({ ...s, phase: 'health', progress: 'Reading Health Connect…' }));
         const { syncHealthConnect } = await import('./health-connect.js');
         const today = new Date().toLocaleDateString('sv-SE');
-        await syncHealthConnect(today);
+        await syncHealthConnect(today, { catchUp: !silent });
       }
     } catch (e) {
       console.warn('[sync] Health Connect read failed:', e.message);

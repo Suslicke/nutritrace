@@ -488,8 +488,8 @@
     try {
       const { syncHealthConnect } = await import('../../lib/health-connect.js');
       const today = _todayStr();
-      const result = await syncHealthConnect(today);
-      const count = result?.count ?? 0;
+      const result = await syncHealthConnect(today, { catchUp: true });
+      const count = Object.keys(result || {}).length;
       showSuccess(`Synced ${count} Health Connect metric${count === 1 ? '' : 's'} for ${today}`);
     } catch (e) {
       showError('Health Connect sync failed: ' + (e?.message || 'Unknown error'));
