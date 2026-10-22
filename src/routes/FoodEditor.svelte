@@ -21,6 +21,7 @@
   import { sharingOn } from '../stores/sharing.js';
   import { userMgmtActive } from '../stores/auth.js';
   import BarcodeScanner from '../components/foods/BarcodeScanner.svelte';
+  import OffAccountInline from '../components/foods/OffAccountInline.svelte';
   import { foodsShowCategories, foodsShowLabels, foodsShowNotes, foodCategories, visibleNutriments, nutrimentsOrder, customNutriments, cropPhotos, offUsername, offPassword, offUploadCountry, aiEffectivelyEnabled, envLocks, aiProvider, aiApiKey, aiModel, aiBaseUrl, energyUnit, showUnitMetadata, warnUnitMismatch, catName as _catName, catDisplay as _catDisplay, disableAnimations } from '../stores/settings.js';
   import { callAI, callAIProxy } from '../lib/aiChat.js';
   import { fitImageDataUrl } from '../lib/image-fit.js';
@@ -143,7 +144,7 @@
   let showAllNutrients = false;
   let contributing = false;
   let offSuccess = false;
-  // No Open Food Facts login in Settings: say so and link there (#284).
+  // No Open Food Facts login, or a wrong one: ask for it here (#284).
   let offNeedsAccount = false;
   let offPhotoFailed = false;
   // Off by default — proportional scaling can surprise users editing a single
@@ -293,8 +294,9 @@
       await _doUploadToOFF(API);
       offProductExists = true; // we just contributed it, mark as present
     } catch(e) {
-      if (e?.kind === 'no_account') offNeedsAccount = true;
-      else showError(_offShareError(e));
+      // A wrong login is fixed in place too.
+      if (e?.kind === 'no_account' || e?.kind === 'login') offNeedsAccount = true;
+      if (e?.kind !== 'no_account') showError(_offShareError(e));
       contributing = false;
     }
   }
@@ -1141,13 +1143,7 @@
             </button>
           </div>
           {#if offNeedsAccount}
-            <div class="off-prepared-notice" role="status">
-              <span class="material-symbols-rounded" aria-hidden="true">info</span>
-              <div class="off-prepared-body">
-                <p>{$_('food_editor.off_share.need_account')}</p>
-                <a class="btn btn-secondary btn-sm" href={`#/settings/connectedServices?q=${encodeURIComponent($_('settings.connected_services.off.account_note'))}`}>{$_('food_editor.off_share.open_settings')}</a>
-              </div>
-            </div>
+            <OffAccountInline on:saved={() => { offNeedsAccount = false; shareOrViewOnOFF(); }} />
           {/if}
           {#if offPhotoFailed}
             <div class="off-prepared-notice" role="status">
