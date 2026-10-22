@@ -684,101 +684,10 @@ function _rankUSDAResults(items) {
   });
 }
 
-// USDA FoodData Central nutrient ID → our nutrition object key
-const _USDA_NUTRIENT_MAP = {
-  1008: 'calories',        // Energy kcal
-  1062: 'kilojoules',      // Energy kJ
-  1003: 'proteins',
-  1004: 'fat',
-  1258: 'saturated-fat',
-  1257: 'trans-fat',
-  1292: 'monounsaturated-fat',
-  1293: 'polyunsaturated-fat',
-  1005: 'carbohydrates',
-  2000: 'sugars',
-  1235: 'added-sugars',
-  1079: 'fiber',
-  1093: 'sodium',          // mg
-  1253: 'cholesterol',     // mg
-  1087: 'calcium',         // mg
-  1089: 'iron',            // mg
-  1092: 'potassium',       // mg
-  1090: 'magnesium',       // mg
-  1095: 'zinc',            // mg
-  1091: 'phosphorus',      // mg
-  1162: 'vitamin-c',       // mg
-  1106: 'vitamin-a',       // mcg
-  1114: 'vitamin-d',       // mcg
-  1109: 'vitamin-e',       // mg
-  1185: 'vitamin-k',       // mcg
-  1165: 'b1',              // mg
-  1166: 'b2',              // mg
-  1167: 'b3',              // mg
-  1175: 'b6',              // mg
-  1177: 'b9',              // mcg (folate)
-  1178: 'b12',             // mcg
-};
-
 const USDA = {
-  _mapProduct(item, servingSize) {
-    // Normalise all nutrient values to per-100g basis
-    // servingSize is the USDA serving size in g/ml; factor scales values → per 100g
-    const factor = (servingSize && servingSize > 0) ? (100 / servingSize) : 1;
-    const nutrition = {};
-
-    for (const fn of (item.foodNutrients || [])) {
-      // Search API returns nutrientId directly; detail API nests it under fn.nutrient.id
-      const nid = fn.nutrientId || (fn.nutrient && fn.nutrient.id);
-      const key = _USDA_NUTRIENT_MAP[nid];
-      // Search API uses fn.value; Foundation/SR Legacy detail API uses fn.amount
-      const raw = fn.value != null ? fn.value : fn.amount;
-      if (key && raw != null) {
-        nutrition[key] = Math.round(raw * factor * 10000) / 10000;
-      }
-    }
-
-    // Derive kJ from kcal if kJ nutrient not present (Android does same conversion)
-    if (nutrition.calories && !nutrition.kilojoules) {
-      nutrition.kilojoules = Math.round(nutrition.calories * 4.184 * 10) / 10;
-    }
-
-    // Derive salt from sodium (or vice versa) via the regulatory factor.
-    // Sets `_derived.salt` so the food editor can render the calculator icon.
-    Nutrition.deriveSodiumSalt(nutrition);
-
-    // USDA "Carbohydrate, by difference" includes fiber — subtract to match OFF net-carbs
-    if (nutrition.carbohydrates != null && nutrition.fiber != null) {
-      let corrected = nutrition.carbohydrates - nutrition.fiber;
-      // Floor at sugars value (can't be less than sugars)
-      if (corrected < (nutrition.sugars || 0)) corrected = nutrition.sugars || 0;
-      nutrition.carbohydrates = Math.round(corrected * 10000) / 10000;
-    }
-
-    const rawUnit = (item.servingSizeUnit || 'g').toLowerCase();
-    const unit = rawUnit === 'ml' ? 'ml' : 'g';
-
-    return {
-      name:      (item.description || '').trim(),
-      brand:     (item.brandOwner || item.brandName || '').trim(),
-      // Use fdcId_ prefix as barcode (matches Android; lets food editor link to USDA page)
-      barcode:   item.fdcId ? 'fdcId_' + item.fdcId : (item.gtinUpc || ''),
-      unit,
-      portion:   100,
-      quantity:  1,
-      imgUrl: '',
-      dateTime:  new Date().toISOString(),
-      categories: [],
-      nutrition,
-      // USDA's `dataType` distinguishes the source database. Feeds both the
-      // in-page result sort (curated tiers first) and the small badge that
-      // renders next to each USDA result row so users can pick informed.
-      // Values seen from USDA: 'Foundation' (highest curated quality),
-      // 'SR Legacy' (established), 'Survey (FNDDS)' (derived dietary
-      // composite), 'Branded' (brand-submitted, quality varies wildly),
-      // 'Experimental' (research; tiny). Null for old imports that lack it.
-      dataType:  item.dataType || null,
-      _source:   'usda',
-    };
+  // Per 100 g (or 100 ml) as USDA gives it; servingSize is never a factor (#290).
+  _mapProduct(item) {
+    return mapUsdaFood(item);
   },
 
   async searchByName(query, page, apiKey) {
@@ -795,11 +704,7 @@ const USDA = {
       const res = await _extFetch(url);
       if (!res.ok) return [];
       const data = await res.json();
-      const items = (data.foods || []).map(f => {
-        // Use servingSize when available, otherwise fall back to 100g base
-        const ss = (f.servingSize && !isNaN(f.servingSize)) ? f.servingSize : 100;
-        return this._mapProduct(f, ss);
-      }).filter(f => f.name);
+      const items = (data.foods || []).map(f => this._mapProduct(f)).filter(f => f.name);
       return _rankUSDAResults(items);
     } catch(e) {
       console.error('[USDA] Search failed:', e);
@@ -820,10 +725,7 @@ const USDA = {
       const res = await _extFetch(url);
       if (!res.ok) return { items: [], totalHits: 0, page, hasMore: false };
       const data = await res.json();
-      const items = (data.foods || []).map(f => {
-        const ss = (f.servingSize && !isNaN(f.servingSize)) ? f.servingSize : 100;
-        return this._mapProduct(f, ss);
-      }).filter(f => f.name);
+      const items = (data.foods || []).map(f => this._mapProduct(f)).filter(f => f.name);
       const totalHits = typeof data.totalHits === 'number' ? data.totalHits : items.length;
       const totalPages = typeof data.totalPages === 'number' ? data.totalPages : Math.ceil(totalHits / pageSize);
       const hasMore = page < totalPages;
@@ -848,12 +750,25 @@ const USDA = {
         f.gtinUpc && (f.gtinUpc === barcode || f.gtinUpc === barcode.replace(/^0+/, ''))
       );
       if (!match) return null;
-      const ss = (match.servingSize && !isNaN(match.servingSize)) ? match.servingSize : 100;
-      return this._mapProduct(match, ss);
+      return this._mapProduct(match);
     } catch(e) {
       console.error('[USDA] Barcode lookup failed:', e);
       return null;
     }
+  },
+
+  // One food by its FoodData Central id, for Refresh from USDA in the food
+  // editor (#290). Returns null when USDA does not have it; throws when the
+  // request fails, so the editor can tell the two apart.
+  async lookupFdcId(fdcId, apiKey) {
+    if (!apiKey || !fdcId) return null;
+    const url = _USDA_BASE + '/food/' + encodeURIComponent(fdcId) +
+      '?api_key=' + encodeURIComponent(apiKey);
+    const res = await _extFetch(url);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('USDA ' + res.status);
+    const item = await res.json();
+    return item && item.fdcId ? this._mapProduct(item) : null;
   }
 };
 
@@ -864,6 +779,7 @@ const USDA = {
 // or native with a server URL configured) this HTTP implementation is used.
 import { isNative, getServerUrl, getAuthToken, resolveAssetUrl, apiUrl } from './platform.js';
 import { Nutrition } from './nutrition.js';
+import { mapUsdaFood } from './usda-map.js';
 
 const _NtApiHttp = {
   // Core fetch — apiUrl() handles the server URL prefix (native server mode)

@@ -10,6 +10,7 @@
   import { NUTRIMENTS } from '../lib/nutrition.js';
   import { showSuccess, showError, showInfo } from '../stores/toast.js';
   import { offlineState } from '../lib/offline-api.js';
+  import { usdaFdcId } from '../lib/usda-map.js';
   import { offNutritionStatus, needsFullLookup, applyOffPrepared } from '../lib/off-nutrition.js';
   import { editorState, clearFoodEditorState } from '../stores/editorState.js';
   import Toggle from '../components/settings/Toggle.svelte';
@@ -22,7 +23,7 @@
   import { userMgmtActive } from '../stores/auth.js';
   import BarcodeScanner from '../components/foods/BarcodeScanner.svelte';
   import OffAccountInline from '../components/foods/OffAccountInline.svelte';
-  import { foodsShowCategories, foodsShowLabels, foodsShowNotes, foodCategories, visibleNutriments, nutrimentsOrder, customNutriments, cropPhotos, offUsername, offPassword, offUploadCountry, aiEffectivelyEnabled, envLocks, aiProvider, aiApiKey, aiModel, aiBaseUrl, energyUnit, showUnitMetadata, warnUnitMismatch, catName as _catName, catDisplay as _catDisplay, disableAnimations } from '../stores/settings.js';
+  import { foodsShowCategories, foodsShowLabels, foodsShowNotes, foodCategories, visibleNutriments, nutrimentsOrder, customNutriments, cropPhotos, offUsername, offPassword, offUploadCountry, usdaApiKey, usdaEnabled, aiEffectivelyEnabled, envLocks, aiProvider, aiApiKey, aiModel, aiBaseUrl, energyUnit, showUnitMetadata, warnUnitMismatch, catName as _catName, catDisplay as _catDisplay, disableAnimations } from '../stores/settings.js';
   import { callAI, callAIProxy } from '../lib/aiChat.js';
   import { fitImageDataUrl } from '../lib/image-fit.js';
   import { draftKey as _mkDraftKey, loadDraft, loadDraftImg, clearDraft, makeDebouncedPersist, sweepDrafts } from '../lib/editor-draft.js';
@@ -195,6 +196,8 @@
   let _draftRestored = false;
   let _serverBaseline = null;
   $: hasBarcode = !!(food.barcode && food.barcode.trim());
+  // A food added from USDA keeps its FoodData Central id as the barcode.
+  $: usdaId = usdaFdcId(food.barcode);
 
   function _normBarcode(b) {
     return String(b || '').trim().replace(/^0+/, '');
@@ -457,6 +460,37 @@
         // prepared_only or no_nutrition: the notice under the buttons says
         // which, and offers the "as prepared" values when there are any.
         _showOffNotice(food.barcode, API.offNutritionInfo(food.barcode));
+      }
+    } catch(e) {
+      showError($_('food_editor.toast.refresh_failed', { values: { error: e.message } }));
+    } finally { downloading = false; }
+  }
+
+  // Refresh from USDA (#290): Refresh from OFF for a food added from USDA,
+  // with the same rules (off-refresh.js). Foods saved before #290 were scaled
+  // by 100 / serving size, and this is how one gets USDA's real values back.
+  async function downloadFromUSDA() {
+    if (!usdaId) return;
+    if (!$usdaEnabled || !$usdaApiKey) { showInfo($_('food_editor.toast.usda_needs_key')); return; }
+    if ($offlineState.online === false) { showInfo($_('food_editor.toast.usda_offline')); return; }
+    downloading = true; downloadSuccess = false;
+    try {
+      const { USDA } = await import('../lib/api.js');
+      const result = await USDA.lookupFdcId(usdaId, $usdaApiKey);
+      if (!result) { showError($_('food_editor.toast.usda_not_found')); return; }
+      const { applyOffRefresh } = await import('../lib/off-refresh.js');
+      const { food: next, changed, reason } = applyOffRefresh(food, result, NUTRIMENTS.map(n => n.id));
+      food = next;
+      if (reason === 'updated') {
+        downloadSuccess = true;
+        setTimeout(() => downloadSuccess = false, 2500);
+        showSuccess($_('food_editor.toast.usda_updated', { values: { count: changed } }));
+      } else if (reason === 'up_to_date') {
+        showSuccess($_('food_editor.toast.usda_up_to_date'));
+      } else if (reason === 'units_differ') {
+        showInfo($_('food_editor.toast.usda_units_differ', { values: { unit: food.unit } }));
+      } else {
+        showInfo($_('food_editor.toast.usda_no_nutrition'));
       }
     } catch(e) {
       showError($_('food_editor.toast.refresh_failed', { values: { error: e.message } }));
@@ -1136,11 +1170,19 @@
               </span>
               {contributing ? 'Uploading…' : offSuccess ? 'Submitted!' : offProductExists ? 'View on OFF' : 'Share to OFF'}
             </button>
-            <button class="btn btn-secondary" style="flex:1"
-              on:click={downloadFromOFF} disabled={downloading}>
-              <span class="material-symbols-rounded" style="font-size:15px;vertical-align:middle;margin-right:4px">download</span>
-              {downloading ? 'Loading…' : downloadSuccess ? 'Updated!' : 'Refresh from OFF'}
-            </button>
+            {#if usdaId}
+              <button class="btn btn-secondary" style="flex:1"
+                on:click={downloadFromUSDA} disabled={downloading}>
+                <span class="material-symbols-rounded" style="font-size:15px;vertical-align:middle;margin-right:4px">download</span>
+                {downloading ? 'Loading…' : downloadSuccess ? 'Updated!' : $_('food_editor.refresh_usda')}
+              </button>
+            {:else}
+              <button class="btn btn-secondary" style="flex:1"
+                on:click={downloadFromOFF} disabled={downloading}>
+                <span class="material-symbols-rounded" style="font-size:15px;vertical-align:middle;margin-right:4px">download</span>
+                {downloading ? 'Loading…' : downloadSuccess ? 'Updated!' : 'Refresh from OFF'}
+              </button>
+            {/if}
           </div>
           {#if offNeedsAccount}
             <OffAccountInline on:saved={() => { offNeedsAccount = false; shareOrViewOnOFF(); }} />
