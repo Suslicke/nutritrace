@@ -53,6 +53,16 @@ services:
       # network, and leave it off behind HTTPS (Caddy, nginx with Let's
       # Encrypt, Cloudflare Tunnel, Tailscale Serve). See .env.example.
       # - INSECURE_COOKIES=${INSECURE_COOKIES:-}
+      # Optional: the full address people open the app at. Needed when your
+      # reverse proxy doesn't pass on the Host or X-Forwarded-Host header, or
+      # changes from the browser are refused. See .env.example.
+      # - PUBLIC_URL=${PUBLIC_URL:-}
+      # Optional: the server's time zone (default UTC), for backup file names
+      # and a backup schedule with no time zone of its own.
+      # - TZ=${TZ:-UTC}
+      # Optional: a dashboard allowed to show NutriTrace inside a frame
+      # (Homarr, Organizr, Home Assistant). Unset, a framed NutriTrace shows blank.
+      # - FRAME_ANCESTORS=${FRAME_ANCESTORS:-}
       # Optional — mount at a subpath instead of root (for reverse-proxy setups)
       # - BASE_URL=/nutritrace
       # Optional — log level: error | warn | info (default) | debug | trace
