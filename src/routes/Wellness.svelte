@@ -536,7 +536,10 @@
     // on the last days when that's due.
     hcSyncing = true;
     try {
-      const { syncHealthConnect } = await import('../lib/health-connect.js');
+      const { syncHealthConnect, runWorkerNow } = await import('../lib/health-connect.js');
+      // The native reader brings workouts, floors and water (#294); this
+      // page reloads when it's done ('nt:hc-worker-done').
+      runWorkerNow({ minAgeMs: 30000 });
       await syncHealthConnect(dateStr, { catchUp: true });
       if (isNative) await loadLocalWellnessData();
       console.log('[wellness] HC sync done, data keys:', Object.keys(data), '_hasLocalData:', _hasLocalData, 'displayData keys:', Object.keys(displayData));
@@ -1378,10 +1381,19 @@
         loadLocalWellnessData();
       };
       window.addEventListener('nt:sync-complete', _syncCompleteHandler);
+      // The native Health Connect reader finished (runWorkerNow, #294):
+      // reload when it brought something.
+      _hcWorkerDoneHandler = (e) => {
+        if (!(e?.detail?.changed > 0)) return;
+        loadLocalWellnessData();
+        loadWorkouts();
+      };
+      window.addEventListener('nt:hc-worker-done', _hcWorkerDoneHandler);
     }
   });
 
   let _syncCompleteHandler = null;
+  let _hcWorkerDoneHandler = null;
   let _lastSyncTickTimer = null;
   onMount(() => {
     // 30s tick to keep the 'Xm ago' label in the left rail fresh
@@ -1391,6 +1403,7 @@
   });
   onDestroy(() => {
     if (_syncCompleteHandler) window.removeEventListener('nt:sync-complete', _syncCompleteHandler);
+    if (_hcWorkerDoneHandler) window.removeEventListener('nt:hc-worker-done', _hcWorkerDoneHandler);
     if (_lastSyncTickTimer) clearInterval(_lastSyncTickTimer);
   });
 

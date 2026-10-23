@@ -693,6 +693,20 @@
       });
     }
 
+    // Health Connect: run the native reader once whenever the app comes to
+    // the front, with or without a server (#294). It reads what the plugin
+    // can't (workouts, floors, water), and without background access it
+    // can only read while the app is open. Skipped when it read in the last
+    // five minutes or is running.
+    if (isNative) {
+      const runHcReader = () => {
+        if (!DB.getSetting('healthConnectEnabled', false)) return;
+        import('./lib/health-connect.js').then(m => m.runWorkerNow({ minAgeMs: 5 * 60 * 1000 })).catch(() => {});
+      };
+      runHcReader();
+      import('@capacitor/app').then(({ App }) => App.addListener('resume', runHcReader)).catch(() => {});
+    }
+
     // Request notification permission + re-schedule reminders on app open
     if (isNative) {
       import('./lib/notifications.js').then(async ({ requestPermission, scheduleWaterReminders, scheduleMealReminders, scheduleWeighInReminder }) => {

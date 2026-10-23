@@ -27,6 +27,7 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -70,6 +71,7 @@ class HealthConnectSyncWorker(
         private const val DB_FILENAME = "nutritrace_localSQLite.db"
         private const val SOURCE = "health_connect"
         private const val LOCAL_USER_ID = 1
+        const val OUTPUT_CHANGED = "changed"
     }
 
     /** One wellness value for one day. */
@@ -138,9 +140,12 @@ class HealthConnectSyncWorker(
 
             Log.d(TAG, "read ${days.size} day(s) from $from: ${rows.size} values (${changedRows.size} changed), ${workouts.size} workouts (${changedWorkouts.size} changed), ${reader.failed} failed reads")
 
+            // How many values and workouts changed, for the app to refresh on
+            // (HealthBackgroundPlugin.runNow).
+            val out = workDataOf(OUTPUT_CHANGED to changedRows.size + changedWorkouts.size)
             if (changedRows.isEmpty() && changedWorkouts.isEmpty()) {
                 Log.d(TAG, "nothing changed, nothing to send")
-                return Result.success()
+                return Result.success(out)
             }
 
             // Push to server so users on browser / other devices see the
@@ -161,12 +166,16 @@ class HealthConnectSyncWorker(
                 // token; the app sends the values once it has checked.
                 Log.d(TAG, "local data belongs to another account, skipping server push")
             } else if (!serverUrl.isNullOrBlank() && !authToken.isNullOrBlank()) {
-                if (pushToServer(base!!, authToken, changedRows, changedWorkouts)) markSynced(ctx, changedRows)
+                val answer = pushToServer(base!!, authToken, changedRows, changedWorkouts)
+                if (answer != null) {
+                    markSynced(ctx, changedRows)
+                    setWorkoutServerIds(ctx, answer, changedWorkouts)
+                }
             } else {
                 Log.d(TAG, "no server credentials in sync_meta, skipping server push (local-mode install?)")
             }
 
-            Result.success()
+            Result.success(out)
         } catch (e: Exception) {
             Log.w(TAG, "worker failed: ${e.message}")
             Result.success() // never retry-spam
@@ -506,14 +515,14 @@ class HealthConnectSyncWorker(
      * Payload matches what the JS sync engine sends:
      *   { "wellness": [{"date", "source", "metric_type", "value", "metadata"}, ...] }
      * Same authorization header pattern (Bearer + JWT) the JS app uses.
-     * True when the server took them.
+     * The server's answer when it took them, null otherwise.
      */
     private fun pushToServer(
         serverUrl: String,
         authToken: String,
         rows: List<WellnessRow>,
         workouts: List<WorkoutRow>
-    ): Boolean {
+    ): JSONObject? {
         var conn: HttpURLConnection? = null
         try {
             val wellnessArr = JSONArray()
@@ -527,8 +536,10 @@ class HealthConnectSyncWorker(
                 })
             }
             val workoutsArr = JSONArray()
-            for (w in workouts) {
+            for ((i, w) in workouts.withIndex()) {
                 workoutsArr.put(JSONObject().apply {
+                    // Echoed back with the server's id (setWorkoutServerIds).
+                    put("client_id", i)
                     put("source", SOURCE)
                     put("source_id", w.sourceId)
                     put("date", w.date)
@@ -571,14 +582,15 @@ class HealthConnectSyncWorker(
             val code = conn.responseCode
             return if (code in 200..299) {
                 Log.d(TAG, "server push ok: $code (${rows.size} metrics + ${workouts.size} workouts)")
-                true
+                val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                try { JSONObject(body) } catch (_: Exception) { JSONObject() }
             } else {
                 Log.w(TAG, "server push failed: HTTP $code")
-                false
+                null
             }
         } catch (e: Exception) {
             Log.w(TAG, "server push failed: ${e.message}")
-            return false
+            return null
         } finally {
             conn?.disconnect()
         }
@@ -686,6 +698,36 @@ class HealthConnectSyncWorker(
             db?.close()
         }
         return Pair(changedRows, changedWorkouts)
+    }
+
+    /**
+     * The server has these workouts: keep its id on each local row, as the
+     * app's own push does (dbSetWorkoutServerId), so the app doesn't send
+     * them a second time (it sends workouts without a server id).
+     */
+    private fun setWorkoutServerIds(ctx: Context, answer: JSONObject, workouts: List<WorkoutRow>) {
+        val ids = answer.optJSONArray("workouts") ?: return
+        if (ids.length() == 0) return
+        val dbFile = ctx.getDatabasePath(DB_FILENAME)
+        if (!dbFile.exists()) return
+        var db: SQLiteDatabase? = null
+        try {
+            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            for (i in 0 until ids.length()) {
+                val o = ids.optJSONObject(i) ?: continue
+                val w = workouts.getOrNull(o.optInt("client_id", -1)) ?: continue
+                val serverId = o.optLong("server_id", 0L)
+                if (serverId <= 0L) continue
+                db.execSQL(
+                    "UPDATE workouts SET server_id = ? WHERE user_id = ? AND source = ? AND source_id = ?",
+                    arrayOf(serverId, LOCAL_USER_ID, SOURCE, w.sourceId)
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "workout server id update failed: ${e.message}")
+        } finally {
+            db?.close()
+        }
     }
 
     /**

@@ -493,7 +493,8 @@
   async function syncHcNow() {
     syncingHc = true;
     try {
-      const { syncHealthConnect } = await import('../../lib/health-connect.js');
+      const { syncHealthConnect, runWorkerNow } = await import('../../lib/health-connect.js');
+      runWorkerNow({ minAgeMs: 30000 });
       const today = _todayStr();
       const result = await syncHealthConnect(today, { catchUp: true });
       const count = Object.keys(result || {}).length;

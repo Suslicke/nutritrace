@@ -239,6 +239,37 @@ export async function requestBackgroundRead() {
   }
 }
 
+// ── Running the native reader now ──────────────────────────────────────
+//
+// The background worker (HealthConnectSyncWorker.kt) reads with the SDK and
+// gets what the Capacitor plugin can't: workouts, floors and water. Without
+// background access it can only read while the app is in front, so the app
+// runs it once when it comes to the front and on Health Connect Sync, next
+// to its own read of today. The native side runs one at a time and skips a
+// run when the worker is running or read less than minAgeMs ago. When it
+// finishes, 'nt:hc-worker-done' { changed } goes out on window.
+
+let _doneListening = false;
+
+/** Run the worker once now. Resolves { started, reason? }. */
+export async function runWorkerNow({ minAgeMs = 60000 } = {}) {
+  try {
+    const bg = await _background();
+    if (!bg) return { started: false, reason: 'unsupported' };
+    if (!_doneListening) {
+      _doneListening = true;
+      await bg.plugin.addListener('workerDone', detail => {
+        try { window.dispatchEvent(new CustomEvent('nt:hc-worker-done', { detail })); } catch {}
+      });
+    }
+    const r = await bg.plugin.runNow({ minAgeMs });
+    return { started: !!r?.started, reason: r?.reason };
+  } catch (e) {
+    _dlog(`[health-connect] worker run failed: ${e?.message}`);
+    return { started: false, reason: 'error' };
+  }
+}
+
 /**
  * Check which permissions are currently granted.
  */
