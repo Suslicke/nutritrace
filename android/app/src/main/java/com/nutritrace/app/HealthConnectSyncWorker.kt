@@ -386,7 +386,7 @@ class HealthConnectSyncWorker(
         if (!dbFile.exists()) return null
         var db: SQLiteDatabase? = null
         return try {
-            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             readSyncMeta(db, key)
         } catch (e: Exception) {
             null
@@ -407,7 +407,7 @@ class HealthConnectSyncWorker(
         if (!dbFile.exists()) return Triple(null, null, null)
         var db: SQLiteDatabase? = null
         return try {
-            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             val url = readSyncMeta(db, "server_url")
             val token = readSyncMeta(db, "auth_token")
             val httpOk = readSyncMeta(db, "server_http_ok")
@@ -436,7 +436,7 @@ class HealthConnectSyncWorker(
         val owner = try {
             val dbFile = ctx.getDatabasePath(DB_FILENAME)
             if (!dbFile.exists()) return true
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             try { readSyncMeta(db, "account") } finally { db.close() }
         } catch (e: Exception) {
             Log.w(TAG, "account tag read failed: ${e.message}")

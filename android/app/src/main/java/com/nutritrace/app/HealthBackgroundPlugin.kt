@@ -164,7 +164,7 @@ class HealthBackgroundPlugin : Plugin() {
         if (!dbFile.exists()) return false
         var db: SQLiteDatabase? = null
         return try {
-            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             val last = db.rawQuery("SELECT value FROM sync_meta WHERE key = 'hc_last_bg_sync_at' LIMIT 1", null)
                 .use { if (it.moveToFirst()) it.getString(0) else null } ?: return false
             val age = Instant.now().toEpochMilli() - Instant.parse(last).toEpochMilli()
