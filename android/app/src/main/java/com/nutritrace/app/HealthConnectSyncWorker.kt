@@ -95,6 +95,13 @@ class HealthConnectSyncWorker(
                 return Result.success()
             }
 
+            // Without the background-read permission Health Connect refuses
+            // reads while the app isn't in front; the run then reads nothing
+            // and the app reads when it opens (#294).
+            if (!granted.contains(HealthBackgroundPlugin.PERMISSION)) {
+                Log.d(TAG, "background reads not allowed: Health Connect answers only while NutriTrace is open")
+            }
+
             val zone = ZoneId.systemDefault()
             val today = LocalDate.now(zone)
             val now = Instant.now()

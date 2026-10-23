@@ -126,8 +126,17 @@ export async function checkAvailability() {
  * Returns the authoritative grants blob as of after the dialog, not the
  * plugin's return value from requestPermissions() (which can be stale
  * relative to what the user just tapped through). #204.
+ *
+ * Then, with any read granted, asks for background reads too
+ * (requestBackgroundRead), so the hourly sync can read with the app closed.
  */
 export async function requestPermissions() {
+  const granted = await _requestRecordPermissions();
+  if (granted.read?.length) await requestBackgroundRead();
+  return granted;
+}
+
+async function _requestRecordPermissions() {
   const hc = _getPlugin();
   if (!hc) return { read: [], write: [] };
   try {
@@ -173,6 +182,60 @@ export async function requestPermissions() {
   } catch (e) {
     console.error('[health-connect] Permission request failed:', e);
     return { read: [], write: [] };
+  }
+}
+
+// ── Reading in the background (#294) ──────────────────────────────────
+//
+// Health Connect answers reads only while the app is in front unless the
+// user allows reading in the background (developer.android.com, Health
+// Connect, "Read data"). The hourly background sync needs it to read with
+// the app closed; without it the sync reads while the app is open, as
+// before. HealthBackgroundPlugin.kt asks for it, since the Capacitor
+// Health Connect plugin can only ask for record types.
+
+// A Capacitor plugin proxy answers every property, `then` included, so an
+// async function must never return one: awaiting it calls then() on the
+// native side and fails. It travels in an object.
+let _bgPlugin = null;
+async function _background() {
+  if (!isNative) return null;
+  if (!_bgPlugin) {
+    const { registerPlugin } = await import('@capacitor/core');
+    _bgPlugin = registerPlugin('HealthBackground');
+  }
+  return { plugin: _bgPlugin };
+}
+
+/**
+ * { available, granted }: whether this phone's Health Connect can read in
+ * the background, and whether the user allowed it. Both false off Android,
+ * or on an app build without the native side.
+ */
+export async function getBackgroundReadStatus() {
+  try {
+    const bg = await _background();
+    if (!bg) return { available: false, granted: false };
+    const s = await bg.plugin.status();
+    return { available: !!s?.available, granted: !!s?.granted };
+  } catch {
+    return { available: false, granted: false };
+  }
+}
+
+/**
+ * Ask for background reads with Health Connect's own screen, when the phone
+ * supports it and it isn't allowed yet. Returns the status afterwards.
+ */
+export async function requestBackgroundRead() {
+  try {
+    const bg = await _background();
+    if (!bg) return { available: false, granted: false };
+    const s = await bg.plugin.request();
+    return { available: !!s?.available, granted: !!s?.granted };
+  } catch (e) {
+    console.warn('[health-connect] background read request failed:', e?.message);
+    return getBackgroundReadStatus();
   }
 }
 

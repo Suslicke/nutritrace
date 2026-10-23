@@ -36,13 +36,20 @@
   let healthConnectAvailability = 'checking';
   let healthConnectPermissions = { read: [] };
   let hcLastBgSyncAt = null;
+  // { available, granted } for Health Connect's background reads (#294).
+  let hcBackground = null;
+  async function allowHcBackground() {
+    const { requestBackgroundRead } = await import('../../lib/health-connect.js');
+    hcBackground = await requestBackgroundRead();
+  }
 
   // Check Health Connect availability on mount
   if (isNative) {
-    import('../../lib/health-connect.js').then(async ({ checkAvailability, getGrantedPermissions }) => {
+    import('../../lib/health-connect.js').then(async ({ checkAvailability, getGrantedPermissions, getBackgroundReadStatus }) => {
       healthConnectAvailability = await checkAvailability();
       if (healthConnectAvailability === 'Available') {
         healthConnectPermissions = await getGrantedPermissions();
+        hcBackground = await getBackgroundReadStatus();
       }
     }).catch(() => { healthConnectAvailability = 'NotSupported'; });
     // Read last background-sync timestamp the Kotlin worker stamps into
@@ -1272,8 +1279,9 @@
                 showError(healthConnectAvailability === 'NotInstalled' ? $_('settings_wellness.hc.not_installed') : $_('settings_wellness.hc.not_supported'));
                 return;
               }
-              const { requestPermissions } = await import('../../lib/health-connect.js');
+              const { requestPermissions, getBackgroundReadStatus } = await import('../../lib/health-connect.js');
               const perms = await requestPermissions();
+              hcBackground = await getBackgroundReadStatus();
               if (perms.read.length === 0) {
                 showError($_('settings_wellness.hc.perms_not_granted'));
               }
@@ -1344,6 +1352,14 @@
             <div class="setting-desc">
               {$_('settings_wellness.hc.bg_sync_desc')}
             </div>
+            {#if hcBackground && !hcBackground.granted}
+              <div class="setting-desc hc-bg-read">
+                <span>{hcBackground.available ? $_('settings_wellness.hc.bg_read_off') : $_('settings_wellness.hc.bg_read_unsupported')}</span>
+                {#if hcBackground.available}
+                  <button class="status-retest" on:click={allowHcBackground}>{$_('settings_wellness.hc.bg_read_allow')}</button>
+                {/if}
+              </div>
+            {/if}
           </div>
           <div class="setting-divider"></div>
           <div class="setting-row" style="align-items:flex-start;flex-direction:column;gap:8px">
@@ -1456,4 +1472,11 @@
     color: var(--accent);
     font-weight: 600;
   }
+  .hc-bg-read {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .hc-bg-read span { flex: 1 1 200px; min-width: 0; }
 </style>

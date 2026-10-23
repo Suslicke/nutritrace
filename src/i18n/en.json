@@ -1743,6 +1743,9 @@
       "mode_scheduled": "Scheduled",
       "bg_sync_label": "Background Sync",
       "bg_sync_desc": "Runs hourly in the background even when NutriTrace is closed, so today's wearable data is already on the server when you open NutriTrace elsewhere. If syncs stop running, check Android Settings → Apps → NutriTrace → Battery and set it to Unrestricted. Some launchers (Samsung, Xiaomi, OnePlus) also need NutriTrace added to the \"never sleeping apps\" or auto-start whitelist.",
+      "bg_read_off": "Reading in the background isn't allowed, so NutriTrace reads Health Connect only while it's open.",
+      "bg_read_unsupported": "Health Connect on this phone can't be read in the background, so NutriTrace reads it only while it's open.",
+      "bg_read_allow": "Allow",
       "synced_count": "Synced {count} Health Connect metric(s) for {date}",
       "sync_failed": "Health Connect sync failed: "
     },
