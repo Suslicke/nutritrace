@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.5.0-dev02] - 2026-10-23 (pre-release)
+
+Second dev pre-release of the 1.5.0 minor. First Day of Week, plain HTTP to a server on your own network in the Android app, Health Connect catching up on past days, Share to OFF with your own account, correct USDA and CookTrace recipe values, more of the app translatable, many fixes, and security updates worth installing.
+
 ### Added
 
 - **Other apps can read your weight and body measurements with an API token** (relates to [#111](https://github.com/TraceApps/nutritrace/issues/111)). A token with the new `read:body-measurements` scope reads the owner's weight and body-composition readings from `GET /api/v1/body-measurements`, by date range and source, without turning on the Public API. Each source's readings stay separate. [Guide](https://github.com/TraceApps/nutritrace/blob/dev/docs/federation.md) Thanks @kgenerozov.
