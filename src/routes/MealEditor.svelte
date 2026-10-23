@@ -265,7 +265,11 @@
       };
       const remoteTs = new Date(_iso(fresh.updated_at)).getTime();
       const localTs  = new Date(_iso(meal.updated_at) || 0).getTime();
-      if (Number.isFinite(remoteTs) && Number.isFinite(localTs) && remoteTs > localTs) {
+      // Imported before CookTrace scaled each ingredient to its amount
+      // (#296): offer the refresh so the per-serving values get fixed.
+      const _unscaledImport = (fresh.items || []).some(it => typeof it?.scaled === 'boolean')
+        && !(meal.items || []).some(it => typeof it?.ct_scaled === 'boolean');
+      if (_unscaledImport || (Number.isFinite(remoteTs) && Number.isFinite(localTs) && remoteTs > localTs)) {
         _ctUpdateAvailable = fresh;
       }
     } catch { /* CT unreachable / auth issue: quietly skip */ }
@@ -713,7 +717,9 @@
         );
       }
       const items = [...meal.items];
-      items[editingIndex] = { ...item, portion: newTotal, unit: portionUnit, quantity: 1, nutrition: newNutrition };
+      // Once the amount is set here the values match it (#296).
+      const { ct_amount: _ctAmount, ...kept } = item;
+      items[editingIndex] = { ...kept, portion: newTotal, unit: portionUnit, quantity: 1, nutrition: newNutrition };
       meal = { ...meal, items };
       editingIndex = null;
     } else {
@@ -874,7 +880,10 @@
         const _itemsMatchSourceCount = Array.isArray(meal.items)
           && Array.isArray(_serverBaseline?.meal?.items)
           && meal.items.length === _serverBaseline.meal.items.length;
-        if (_hasSourceRollup && _itemsMatchSourceCount) {
+        // An amount CookTrace couldn't convert, now set here, isn't in
+        // CookTrace's rollup: count the ingredients instead (#296).
+        const _ctAmountFixed = (meal.items || []).some(it => it?.ct_scaled === false && it.ct_amount == null);
+        if (_hasSourceRollup && _itemsMatchSourceCount && !_ctAmountFixed) {
           item.nutrition = Object.fromEntries(
             Object.entries(meal.nutrition).map(([k, v]) => [k, (parseFloat(v) || 0) / yields])
           );
@@ -1221,6 +1230,12 @@
               <div class="ing-info">
                 <span class="ingredient-name">{item.name}</span>
                 <span class="text-3" style="font-size:12px">{item.portion} {item.unit}</span>
+                {#if item.ct_amount != null}
+                  <span class="ing-unscaled">
+                    <span class="material-symbols-rounded ct-source-warn-icon" style="font-size:14px">warning</span>
+                    {item.ct_amount ? $_('meal_editor.ct_unscaled', { values: { amount: item.ct_amount } }) : $_('meal_editor.ct_unscaled_blank')}
+                  </span>
+                {/if}
               </div>
               <span class="text-3 text-sm">{_ingEnergy.value.toLocaleString()} {_ingEnergy.unit}</span>
               <button class="btn-icon btn-sm" on:click={() => openEditIngredient(i)}
@@ -1599,6 +1614,7 @@
     font-size: 13px;
   }
   .ct-source-warn-icon { color: var(--warning, #f59e0b); flex-shrink: 0; font-size: 18px; }
+  .ing-unscaled { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--warning, #f59e0b); }
   .ct-source-warn-line { margin: 0; }
   .ct-source-warn-line + .ct-source-warn-line { margin-top: 4px; }
   /* #207 companion: refresh banner shown when the CT source recipe has

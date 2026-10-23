@@ -1553,6 +1553,8 @@
       "error_toast": "Could not refresh from CookTrace",
       "deleted_toast": "Recipe deleted"
     },
+    "ct_unscaled": "CookTrace couldn't convert {amount}. Edit the amount.",
+    "ct_unscaled_blank": "CookTrace had no amount for this. Edit the amount.",
     "ct_deleted": {
       "headline": "CookTrace source no longer available",
       "sub": "The original recipe on CookTrace was deleted or is no longer readable with this token.",
