@@ -33,6 +33,7 @@ import './styles/forms.css';
 import './styles/fold.css';
 import App from './App.svelte';
 import { DB } from './lib/db.js';
+import { waitLocale, locale } from 'svelte-i18n';
 import { initI18n } from './i18n/index.js';
 
 // Pick browser-detected locale for first paint; the App-level subscription to
@@ -58,6 +59,17 @@ DB.init()
     if (isNative) {
       const { loadImageMap } = await import('./lib/platform.js');
       await loadImageMap();
+    }
+    // The locale file loads asynchronously. Mounting before it resolves
+    // makes the first $_() throw and the boot catch reports a fake
+    // database error.
+    // A language file that can't load (an old cached copy after an update,
+    // say) falls back to English rather than stopping the app from opening.
+    try {
+      await waitLocale();
+    } catch (err) {
+      console.warn('Language file failed to load, using English:', err);
+      try { locale.set('en'); await waitLocale('en'); } catch { /* mount anyway */ }
     }
     new App({ target: document.getElementById('app') });
   })
