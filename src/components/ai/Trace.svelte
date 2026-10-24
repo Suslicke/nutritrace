@@ -36,7 +36,8 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
-  import { EXTRA_TOOLS, runExtraTool, extraPrompt } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import { EXTRA_TOOLS, runExtraTool, extraPrompt, dishDraft } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import DishCard from './DishCard.svelte'; // fork: propose_dish cards
   import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
   import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
@@ -1975,6 +1976,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     messages = [];
     toolsNotice.reset();
     localStorage.removeItem('wl:aiChatHistory');
+    dishDraft.set(null); // fork
     NtApi.del('/api/ai/history').catch(() => {});
     // Clear ANY pending review card so a cleared chat doesn't strand a
     // proposal floating with no context above it. Covers both flows:
@@ -2376,6 +2378,8 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
               </div>
             </div>
           {/if}
+
+          <DishCard ask={quickAsk} /> <!-- fork -->
 
           <!-- propose_food review card. Two commit paths (Save to
                Catalog vs Save & Log to Diary); meal picker is only
