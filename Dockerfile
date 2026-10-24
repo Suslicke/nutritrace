@@ -1,4 +1,29 @@
 # ── Stage 1: Build Svelte frontend ──────────────────────────────────────────
+# fork (Suslicke/nutritrace): OpenAI Codex CLI for AI_PROVIDER=codex-cli (server/lib/codex-cli.js).
+# Pinned release + SHA-256 of its archives (same as Checkist's recognition image); change the five
+# values together. codex-code-mode-host must sit next to codex or every answer is invalid.
+ARG CODEX_VERSION=0.162.0
+ARG CODEX_SHA256_AMD64=8daf67f6261161aa5939d8d42a516032d760406216779d7ce6040f242140ff73
+ARG CODEX_SHA256_ARM64=15162a9b59edf8e512b27414ec0b7db22e6424a1262b0eee8666643e0d295c2f
+ARG CODEX_HOST_SHA256_AMD64=dee8bf3df637c68e1495b928d643b76d4ad44f94e4f0ed79fe8482fa79e23d97
+ARG CODEX_HOST_SHA256_ARM64=18d99b055d2ef4a2af51f1144919bd8a208f4f79ace389b7775341d6903cf7e9
+
+FROM scratch AS codex-amd64
+ARG CODEX_VERSION
+ARG CODEX_SHA256_AMD64
+ARG CODEX_HOST_SHA256_AMD64
+ADD --checksum=sha256:${CODEX_SHA256_AMD64} https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz /codex.tar.gz
+ADD --checksum=sha256:${CODEX_HOST_SHA256_AMD64} https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz /host.tar.gz
+
+FROM scratch AS codex-arm64
+ARG CODEX_VERSION
+ARG CODEX_SHA256_ARM64
+ARG CODEX_HOST_SHA256_ARM64
+ADD --checksum=sha256:${CODEX_SHA256_ARM64} https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-aarch64-unknown-linux-musl.tar.gz /codex.tar.gz
+ADD --checksum=sha256:${CODEX_HOST_SHA256_ARM64} https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz /host.tar.gz
+
+FROM codex-${TARGETARCH} AS codex-archive
+
 FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
@@ -28,6 +53,14 @@ RUN apt-get update \
 WORKDIR /app
 COPY server/package*.json ./
 RUN npm install --omit=dev
+# fork: Codex CLI + bubblewrap (the sandbox of `codex -s read-only`) for AI_PROVIDER=codex-cli.
+RUN --mount=type=bind,from=codex-archive,source=/codex.tar.gz,target=/tmp/codex.tar.gz \
+    --mount=type=bind,from=codex-archive,source=/host.tar.gz,target=/tmp/host.tar.gz \
+    apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/* \
+ && mkdir /tmp/c && tar -xzf /tmp/codex.tar.gz -C /tmp/c && tar -xzf /tmp/host.tar.gz -C /tmp/c \
+ && install -m 0755 /tmp/c/codex-code-mode-host-*-unknown-linux-musl /usr/local/bin/codex-code-mode-host \
+ && rm /tmp/c/codex-code-mode-host-*-unknown-linux-musl \
+ && install -m 0755 /tmp/c/codex-*-unknown-linux-musl /usr/local/bin/codex && rm -rf /tmp/c
 COPY server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 COPY server/ .

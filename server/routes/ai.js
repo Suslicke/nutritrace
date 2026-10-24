@@ -9,6 +9,7 @@ import { toolMessagesForOpenAI, toolNameFor, rememberToolCalls } from '../lib/to
 import { geminiToolResponse } from '../lib/gemini-tool-response.js';
 import { createToolSupportMemory, sendWithToolFallback } from '../lib/tool-support.js';
 import db from '../db.js';
+import { callCodexCli } from '../lib/codex-cli.js'; // fork: AI_PROVIDER=codex-cli
 
 const router = Router();
 // One Trace answer can take 13 requests (TraceApps/notetrace#34): room for a few a minute.
@@ -211,7 +212,7 @@ router.post('/chat', requireAuth, aiChatLimit, wrap(async (req, res) => {
   // API key is required for cloud providers. `oai-compat` local endpoints
   // (Ollama, LM Studio, etc.) often don't need one — mirror the client-side
   // callAI() behaviour at aiChat.js:247-249.
-  if (!apiKey && provider !== 'oai-compat') {
+  if (!apiKey && provider !== 'oai-compat' && provider !== 'codex-cli') {
     return res.status(503).json({ error: 'AI not configured on server. Set AI_API_KEY in environment.' });
   }
   if (provider === 'oai-compat') {
@@ -226,6 +227,7 @@ router.post('/chat', requireAuth, aiChatLimit, wrap(async (req, res) => {
       case 'openai':     result = await _callOpenAI(apiKey, renamedModel(model), messages, systemPrompt, toolsArr, 'https://api.openai.com', toolsOff); break;
       case 'gemini':     result = await _callGemini(apiKey, model, messages, systemPrompt, toolsArr, toolsOff); break;
       case 'oai-compat': result = await _callOpenAI(apiKey || 'no-key', model, messages, systemPrompt, toolsArr, baseUrl.replace(/\/+$/, ''), toolsOff); break;
+      case 'codex-cli':  result = await callCodexCli(model, messages, systemPrompt, toolsOff ? [] : toolsArr); break; // fork
       default: return res.status(400).json({ error: `Unknown provider: ${provider}` });
     }
   } catch (e) {

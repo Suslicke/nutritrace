@@ -76,6 +76,9 @@ router.get('/env-locks', requireAuth, wrap(async (req, res) => {
     smtp: isSmtpEnvLocked(),
     ai: aiLocked,
     ai_enabled,
+    // fork: the settings screen shows what the server really uses (never the key)
+    ai_provider: aiLocked ? (db.prepare(`SELECT value FROM app_config WHERE key = 'ai_provider'`).get()?.value || '') : '',
+    ai_model: aiLocked ? (db.prepare(`SELECT value FROM app_config WHERE key = 'ai_model'`).get()?.value || '') : '',
     off_local,
     off_local_only,
     oidc_provider_ids: getEnvLockedProviderIds(),

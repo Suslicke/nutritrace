@@ -285,6 +285,18 @@
 
     {#if _displayedAiEnabled}
       <div class="setting-divider"></div>
+      {#if envLocks.ai && envLocks.ai_provider}
+        <!-- fork: what the server really uses; the selects below would show this browser's own settings -->
+        <div class="setting-row">
+          <span class="setting-label">{$_('settings_trace.labels.provider')}</span>
+          <span class="setting-desc">{AI_PROVIDERS.find(p => p.value === envLocks.ai_provider)?.label || envLocks.ai_provider}</span>
+        </div>
+        <div class="setting-divider"></div>
+        <div class="setting-row">
+          <span class="setting-label">{$_('settings_trace.labels.model')}</span>
+          <span class="setting-desc">{envLocks.ai_model || '—'}</span>
+        </div>
+      {:else}
       <div class="setting-row">
         <span class="setting-label">{$_('settings_trace.labels.provider')}</span>
         <select class="select sel-sm" style="width:auto" bind:value={aiProviderVal} on:change={_onProviderChange} disabled={envLocks.ai}>
@@ -346,6 +358,7 @@
             </div>
           </div>
         {/if}
+      {/if}
       {/if}
 
       {#if !envLocks.ai}

@@ -440,6 +440,7 @@ export const AI_PROVIDERS = [
   { value: 'openai',     label: 'OpenAI'           },
   { value: 'gemini',     label: 'Google Gemini'    },
   { value: 'oai-compat', label: 'OpenAI Compatible' },
+  { value: 'codex-cli',  label: 'Codex CLI (ChatGPT subscription)' }, // fork: server-only, AI_PROVIDER=codex-cli
 ];
 
 // Checked against the vendors' model and deprecation pages on 2026-10-09
