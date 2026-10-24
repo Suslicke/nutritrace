@@ -11,6 +11,7 @@
  */
 import db from '../db.js';
 import { logger } from '../logger.js';
+import { allowedPushEndpoint, validSubscription } from './webpush-validate.js';
 
 let _ready = false;
 function _table() {
@@ -27,15 +28,8 @@ function _table() {
   _ready = true;
 }
 
-/** A browser PushSubscription JSON we accept: https endpoint and both keys. */
-export function validSubscription(sub) {
-  if (!sub || typeof sub !== 'object') return false;
-  let u;
-  try { u = new URL(sub.endpoint); } catch { return false; }
-  return u.protocol === 'https:' && sub.endpoint.length < 1000
-    && typeof sub.keys?.p256dh === 'string' && sub.keys.p256dh.length < 200
-    && typeof sub.keys?.auth === 'string' && sub.keys.auth.length < 100;
-}
+// Only the browsers' push services, checked on subscribe and again before every send (SSRF).
+export { validSubscription };
 
 /** What the service worker shows (public/push-sw.js reads exactly these fields). */
 export function payload(title, message, url = '/') {
@@ -95,6 +89,11 @@ export async function sendWebPush(userId, title, message, url = '/') {
   const body = payload(title, message, url);
   let sent = 0, failed = 0;
   for (const s of subs) {
+    if (!allowedPushEndpoint(s.endpoint)) {  // re-checked at send time, never trusted from the row
+      db.prepare('DELETE FROM fork_webpush_subs WHERE id = ?').run(s.id);
+      failed++;
+      continue;
+    }
     try {
       await lib.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body,
         { vapidDetails: { subject, publicKey, privateKey }, TTL: 6 * 3600 });
