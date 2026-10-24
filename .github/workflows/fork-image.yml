@@ -1,0 +1,35 @@
+# Fork (Suslicke/nutritrace): image of the `suslicke` branch = upstream `dev` + the fork's commits.
+# Upstream's docker.yml is hard-wired to TraceApps' registries and only runs for main/dev.
+name: fork image
+on:
+  push:
+    branches: [suslicke]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test scripts/trace-extra.test.js
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64  # the server is x86; add arm64 when needed
+          push: true
+          tags: |
+            ghcr.io/suslicke/nutritrace:latest
+            ghcr.io/suslicke/nutritrace:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/Suslicke/nutritrace
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

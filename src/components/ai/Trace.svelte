@@ -36,6 +36,7 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
+  import { EXTRA_TOOLS, runExtraTool } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
   import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
   import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
@@ -880,6 +881,7 @@
           return { ok: true, kind: 'food_proposal', ...payload, ...replaced };
         }
         default: {
+          const extra = await runExtraTool(name, args); if (extra) return extra; // fork: trace-extra.js
           // Coaching: a client's summary and catalog, drafts for a coach,
           // and a client's recommendations (never the conversation).
           const c = await runCoachingTool(name, args, _coaching);
@@ -1894,7 +1896,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
       // proposes again while it is still on screen (or after the user
       // discarded it) is caught in the propose handlers, not by taking the
       // tools away: that blocked every new card until the user tapped one.
-      const toolsForRound = [...traceToolsForTurn(TOOLS, { image: !!image }), ...coachingTools(_coaching)];
+      const toolsForRound = [...traceToolsForTurn(TOOLS, { image: !!image }), ...coachingTools(_coaching), ...EXTRA_TOOLS];
       // The model can't use tools and answered without them: a note in the
       // conversation says so, once (#259). routed: the gateway picked a
       // model for this request that can't, another pick may well.
