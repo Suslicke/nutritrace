@@ -112,6 +112,8 @@ export async function callCodexCli(model, messages, systemPrompt, tools = []) {
   const work = await mkdtemp(path.join(os.tmpdir(), 'codex-'));
   try {
     const toolNames = tools.map(t => t.name);
+    // Which tools reached the model — catches a browser still running an old app build.
+    logger.info(`[codex-cli] step: ${toolNames.length} tools${toolNames.includes('create_meal') ? ' (fork tools on)' : ' (no fork tools: old app build?)'}, ${messages.length} msgs`);
     const { prompt, images } = buildPrompt(messages, systemPrompt, tools);
     const files = [path.join(work, 'schema.json')];
     await writeFile(files[0], JSON.stringify(outputSchema(toolNames)));
