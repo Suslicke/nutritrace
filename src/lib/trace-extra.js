@@ -59,8 +59,8 @@ export const EXTRA_TOOLS = [
   { name: 'app_api',
     description: 'Fallback for anything the other tools don\'t cover: call a NutriTrace REST endpoint as the user. ' +
       'Reachable: /api/foods, /api/meals, /api/diary, /api/activity, /api/fasts, /api/settings, /api/goals. ' +
-      'Prefer the dedicated tools (they keep the diary in sync and compute nutrition). Before a DELETE or a PUT ' +
-      'that replaces data, say what will change and ask the user to confirm unless they already asked for exactly that.',
+      'Prefer the dedicated tools (they keep the diary in sync, compute nutrition and need no confirmation): every ' +
+      'non-GET call here waits for the user to confirm in a dialog.',
     parameters: obj({ method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
       path: str('Starts with /api/, may include a query string'), body: { type: 'object', description: 'JSON body for POST/PUT/PATCH' } },
     ['method', 'path']) },
@@ -243,6 +243,7 @@ const HANDLERS = {
     if (!meal) return { error: `No saved meal with id ${id}.` };
     let patch = {};
     if (items) {
+      if (!items.length) return { error: 'A meal needs at least one ingredient — use delete_meal to remove it.' };
       const built = await mealItems(NtApi, items);
       if (built.error) return built;
       patch = { items: built.items, nutrition: built.nutrition };
@@ -311,7 +312,9 @@ const HANDLERS = {
     const method = String(args.method || 'GET').toUpperCase();
     const path = allowedPath(args.path);
     if (!path) return { error: 'This path is not available to the assistant (foods, meals, diary, activity, fasts, settings, goals only).' };
-    if (method === 'DELETE' && !await confirmDelete(`${path}`)) return { cancelled: true, note: 'The user declined.' };
+    // Every write through the fallback is confirmed: a PUT can replace a whole diary day or drop items
+    // (deleted_uuids) just like a DELETE. The dedicated tools above stay one-step.
+    if (method !== 'GET' && !await confirmDelete(`${method} ${path} — may change or remove data`)) return { cancelled: true, note: 'The user declined.' };
     const { NtApi } = await import('./api.js');
     const body = args.body ?? {};
     const data = method === 'GET' ? await NtApi.get(path)
