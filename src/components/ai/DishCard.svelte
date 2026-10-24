@@ -1,7 +1,7 @@
 <!-- Fork (Suslicke/nutritrace): propose_dish review cards — one card per product, ✓ / grams / ✎,
      then one Save that builds the meal and logs it (src/lib/trace-extra.js saveDish). -->
 <script>
-  import { dishDraft, saveDish, itemKcal } from '../../lib/trace-extra.js';
+  import { dishDraft, saveDish, itemKcal, dishTotals } from '../../lib/trace-extra.js';
   import { mealNames } from '../../stores/settings.js';
   import TraceFace from './TraceFace.svelte';
 
@@ -12,6 +12,11 @@
 
   $: d = $dishDraft;
   $: total = d ? d.items.reduce((s, i) => s + itemKcal(i), 0) : 0;
+  $: t = d ? dishTotals(d.items, d.eaten) : { whole: 0, share: 1 };
+  $: weight = t.whole;
+  $: eaten = d?.eaten || weight;
+  // ponytail: one step for the slider and buttons; 10 g is finer than a ladle anyway
+  const setEaten = (g) => { d.eaten = Math.max(10, Math.round(g / 10) * 10); touch(); };
   $: allOk = d && d.items.every(i => i.status === 'ok' && i.grams > 0);
 
   const touch = () => dishDraft.set(d);
@@ -28,7 +33,7 @@
     try {
       const r = await saveDish(d);
       d.saved = r; touch();
-      ask(`Сохранил meal «${d.name}» (id ${r.meal_id}) и записал в ${names()[d.meal ?? 0]}: ${r.kcal} ккал. Состав: ${d.items.map(i => `${i.name} ${i.grams} г`).join(', ')}. Запомни, если это мой обычный рецепт.`);
+      ask(`Сохранил рецепт «${d.name}» (id ${r.meal_id}, всё блюдо ${weight} г) и записал в ${names()[d.meal ?? 0]} ${r.grams} г: ${r.kcal} ккал. Состав: ${d.items.map(i => `${i.name} ${i.grams} г`).join(', ')}. Запомни, если это мой обычный рецепт.`);
     } catch (e) { error = e?.message || String(e); }
     busy = false;
   }
@@ -47,7 +52,9 @@
           {#if d.saved}{it.grams} г{:else}
             <input type="number" min="0" inputmode="decimal" value={it.grams} on:input={e => { it.grams = Number(e.target.value) || 0; touch(); }}> г
           {/if}
-          · {itemKcal(it)} ккал <span class="per">({it.kcal} / {it.protein} / {it.fat} / {it.carbs} на 100 г)</span>
+          · {itemKcal(it)} ккал
+          {#if t.share !== 1}<span class="share">→ съедено ≈ {Math.round(it.grams * t.share)} г</span>{/if}
+          <span class="per">({it.kcal} / {it.protein} / {it.fat} / {it.carbs} на 100 г)</span>
         </div>
         {#if !d.saved}
           <div class="row btns">
@@ -71,10 +78,27 @@
     <div class="ai-msg-avatar"><TraceFace size={24} /></div>
     <div class="dish-item">
       {#if d.saved}
-        <div class="nm">✓ «{d.name}» записан: {d.saved.kcal} ккал</div>
+        <div class="nm">✓ «{d.name}» записан: {d.saved.grams} г · {d.saved.kcal} ккал</div>
         <div class="row btns"><button class="btn btn-secondary btn-sm" on:click={() => dishDraft.set(null)}>Закрыть</button></div>
       {:else}
-        <div class="row"><span class="nm">{d.name}</span><span class="nm">{total} ккал</span></div>
+        <div class="row"><span class="nm">{d.name}</span><span class="src">всё блюдо {weight} г · {total} ккал</span></div>
+        <div class="eat">
+          <div class="row">
+            <span>Съедено <input type="number" min="1" inputmode="decimal" value={eaten}
+              on:input={e => { d.eaten = Number(e.target.value) || null; touch(); }}> г</span>
+            <b>≈ {t.kcal} ккал</b>
+          </div>
+          <input type="range" min="10" max={Math.max(weight * 2, 100)} step="10" value={eaten}
+            on:input={e => setEaten(Number(e.target.value))}>
+          <div class="row chips">
+            <button class="btn btn-secondary btn-sm" on:click={() => setEaten(eaten - 50)}>−50</button>
+            <button class="btn btn-secondary btn-sm" on:click={() => setEaten(weight / 4)}>¼</button>
+            <button class="btn btn-secondary btn-sm" on:click={() => setEaten(weight / 2)}>½</button>
+            <button class="btn btn-secondary btn-sm" on:click={() => setEaten(weight)}>всё</button>
+            <button class="btn btn-secondary btn-sm" on:click={() => setEaten(eaten + 50)}>+50</button>
+          </div>
+          <div class="sub">≈ Б {t.protein} · Ж {t.fat} · У {t.carbs} г · {Math.round(t.share * 100)}% блюда (примерно)</div>
+        </div>
         <div class="row sub">
           <select on:change={e => { d.meal = Number(e.target.value); touch(); }}>
             {#if d.meal == null}<option value="" selected disabled>Приём пищи?</option>{/if}
@@ -109,4 +133,9 @@
   .done { color: var(--primary, #4caf50); font-size: 13px; }
   .err { color: var(--danger, #e53935); font-size: 13px; margin-top: 6px; }
   input[type=number] { width: 64px; }
+  .eat { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border, rgba(127,127,127,.25)); }
+  .eat input[type=range] { width: 100%; margin: 8px 0 4px; }
+  .chips { justify-content: space-between; flex-wrap: nowrap; }
+  .chips .btn { flex: 1; padding-left: 0; padding-right: 0; }
+  .share { color: var(--primary, #4caf50); font-size: 12px; }
 </style>

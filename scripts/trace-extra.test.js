@@ -50,3 +50,16 @@ test('a corrected dish keeps what the user already accepted, with their grams', 
   assert.deepEqual(next.items.map(i => [i.status, i.grams]), [['new', 50], ['ok', 250]]);
   assert.equal(itemKcal({ kcal: 77, grams: 250 }), 193);
 });
+
+test('a recipe is the whole dish: its weight is the sum of the ingredients', async () => {
+  const { recipeShape } = await import('../src/lib/trace-extra.js');
+  assert.deepEqual(recipeShape([{ portion: 70, quantity: 1 }, { portion: 80 }, { portion: 30, quantity: 2 }]),
+    { is_recipe: true, unit: 'g', servings: null, portion: 210 });
+});
+
+test('eating part of a dish scales every product by the same share', async () => {
+  const { dishTotals } = await import('../src/lib/trace-extra.js');
+  const items = [{ grams: 300, kcal: 50, protein: 2, fat: 1, carbs: 8 }, { grams: 200, kcal: 150, protein: 10, fat: 5, carbs: 10 }];
+  assert.deepEqual(dishTotals(items, 250), { whole: 500, share: 0.5, kcal: 225, protein: 13, fat: 7, carbs: 22 });
+  assert.equal(dishTotals(items).kcal, 450);
+});

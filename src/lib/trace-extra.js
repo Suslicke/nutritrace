@@ -37,15 +37,17 @@ export const EXTRA_TOOLS = [
   { name: 'delete_food', description: 'Delete a catalog food. The app asks the user to confirm in a dialog; a declined delete returns cancelled.',
     parameters: obj({ id: int('Food id') }, ['id']) },
   { name: 'create_meal',
-    description: 'Save a reusable MEAL (a set of catalog foods with amounts, e.g. "my coffee" = coffee 250 ml + milk 150 ml + sugar 8 g). Nutrition is computed here from the foods — never pass totals. Every ingredient must be a catalog food: search_foods, then save_food for anything missing.',
-    parameters: obj({ name: str('Meal name'), items: MEAL_ITEMS, notes: str('Notes') }, ['name', 'items']) },
+    description: 'Save a cooked dish as a RECIPE (recipe: true — soup, salad, porridge: one diary row, any amount in grams) or a MEAL (recipe: false — separate foods eaten together, logged as their own rows, e.g. "my breakfast" = toast + coffee). Nutrition is computed here from the foods — never pass totals. Every ingredient must be a catalog food: search_foods, then save_food for anything missing.',
+    parameters: obj({ name: str('Dish name'), items: MEAL_ITEMS, recipe: { type: 'boolean', description: 'true for a cooked dish (default), false for a set of separate foods' },
+      notes: str('Notes') }, ['name', 'items']) },
   { name: 'log_meal',
-    description: 'Log a SAVED meal (from create_meal or get_meals) to the diary as one entry that keeps its ingredients. Use it right after create_meal when the user ate the dish.',
-    parameters: obj({ meal_id: int('Saved meal id'), meal: int('Meal slot index (0 = breakfast, 1 = lunch, 2 = dinner, 3 = snacks, as the user\'s diary names them)'),
-      date: str('YYYY-MM-DD, default today'), servings: num('How many times the saved meal, default 1') }, ['meal_id', 'meal']) },
+    description: 'Log a saved recipe or meal (create_meal, get_meals, get_recipes) to the diary. A recipe is one row of `grams` (default: the whole dish); a meal logs each of its foods as its own row, `servings` times.',
+    parameters: obj({ meal_id: int('Saved recipe/meal id'), meal: int('Meal slot index (0 = breakfast, 1 = lunch, 2 = dinner, 3 = snacks, as the user\'s diary names them)'),
+      date: str('YYYY-MM-DD, default today'), grams: num('Recipe: how much was eaten, g'), servings: num('Meal: how many times, default 1') }, ['meal_id', 'meal']) },
   { name: 'propose_dish',
     description: 'Show a dish as review cards, one card per product, all at once: the user taps ✓ or edits the grams on each, or taps ✎ to tell you what to fix, then saves the whole meal to the diary with one button. Call it again with the full corrected list after a fix (products the user already accepted stay accepted). The app saves missing foods, builds the meal and logs it itself.',
     parameters: obj({ name: str('Dish name, e.g. "Сырный суп"'), meal: int('Meal slot index (0 = breakfast, 1 = lunch, 2 = dinner, 3 = snacks)'), date: str('YYYY-MM-DD, default today'),
+      eaten: num('Grams the user ate, when less or more than the whole dish (default: the sum of the products)'),
       items: { type: 'array', description: 'Every product of the dish, in order',
         items: obj({ name: str('Product name as the user would say it'), grams: num('Amount in the user\'s portion (g or ml)'),
           food_id: int('Catalog food id, when it is a local hit'), ref: str('search_foods ref of an OFF/USDA hit'),
@@ -53,7 +55,8 @@ export const EXTRA_TOOLS = [
           kcal: num('kcal per 100 g'), protein: num('Protein per 100 g'), fat: num('Fat per 100 g'), carbs: num('Carbs per 100 g') },
         ['name', 'grams', 'kcal']) } }, ['name', 'items']) },
   { name: 'update_meal', description: 'Rename a saved meal, change its notes, or replace its ingredient list (same format as create_meal; nutrition is recomputed).',
-    parameters: obj({ id: int('Meal id'), name: str(''), notes: str(''), items: MEAL_ITEMS }, ['id']) },
+    parameters: obj({ id: int('Meal id'), name: str(''), notes: str(''), items: MEAL_ITEMS,
+      recipe: { type: 'boolean', description: 'true turns a meal into a recipe (one diary row), false back into a meal' } }, ['id']) },
   { name: 'delete_meal', description: 'Delete a saved meal. The app asks the user to confirm in a dialog; a declined delete returns cancelled.',
     parameters: obj({ id: int('Meal id') }, ['id']) },
   { name: 'edit_diary_item',
@@ -141,6 +144,14 @@ export function mergeDish(prev, next) {
 
 export const itemKcal = (i) => Math.round((Number(i.kcal) || 0) * (Number(i.grams) || 0) / 100);
 
+/** Approximate totals of the eaten part: every product scaled by the same share (eaten / whole dish). */
+export function dishTotals(items, eaten) {
+  const whole = items.reduce((s, i) => s + (Number(i.grams) || 0), 0);
+  const k = whole ? (Number(eaten) || whole) / whole : 0;
+  const sum = (f) => Math.round(items.reduce((s, i) => s + (Number(i[f]) || 0) * (Number(i.grams) || 0) / 100, 0) * k);
+  return { whole, share: k, kcal: sum('kcal'), protein: sum('protein'), fat: sum('fat'), carbs: sum('carbs') };
+}
+
 /** One remembered fact as plain data: a string, one line, no control characters, capped. */
 export const cleanFact = (v) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim().slice(0, 300);
 
@@ -168,13 +179,13 @@ export async function extraPrompt() {
 
 ## You are the main way to use this app
 The user mostly runs NutriTrace through you. Do the work directly with tools instead of telling them where to tap: search foods (search_foods), create or fix foods (save_food, update_food), build, log and edit saved meals (create_meal, log_meal, update_meal), correct or remove diary items (edit_diary_item, delete_diary_item), and log food. Search before you create and reuse what exists.
-## Every dish is a MEAL built from its products — always, step by step
-Whenever the user eats or describes a dish made of more than one product (soup, salad, sandwich, porridge with toppings, "my coffee"), never log it or save it as one food and never use propose_food for it. Follow these steps:
+## Every dish is a RECIPE built from its products — always, step by step
+Whenever the user eats or describes a dish made of more than one product (soup, salad, sandwich, porridge with toppings, "my coffee"), never log it or save it as one food and never use propose_food for it. It becomes a saved recipe (create_meal recipe: true): the diary shows ONE row with the dish name, and the user can log any amount of it later (log_meal grams). Use recipe: false only for separate foods eaten together that the user wants as separate rows. Follow these steps:
 1. Split the dish into its products with grams for the user's portion and show that list (name — grams), with your estimate of the total.
 2. search_foods for EVERY product in the same turn (no questions in between), pick the best match for each (prefer local, then the closest OFF/USDA hit; when nothing fits, your own per-100 g estimate with source "estimate").
-3. Call propose_dish ONCE with all products (name, grams, food_id or ref, kcal/protein/fat/carbs per 100 g) and the meal slot. The app shows one card per product: the user taps ✓ or changes the grams, or taps ✎ and tells you what is wrong. Don't ask "is this right?" in text — the cards do that.
-4. A fix comes as a message naming the product: search again, then call propose_dish again with the FULL corrected list. When the user taps Save, the app saves missing foods, creates the meal and logs it itself; you get a message with the result.
-Do all of this yourself; never send the user to the Meals screen. If the user says "just log it" or "don't ask", still split it into products and build the meal, log it straight away without cards: save_food the missing products, create_meal, log_meal, then list what you picked. propose_food is only for one single product the user wants to review as a card. Any older line saying propose_food is the ONLY way to create a food is outdated: save_food and create_meal exist here.
+3. Call propose_dish ONCE with all products (name, grams, food_id or ref, kcal/protein/fat/carbs per 100 g), the meal slot, and "eaten" when the user ate only part of the pot (e.g. 200 g of a 1.5 kg soup). The app shows one card per product: the user taps ✓ or changes the grams, or taps ✎ and tells you what is wrong. Don't ask "is this right?" in text — the cards do that.
+4. A fix comes as a message naming the product: search again, then call propose_dish again with the FULL corrected list. When the user taps Save, the app saves missing foods, creates the recipe and logs the eaten grams itself; you get a message with the result.
+Do all of this yourself; never send the user to the Meals screen. If the user says "just log it" or "don't ask", still split it into products and build the meal, log it straight away without cards: save_food the missing products, create_meal (recipe: true), log_meal with the grams eaten, then list what you picked. A dish already saved (get_recipes / get_meals, or another user's shared one) is logged with log_meal and grams — don't rebuild it. propose_food is only for one single product the user wants to review as a card. Any older line saying propose_food is the ONLY way to create a food is outdated: save_food and create_meal exist here.
 When you learn how the user usually makes a dish (its products and grams), memory_save it, so next time you can offer the same meal at once.
 
 ## Everything else
@@ -202,6 +213,10 @@ function checkItem(entry, index, expected) {
     return { error: `Item ${index} is "${item.name}", not "${expected}" — call get_diary again.` };
   return { item };
 }
+
+/** A recipe as the Meal editor saves one with yields 1: portion = the whole dish, nutrition for it. */
+export const recipeShape = (items) => ({ is_recipe: true, unit: 'g', servings: null,
+  portion: Math.round(items.reduce((s, i) => s + (Number(i.portion) || 0) * (Number(i.quantity) || 1), 0)) || 100 });
 
 async function mealItems(NtApi, items) {
   const foods = await NtApi.getFoods();
@@ -276,38 +291,50 @@ const HANDLERS = {
     return { ok: true, deleted_food: id };
   },
 
-  async create_meal({ name, items, notes }) {
+  async create_meal({ name, items, notes, recipe = true }) {
     const { NtApi } = await import('./api.js');
     const built = await mealItems(NtApi, items);
     if (built.error) return built;
-    const saved = await NtApi.createMeal({ name, items: built.items, nutrition: built.nutrition, notes: notes || '', is_recipe: false });
-    return { ok: true, id: saved?.id, name, ...macros(built.nutrition) };
+    const saved = await NtApi.createMeal({ name, items: built.items, nutrition: built.nutrition, notes: notes || '',
+      ...(recipe ? recipeShape(built.items) : { is_recipe: false }) });
+    return { ok: true, id: saved?.id, name, kind: recipe ? 'recipe' : 'meal', ...(recipe ? { grams: recipeShape(built.items).portion } : {}), ...macros(built.nutrition) };
   },
 
-  async log_meal({ meal_id, meal, date, servings }) {
+  async log_meal({ meal_id, meal, date, grams, servings }) {
     const { NtApi } = await import('./api.js');
-    const saved = (await NtApi.getMeals()).find(m => Number(m.id) === Number(meal_id));
-    if (!saved) return { error: `No saved meal with id ${meal_id}.` };
+    // Own first, then the ones other users share with this account.
+    const all = [...await NtApi.getMeals(), ...await NtApi.getRecipes().catch(() => []),
+      ...await NtApi.getGroupMeals().catch(() => []), ...await NtApi.getGroupRecipes().catch(() => [])];
+    const saved = all.find(m => Number(m.id) === Number(meal_id));
+    if (!saved) return { error: `No saved recipe or meal with id ${meal_id}.` };
     const { addDiaryItem } = await import('../stores/diary.js');
+    const slot = Number.isInteger(meal) ? meal : 0;
+    // The Foods screen's two ways: a recipe is one row at the amount eaten, a meal expands into its foods.
+    if (saved.is_recipe) {
+      const whole = Number(saved.portion) || 100;
+      const amount = Number(grams) > 0 ? Number(grams) : whole;
+      const nutrition = scaleNutrition(saved.nutrition, whole, amount);
+      await addDiaryItem({ ...saved, portion: amount, unit: saved.unit || 'g', quantity: 1, nutrition }, slot, date || undefined, { kind: 'recipe' });
+      return { ok: true, logged: saved.name, grams: amount, ...macros(nutrition) };
+    }
     const qty = Number(servings) > 0 ? Number(servings) : 1;
-    // Same shape the Foods screen logs a meal with: the meal row, its items kept for Split.
-    await addDiaryItem({ ...saved, quantity: qty, portion: saved.portion || 100, unit: saved.unit || 'g', nutrition: saved.nutrition },
-      Number.isInteger(meal) ? meal : 0, date || undefined, { kind: 'meal' });
-    return { ok: true, logged: saved.name, servings: qty, ...macros(scaleNutrition(saved.nutrition, 1, qty)) };
+    for (const item of saved.items || []) await addDiaryItem({ ...item, quantity: (item.quantity || 1) * qty }, slot, date || undefined);
+    return { ok: true, logged: saved.name, rows: (saved.items || []).length, servings: qty, ...macros(scaleNutrition(saved.nutrition, 1, qty)) };
   },
 
-  async propose_dish({ name, meal, date, items }) {
+  async propose_dish({ name, meal, date, eaten, items }) {
     if (!Array.isArray(items) || !items.length) return { error: 'List the dish\'s products in items.' };
     dishDraft.set(mergeDish(dishDraft.get(), { name: String(name || 'Dish'), meal: Number.isInteger(meal) ? meal : null, date: date || null,
+      eaten: Number(eaten) > 0 ? Number(eaten) : null,
       items: items.map(i => ({ name: String(i.name || '?'), grams: i.grams, food_id: i.food_id || null, ref: i.ref || null,
         source: i.source || (i.food_id ? 'local' : i.ref ? String(i.ref).split(':')[0] : 'estimate'),
         kcal: Number(i.kcal) || 0, protein: Number(i.protein) || 0, fat: Number(i.fat) || 0, carbs: Number(i.carbs) || 0 })) }));
     return { ok: true, shown: 'dish cards', note: 'The user now reviews each product on its card. Stop here, say one short line, and wait: their fixes or the saved result come as the next message.' };
   },
 
-  async update_meal({ id, name, notes, items }) {
+  async update_meal({ id, name, notes, items, recipe }) {
     const { NtApi } = await import('./api.js');
-    const meal = (await NtApi.getMeals()).find(m => Number(m.id) === Number(id));
+    const meal = [...await NtApi.getMeals(), ...await NtApi.getRecipes().catch(() => [])].find(m => Number(m.id) === Number(id));
     if (!meal) return { error: `No saved meal with id ${id}.` };
     let patch = {};
     if (items) {
@@ -316,6 +343,8 @@ const HANDLERS = {
       if (built.error) return built;
       patch = { items: built.items, nutrition: built.nutrition };
     }
+    if (recipe === true || (meal.is_recipe && recipe !== false && patch.items)) Object.assign(patch, recipeShape(patch.items || meal.items || []));
+    else if (recipe === false) patch.is_recipe = false;
     await NtApi.updateMeal(id, { ...meal, ...(name ? { name } : {}), ...(notes != null ? { notes } : {}), ...patch });
     return { ok: true, id, name: name || meal.name, ...macros(patch.nutrition || meal.nutrition) };
   },
@@ -408,11 +437,11 @@ export async function saveDish(draft) {
     if (!id) throw new Error(`Could not save «${i.name}»`);
     parts.push({ food_id: id, amount: i.grams });
   }
-  const meal = await HANDLERS.create_meal({ name: draft.name, items: parts });
-  if (meal.error) throw new Error(meal.error);
-  const logged = await HANDLERS.log_meal({ meal_id: meal.id, meal: draft.meal ?? 0, date: draft.date || undefined });
+  const recipe = await HANDLERS.create_meal({ name: draft.name, items: parts, recipe: true });
+  if (recipe.error) throw new Error(recipe.error);
+  const logged = await HANDLERS.log_meal({ meal_id: recipe.id, meal: draft.meal ?? 0, date: draft.date || undefined, grams: draft.eaten || undefined });
   if (logged.error) throw new Error(logged.error);
-  return { meal_id: meal.id, kcal: Math.round(meal.calories || 0) };
+  return { meal_id: recipe.id, grams: logged.grams, kcal: Math.round(logged.calories || 0) };
 }
 
 /** Result for an EXTRA_TOOLS call, or null when the tool isn't one of ours. */
