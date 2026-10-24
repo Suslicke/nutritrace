@@ -25,6 +25,9 @@ export const EXTRA_TOOLS = [
     parameters: obj({ query: str('What to look for, in the user\'s words; try English too for USDA'),
       sources: { type: 'array', items: { type: 'string', enum: ['local', 'off', 'usda'] }, description: 'Default: all' },
       limit: int('Hits per source, default 6') }, ['query']) },
+  { name: 'find_dishes',
+    description: 'Find saved recipes and meals — the user\'s own AND the ones other users share with them ("shared": true). Use it before building a dish that may already exist, and whenever the user mentions someone else\'s dish. Log a hit with log_meal (recipe: grams).',
+    parameters: obj({ query: str('Part of the name; empty lists all') }) },
   { name: 'save_food',
     description: 'Create a food in the user\'s catalog, either from a search hit (`ref` from search_foods, off:/usda:) or from your own values (name + portion + unit + nutrition for that portion). Returns the new food id. Prefer an existing local food over creating a duplicate.',
     parameters: obj({ ref: str('search_foods ref of an OFF/USDA hit'), name: str('Food name'), brand: str('Brand'),
@@ -185,7 +188,7 @@ Whenever the user eats or describes a dish made of more than one product (soup, 
 2. search_foods for EVERY product in the same turn (no questions in between), pick the best match for each (prefer local, then the closest OFF/USDA hit; when nothing fits, your own per-100 g estimate with source "estimate").
 3. Call propose_dish ONCE with all products (name, grams, food_id or ref, kcal/protein/fat/carbs per 100 g), the meal slot, and "eaten" when the user ate only part of the pot (e.g. 200 g of a 1.5 kg soup). The app shows one card per product: the user taps ✓ or changes the grams, or taps ✎ and tells you what is wrong. Don't ask "is this right?" in text — the cards do that.
 4. A fix comes as a message naming the product: search again, then call propose_dish again with the FULL corrected list. When the user taps Save, the app saves missing foods, creates the recipe and logs the eaten grams itself; you get a message with the result.
-Do all of this yourself; never send the user to the Meals screen. If the user says "just log it" or "don't ask", still split it into products and build the meal, log it straight away without cards: save_food the missing products, create_meal (recipe: true), log_meal with the grams eaten, then list what you picked. A dish already saved (get_recipes / get_meals, or another user's shared one) is logged with log_meal and grams — don't rebuild it. propose_food is only for one single product the user wants to review as a card. Any older line saying propose_food is the ONLY way to create a food is outdated: save_food and create_meal exist here.
+Do all of this yourself; never send the user to the Meals screen. If the user says "just log it" or "don't ask", still split it into products and build the meal, log it straight away without cards: save_food the missing products, create_meal (recipe: true), log_meal with the grams eaten, then list what you picked. A dish already saved (find_dishes — includes dishes other users share) is logged with log_meal and grams — don't rebuild it. propose_food is only for one single product the user wants to review as a card. Any older line saying propose_food is the ONLY way to create a food is outdated: save_food and create_meal exist here.
 When you learn how the user usually makes a dish (its products and grams), memory_save it, so next time you can offer the same meal at once.
 
 ## Everything else
@@ -254,6 +257,19 @@ const HANDLERS = {
         .map(f => { const b = brief(f, 'usda'); remember(b.ref, f); return b; }) : 'USDA key not set in Settings';
     }
     return out;
+  },
+
+  async find_dishes({ query }) {
+    const { NtApi } = await import('./api.js');
+    const q = String(query || '').trim().toLowerCase();
+    const [own, ownR, group, groupR] = await Promise.all([NtApi.getMeals(), NtApi.getRecipes(),
+      NtApi.getGroupMeals(), NtApi.getGroupRecipes()].map(p => p.catch(() => [])));
+    const seen = new Set();
+    return [...own, ...ownR, ...group, ...groupR]
+      .filter(m => !seen.has(m.id) && seen.add(m.id) && String(m.name || '').toLowerCase().includes(q))
+      .slice(0, 25)
+      .map(m => ({ id: m.id, name: m.name, kind: m.is_recipe ? 'recipe' : 'meal', shared: !own.concat(ownR).some(o => o.id === m.id),
+        ...(m.is_recipe ? { whole_grams: Number(m.portion) || null } : { foods: (m.items || []).length }), ...macros(m.nutrition) }));
   },
 
   async save_food(a) {
