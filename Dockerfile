@@ -53,6 +53,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY server/package*.json ./
 RUN npm install --omit=dev
+# fork: Web Push sender, outside package.json so upstream lockfile changes never conflict
+RUN npm install --omit=dev --no-save web-push@3.6.7
 # fork: Codex CLI + bubblewrap (the sandbox of `codex -s read-only`) + ca-certificates (node:20-slim has
 # none; Node brings its own, Codex reads the system's) for AI_PROVIDER=codex-cli.
 RUN --mount=type=bind,from=codex-archive,source=/codex.tar.gz,target=/tmp/codex.tar.gz \

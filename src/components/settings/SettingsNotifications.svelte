@@ -10,6 +10,7 @@
   import { weekdayOrder } from '../../lib/week.js';
   import { coachingSupported, inCoaching, coachTab, clientsTab } from '../../stores/coaching.js';
   import { serverFeatures, currentUser } from '../../stores/auth.js';
+  import { webPushStatus, enableWebPush, disableWebPush } from '../../lib/webpush-client.js'; // fork
 
   function set(key, value) { DB.setSetting(key, value); scheduleSave(key, value); }
 
@@ -42,6 +43,12 @@
   let _notifClientAns  = DB.getSetting('notifClientAnswer',        true) !== false;
   let _notifLocal    = DB.getSetting('notifLocalEnabled',     true);
   let _notifPushService = DB.getSetting('notifPushService', 'none');
+  // fork: Web Push state for this device
+  let _wp = { supported: true, thisDevice: false, devices: 0 }, _wpMsg = '';
+  async function _wpRefresh() { try { _wp = await webPushStatus(); } catch {} }
+  async function _wpOn() { _wpMsg = ''; try { await enableWebPush(); await _wpRefresh(); _wpMsg = 'On for this device.'; } catch (e) { _wpMsg = e?.message || String(e); } }
+  async function _wpOff() { await disableWebPush().catch(() => {}); await _wpRefresh(); _wpMsg = 'Off for this device.'; }
+  $: if (_notifPushService === 'webpush') _wpRefresh();
   let _gotifyUrl     = DB.getSetting('gotifyUrl',            '');
   let _gotifyToken   = DB.getSetting('gotifyToken',          '');
   let _appriseUrl    = DB.getSetting('appriseUrl',  '');
@@ -75,6 +82,7 @@
   $: _pushConfigured = _notifPushService === 'gotify'  ? !!(_gotifyUrl && _gotifyToken)
                      : _notifPushService === 'ntfy'    ? !!(_ntfyUrl && _ntfyTopic)
                      : _notifPushService === 'apprise' ? !!_appriseUrl
+                     : _notifPushService === 'webpush' ? true // fork
                      : false;
   $: _pushBannerStatus = _gotifyTesting
     ? 'testing'
@@ -85,6 +93,7 @@
   $: _pushProviderLabel  = _notifPushService === 'gotify'  ? 'Gotify'
                          : _notifPushService === 'ntfy'    ? 'ntfy'
                          : _notifPushService === 'apprise' ? 'Apprise'
+                         : _notifPushService === 'webpush' ? 'Web Push' // fork
                          : '';
   // Clear stale test result when switching providers so the banner doesn't
   // carry over a "Last Test Sent" pill from a different service.
@@ -193,6 +202,7 @@
           <option value="apprise">{$_('settings_notifications.push.option_apprise')}</option>
           <option value="gotify">{$_('settings_notifications.push.option_gotify')}</option>
           <option value="ntfy">{$_('settings_notifications.push.option_ntfy')}</option>
+          <option value="webpush">Web Push (this app)</option> <!-- fork -->
         </select>
       </div>
     </div>
@@ -231,6 +241,20 @@
     {/if}
 
     <!-- ntfy config -->
+    {#if _notifPushService === 'webpush'} <!-- fork: Web Push (src/lib/webpush-client.js) -->
+      <div class="form-group" style="padding:10px 16px 14px">
+        <div class="setting-desc" style="margin-bottom:8px">
+          {#if !_wp.supported}This browser has no Web Push. On iPhone: iOS 16.4+, app opened from the Home Screen.
+          {:else}Notifications come from NutriTrace itself, even with the app closed. This device: {_wp.thisDevice ? 'on' : 'off'} · devices on this account: {_wp.devices}{/if}
+        </div>
+        {#if _wp.supported}
+          {#if _wp.thisDevice}<button class="btn btn-sm" on:click={_wpOff}>Turn off on this device</button>
+          {:else}<button class="btn btn-sm btn-primary" on:click={_wpOn}>Turn on for this device</button>{/if}
+        {/if}
+        {#if _wpMsg}<div class="setting-desc" style="margin-top:6px">{_wpMsg}</div>{/if}
+      </div>
+    {/if}
+
     {#if _notifPushService === 'ntfy'}
       <div class="form-group" style="padding:10px 16px 4px">
         <label class="form-label">{$_('settings_notifications.push.ntfy_url')}</label>

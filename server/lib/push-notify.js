@@ -9,6 +9,7 @@ import db from '../db.js';
 import { logger } from '../logger.js';
 import { fetchChecked, serviceBase } from './ssrf-guard.js';
 import { userWeeklyRange } from './weekly-range.js';
+import { sendWebPush } from './webpush.js'; // fork
 
 // Push services (Gotify, ntfy, Apprise) usually live on the home network,
 // so that's allowed for every account; the address is still checked on
@@ -68,6 +69,7 @@ async function _pushToService(userId, title, message, priority = 5) {
       case 'gotify':  return await _pushGotify(userId, title, message, priority);
       case 'ntfy':    return await _pushNtfy(userId, title, message, priority);
       case 'apprise': return await _pushApprise(userId, title, message, priority);
+      case 'webpush': return await sendWebPush(userId, title, message); // fork
     }
   } catch (e) {
     logger.warn(`[push] ${service} failed for user ${userId}: ${e.message}`);

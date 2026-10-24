@@ -6,6 +6,7 @@ import { isServerOnlyKey } from '../lib/server-only-keys.js';
 import { fetchChecked, serviceBase } from '../lib/ssrf-guard.js';
 import { coachingSignature } from '../lib/coaching.js';
 import { fillIfSetupAnswers } from '../lib/profile-fields.js';
+import { sendWebPush } from '../lib/webpush.js'; // fork
 
 // Push services usually live on the home network, so that's allowed for
 // every account; the address is still checked, and a redirect only
@@ -130,6 +131,10 @@ async function _pushTestHandler(req, res) {
   const u = req.user.id;
   const { service, title, message, priority } = req.body;
   const svc = service || 'gotify';
+  if (svc === 'webpush') { // fork: the PWA's own push (server/lib/webpush.js)
+    try { return res.json({ ok: true, ...(await sendWebPush(u, title || 'Test', message || 'Push notifications work ✅')) }); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+  }
 
   function _s(key) {
     const r = db.prepare('SELECT value FROM user_settings WHERE user_id=? AND key=?').get(u, key);

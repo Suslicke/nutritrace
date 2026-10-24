@@ -37,6 +37,7 @@ export default defineConfig({
       // for the Svelte-side bridge.
       registerType: 'prompt',
       workbox: {
+        importScripts: ['push-sw.js'], // fork: Web Push handlers (public/push-sw.js)
         // Precache the whole app shell, not just the fallback page. Without
         // this a reload with no connection loaded index.html and then failed
         // to fetch its own JavaScript, so the installed app looked broken

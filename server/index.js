@@ -67,6 +67,7 @@ import { caloriesOutFor } from './lib/effective-goal.js';
 // Initialise DB (runs schema)
 import db from './db.js';
 import { isPrivateUploadPath, UPLOAD_RESPONSE_HEADERS } from './lib/upload-paths.js';
+import webpushRoutes from './routes/webpush.js'; // fork: Web Push for the PWA
 
 // Seed config from env vars if provided (env vars take priority over UI)
 seedSmtpFromEnv();
@@ -280,6 +281,7 @@ router.use('/api/upload', uploadRoutes);
 router.use('/api/mealie',     mealieRoutes);
 router.use('/api/cooktrace',  cooktraceRoutes);
 router.use('/api/settings',  settingsRoutes);
+router.use('/api/webpush',   webpushRoutes); // fork
 router.use('/api/app-config',  appConfigRoutes);
 router.use('/api/off-local',   offLocalRoutes);
 router.use('/api/off',         offContributeRoutes);
