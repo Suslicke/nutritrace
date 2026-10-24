@@ -36,7 +36,7 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
-  import { EXTRA_TOOLS, runExtraTool } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import { EXTRA_TOOLS, runExtraTool, extraPrompt } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
   import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
   import { coachTab, clientsTab, coachDraft } from '../../stores/coaching.js';
@@ -1870,11 +1870,11 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
 
     try {
       const ctx          = await buildContext();
-      const systemPrompt = buildSystemPrompt(ctx) + coachingPrompt(_coaching);
+      const systemPrompt = buildSystemPrompt(ctx) + coachingPrompt(_coaching) + await extraPrompt().catch(() => ''); // fork: role + memory
       // Build API messages — include image in the last user message if present
       const apiMessages  = forModel(messages)
         .map(m => ({ role: m.role, content: m.content }))
-        .slice(-20);
+        .slice(-30); // fork: was 20; leaves ~18 of aiChat's 48-message wrap for tool steps
       // If image attached, modify the last user message to include it.
       // Env-locked path uses the proxy's OpenAI-shape wire format
       // regardless of the underlying provider — the server translates to

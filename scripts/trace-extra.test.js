@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { allowedPath, runExtraTool, EXTRA_TOOLS } from '../src/lib/trace-extra.js';
+import { allowedPath, runExtraTool, EXTRA_TOOLS, scaleNutrition, sumNutrition } from '../src/lib/trace-extra.js';
 
 test('data routes pass, normalized', () => {
   assert.equal(allowedPath('/api/meals'), '/api/meals');
@@ -23,5 +23,15 @@ test('everything else is refused', () => {
 test('other tools fall through, a refused path never calls the server', async () => {
   assert.equal(await runExtraTool('log_food', {}), null);
   assert.ok((await runExtraTool('app_api', { method: 'GET', path: '/api/admin/x' })).error);
-  assert.deepEqual(EXTRA_TOOLS.map(t => t.name), ['app_api']);
+  assert.ok(EXTRA_TOOLS.some(t => t.name === 'create_meal') && EXTRA_TOOLS.some(t => t.name === 'memory_save'));
+  assert.equal(new Set(EXTRA_TOOLS.map(t => t.name)).size, EXTRA_TOOLS.length);
+});
+
+test('meal nutrition is computed from the foods, not by the model', () => {
+  // milk 6.5 %: per 100 ml → 150 ml; sugar per 100 g → 8 g
+  const milk = scaleNutrition({ calories: 89, proteins: 3, fat: 6.5, _derived: { x: 1 } }, 100, 150);
+  assert.deepEqual(milk, { calories: 133.5, proteins: 4.5, fat: 9.75 });
+  const sugar = scaleNutrition({ calories: 387, carbohydrates: 100 }, 100, 8);
+  assert.deepEqual(sumNutrition([milk, sugar]), { calories: 164.46, proteins: 4.5, fat: 9.75, carbohydrates: 8 });
+  assert.deepEqual(scaleNutrition({ calories: 50 }, 0, 100), { calories: 50 });  // missing portion = per 100
 });
