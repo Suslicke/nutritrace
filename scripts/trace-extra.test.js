@@ -1,18 +1,23 @@
 /**
- * Fork (Suslicke/nutritrace): Trace's app_api tool reaches the user's data endpoints and never
- * account, server or backup administration.
+ * Fork (Suslicke/nutritrace): Trace's app_api tool reaches only the user's data routes
+ * (allowlist), checked after URL normalization so encodings and dot segments can't slip past.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { allowedPath, runExtraTool, EXTRA_TOOLS } from '../src/lib/trace-extra.js';
 
-test('data endpoints are allowed', () => {
-  for (const p of ['/api/meals', '/api/meals/3', '/api/foods?q=x', '/api/diary/2026-10-24', '/api/settings']) assert.ok(allowedPath(p), p);
+test('data routes pass, normalized', () => {
+  assert.equal(allowedPath('/api/meals'), '/api/meals');
+  assert.equal(allowedPath('/api/meals/3'), '/api/meals/3');
+  assert.equal(allowedPath('/api/diary/2026-10-24'), '/api/diary/2026-10-24');
+  assert.equal(allowedPath('/api/foods?q=гречка'), '/api/foods?q=%D0%B3%D1%80%D0%B5%D1%87%D0%BA%D0%B0');
 });
 
-test('administration and odd paths are refused', () => {
+test('everything else is refused', () => {
   for (const p of ['/api/auth/change-password', '/api/admin/api-tokens', '/api/app-config', '/api/full-backup',
-    '/api/mcp', '/api/ai/chat', '/api/foods/../auth', '/foods', '', undefined]) assert.equal(allowedPath(p), false, String(p));
+    '/api/mcp', '/api/ai/chat', '/api/users', '/api/mealsx', '/api/foods/../auth', '/api/foods/%2e%2e/auth',
+    '/api/%61dmin', '/api//admin', '/api/foods/./x', '/api/foods\\..\\auth', '//evil.com/api/foods',
+    'http://evil.com/api/foods', '/foods', '', undefined]) assert.equal(allowedPath(p), null, String(p));
 });
 
 test('other tools fall through, a refused path never calls the server', async () => {
