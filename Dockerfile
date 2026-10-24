@@ -53,10 +53,11 @@ RUN apt-get update \
 WORKDIR /app
 COPY server/package*.json ./
 RUN npm install --omit=dev
-# fork: Codex CLI + bubblewrap (the sandbox of `codex -s read-only`) for AI_PROVIDER=codex-cli.
+# fork: Codex CLI + bubblewrap (the sandbox of `codex -s read-only`) + ca-certificates (node:20-slim has
+# none; Node brings its own, Codex reads the system's) for AI_PROVIDER=codex-cli.
 RUN --mount=type=bind,from=codex-archive,source=/codex.tar.gz,target=/tmp/codex.tar.gz \
     --mount=type=bind,from=codex-archive,source=/host.tar.gz,target=/tmp/host.tar.gz \
-    apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/* \
+    apt-get update && apt-get install -y --no-install-recommends bubblewrap ca-certificates && rm -rf /var/lib/apt/lists/* \
  && mkdir /tmp/c && tar -xzf /tmp/codex.tar.gz -C /tmp/c && tar -xzf /tmp/host.tar.gz -C /tmp/c \
  && install -m 0755 /tmp/c/codex-code-mode-host-*-unknown-linux-musl /usr/local/bin/codex-code-mode-host \
  && rm /tmp/c/codex-code-mode-host-*-unknown-linux-musl \

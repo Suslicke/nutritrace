@@ -16,6 +16,16 @@ import { randomUUID } from 'crypto';
 import { chown, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { logger } from '../logger.js';
+
+// Every Codex feature that lets the model act or read beyond the prompt is off: the prompt carries
+// user-controlled text (food names from Open Food Facts, chat), and one model step only needs to
+// return JSON. Plus the server keeps its data dirs root-only, and codex runs as another uid.
+const DISABLE = ['shell_tool', 'unified_exec', 'unified_exec_tty', 'unified_exec_zsh_fork', 'multi_agent',
+  'apps', 'plugins', 'remote_plugin', 'browser_use', 'browser_use_external', 'browser_use_full_cdp_access',
+  'computer_use', 'code_mode_host', 'view_image', 'image_generation', 'hooks', 'skill_search',
+  'skill_mcp_dependency_install', 'tool_suggest', 'in_app_local_automation', 'workspace_dependencies',
+  'worktrees', 'write_stdin_approval', 'sleep_tool', 'goals'];
 
 const RULES = `You are the model behind a nutrition diary app's assistant. Answer ONLY through the output schema:
 - a final answer to the user: put it in "text" and leave "tool_calls" empty;
@@ -117,7 +127,7 @@ export async function callCodexCli(model, messages, systemPrompt, tools = []) {
     const out = path.join(work, 'out.json');
     const argv = [env.CODEX_BIN || 'codex', '-a', 'never', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
       '--skip-git-repo-check', '-C', work, ...(model ? ['-m', model] : []), '-s', 'read-only',
-      '--disable', 'shell_tool', '--disable', 'unified_exec', '--disable', 'multi_agent',
+      ...DISABLE.flatMap(f => ['--disable', f]),
       '-c', 'web_search="disabled"', '-c', 'project_doc_max_bytes=0',
       '-c', `model_reasoning_effort="${env.CODEX_EFFORT || 'medium'}"`, '--color', 'never',
       '--output-schema', files[0], '-o', out, ...imageArgs, '-'];
@@ -126,7 +136,11 @@ export async function callCodexCli(model, messages, systemPrompt, tools = []) {
       timeoutMs: (Number(env.CODEX_TIMEOUT) || 180) * 1000 });
     let answer;
     try { answer = JSON.parse(await readFile(out, 'utf8')); } catch { answer = null; }
-    if (code !== 0 || !answer) throw new Error(`Codex CLI failed (exit ${code}): ${stderr.trim().split('\n').slice(-3).join(' ').slice(0, 300)}`);
+    if (code !== 0 || !answer) {
+      // The details stay in the server log; the browser gets a generic message.
+      logger.warn(`[codex-cli] exit ${code}: ${stderr.trim().split('\n').slice(-5).join(' | ').slice(0, 800)}`);
+      throw new Error('The AI provider (Codex CLI) could not answer. Details are in the server log.');
+    }
     return toResult(answer, toolNames);
   } finally {
     await rm(work, { recursive: true, force: true });
