@@ -37,7 +37,10 @@ router.post('/unsubscribe', wrap(async (req, res) => {
 // "I ate it too": whoever else can see this dish gets a push; on the PWA it opens the dish in Trace.
 router.post('/ate', wrap(async (req, res) => {
   const meal = db.prepare('SELECT id, user_id, name, visibility FROM meals WHERE id = ? AND deleted_at IS NULL').get(Number(req.body?.meal_id));
-  if (!meal || !canRead(meal, req.user.id, 'meal_shares', 'meal_id')) return res.status(404).json({ error: 'No such dish' });
+  if (!meal || meal.user_id == null || !canRead(meal, req.user.id, 'meal_shares', 'meal_id')) return res.status(404).json({ error: 'No such dish' });
+  // One "ate it too?" per person, dish and day: repeated calls can't spam the others.
+  const once = `_fork_ate_${req.user.id}_${meal.id}_${new Date().toISOString().slice(0, 10)}`;
+  if (db.prepare('INSERT OR IGNORE INTO app_config (key, value) VALUES (?, ?)').run(once, '1').changes === 0) return res.json({ ok: true, sent: 0 });
   const who = db.prepare('SELECT full_name, username FROM users WHERE id = ?').get(req.user.id);
   const by = who?.full_name || who?.username || 'Кто-то';
   const name = String(meal.name).slice(0, 80);
