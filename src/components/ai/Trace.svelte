@@ -36,7 +36,9 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
-  import { EXTRA_TOOLS, runExtraTool, extraPrompt, dishDraft } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import { EXTRA_TOOLS, runExtraTool, extraPrompt, dishDraft, takeRecipeLink } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import TraceDock from './TraceDock.svelte'; // fork: day ring + quick dishes
+  let _abort = null; // fork: the cancel button's AbortController
   import DishCard from './DishCard.svelte'; // fork: propose_dish cards
   import { traceToolsForTurn, cardKey, repeatedCard, repeatedCardResult, cardContext } from '../../lib/trace-cards.js';
   import { formatDay } from '../../lib/coaching-view.js';
@@ -128,6 +130,7 @@
   }
 
   onMount(async () => {
+    takeRecipeLink().then(d => { if (d) { dishDraft.set(d); panelOpen = true; } }).catch(() => {}); // fork: "ate it too?" push
     // Load history from server; fall back to localStorage for offline / migration
     try {
       const rows = await NtApi.get('/api/ai/history');
@@ -1907,7 +1910,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
           : aiEnvLocked ? 'trace.tools_unsupported_server' : 'trace.tools_unsupported';
       };
       const reply = aiEnvLocked
-        ? await callAIProxy({ messages: apiMessages, systemPrompt, tools: toolsForRound, onToolCall, onToolsUnsupported })
+        ? await callAIProxy({ messages: apiMessages, systemPrompt, tools: toolsForRound, onToolCall, onToolsUnsupported, signal: (_abort = new AbortController()).signal })
         : await callAI({ provider, apiKey: key, model, baseUrl, messages: apiMessages, systemPrompt, tools: toolsForRound, onToolCall, onToolsUnsupported });
       messages = [...messages, { role: 'assistant', content: reply, time: fmtTime() }];
       if (toolsNote) messages = toolsNotice.add(messages, $_(toolsNote));
@@ -1915,8 +1918,10 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
       NtApi.post('/api/ai/history', { role: 'assistant', content: reply }).catch(() => {});
       if (!panelOpen) hasUnread = true;
     } catch (e) {
-      showError(e.message || 'AI request failed');
+      if (e?.name === 'AbortError') messages = [...messages, { role: 'note', content: 'Отменено' }]; // fork
+      else showError(e.message || 'AI request failed');
     } finally {
+      _abort = null; // fork
       loading = false;
       _toolStatus = '';
       try { await _releaseWakeLock(); } catch { /* noop */ }
@@ -2460,11 +2465,13 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
                   <span class="ai-dot"></span>
                 {/if}
               </div>
+              {#if _abort}<button class="ai-cancel" on:click={() => _abort?.abort()}>Отменить</button>{/if} <!-- fork -->
             </div>
           </div>
         {/if}
       </div>
 
+      <TraceDock hideChips={loading || !!$dishDraft} /> <!-- fork -->
       <!-- Input bar -->
       {#if attachedImage}
         <div class="ai-image-preview">
@@ -2851,6 +2858,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     display: flex; flex-wrap: wrap; gap: 8px;
     justify-content: center; margin-top: 8px;
   }
+  .ai-cancel { margin-top: 4px; padding: 4px 10px; border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: none; color: var(--text-2); font-size: 12px; cursor: pointer; } /* fork */
   .ai-chip {
     padding: 7px 14px;
     border-radius: var(--radius-full);

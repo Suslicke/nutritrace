@@ -8,7 +8,7 @@
  * can't describe every tool's own arguments), images go in with `-i`.
  *
  * Env: CODEX_BIN (codex), CODEX_HOME (the sign-in), CODEX_EFFORT (medium), CODEX_TIMEOUT (seconds,
- * 180), CODEX_UID / CODEX_GID (run codex as that user — when CODEX_HOME belongs to another
+ * 75; a timed-out call is tried once more), CODEX_UID / CODEX_GID (run codex as that user — when CODEX_HOME belongs to another
  * service, so a refreshed sign-in stays readable for it).
  */
 import { spawn } from 'child_process';
@@ -134,8 +134,16 @@ export async function callCodexCli(model, messages, systemPrompt, tools = []) {
       '-c', `model_reasoning_effort="${env.CODEX_EFFORT || 'medium'}"`, '--color', 'never',
       '--output-schema', files[0], '-o', out, ...imageArgs, '-'];
     const childEnv = { PATH: env.PATH, HOME: work, LANG: env.LANG || 'C.UTF-8', ...(env.CODEX_HOME ? { CODEX_HOME: env.CODEX_HOME } : {}) };
-    const { code, stderr } = await run(argv, { input: prompt, cwd: work, env: childEnv, uid, gid,
-      timeoutMs: (Number(env.CODEX_TIMEOUT) || 180) * 1000 });
+    // A normal answer takes 8–20 s; a hung one is killed early and tried once more.
+    const timeoutMs = (Number(env.CODEX_TIMEOUT) || 75) * 1000;
+    let code, stderr;
+    for (let attempt = 1; ; attempt++) {
+      try { ({ code, stderr } = await run(argv, { input: prompt, cwd: work, env: childEnv, uid, gid, timeoutMs })); break; }
+      catch (e) {
+        if (attempt > 1 || !/timed out/.test(e?.message)) throw e;
+        logger.warn('[codex-cli] timed out, retrying once');
+      }
+    }
     let answer;
     try { answer = JSON.parse(await readFile(out, 'utf8')); } catch { answer = null; }
     if (code !== 0 || !answer) {

@@ -354,7 +354,7 @@ export async function callAI({ provider, apiKey, model, messages, systemPrompt, 
  * the pattern in api.js#_fetch — without the Bearer header, env-locked
  * AI calls from Android return 401 even though the chat path looks fine.
  */
-export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, onToolsUnsupported }) {
+export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, onToolsUnsupported, signal }) { // fork: signal = Trace's cancel
   const { apiUrl, isNative, getServerUrl, getAuthToken } = await import('./platform.js');
 
   let currentMessages = [...messages];
@@ -375,6 +375,7 @@ export async function callAIProxy({ messages, systemPrompt, tools, onToolCall, o
     }
     const res = await fetch(apiUrl('/api/ai/chat'), {
       method: 'POST',
+      signal,
       credentials: 'include',
       headers,
       // Out of rounds: told to answer in the system prompt, and the server

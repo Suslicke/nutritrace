@@ -7,7 +7,7 @@
 
   export let ask;  // (text) => send a chat message to Trace
 
-  let fixing = null, fixText = '', busy = false, error = '';
+  let fixing = null, fixText = '', busy = false, error = '', showOk = false;
   const names = () => mealNames.get() || ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
   $: d = $dishDraft;
@@ -18,6 +18,8 @@
   // ponytail: one step for the slider and buttons; 10 g is finer than a ladle anyway
   const setEaten = (g) => { d.eaten = Math.max(10, Math.round(g / 10) * 10); touch(); };
   $: allOk = d && d.items.every(i => i.status === 'ok' && i.grams > 0);
+  $: fixed = !!d?.meal_id;  // a saved recipe or meal: products as they are, only the amount eaten
+  $: ok = d ? d.items.filter(i => i.status === 'ok') : [];
 
   const touch = () => dishDraft.set(d);
   function accept(i) { d.items[i].status = 'ok'; touch(); }
@@ -33,14 +35,24 @@
     try {
       const r = await saveDish(d);
       d.saved = r; touch();
-      ask(`Сохранил рецепт «${d.name}» (id ${r.meal_id}, всё блюдо ${weight} г) и записал в ${names()[d.meal ?? 0]} ${r.grams} г: ${r.kcal} ккал. Состав: ${d.items.map(i => `${i.name} ${i.grams} г`).join(', ')}. Запомни, если это мой обычный рецепт.`);
+      if (!fixed) ask(`Сохранил рецепт «${d.name}» (id ${r.meal_id}, всё блюдо ${weight} г) и записал в ${names()[d.meal ?? 0]} ${r.grams} г: ${r.kcal} ккал. Состав: ${d.items.map(i => `${i.name} ${i.grams} г`).join(', ')}. Запомни, если это мой обычный рецепт.`);
     } catch (e) { error = e?.message || String(e); }
     busy = false;
   }
 </script>
 
 {#if d}
+  {#if ok.length && !showOk}
+    <div class="ai-msg">
+      <div class="ai-msg-avatar"><TraceFace size={24} /></div>
+      <button class="dish-item ok summary" on:click={() => (showOk = true)}>
+        <span class="nm">✓ {ok.length} {ok.length === 1 ? 'продукт' : ok.length < 5 ? 'продукта' : 'продуктов'} · {ok.reduce((s, i) => s + itemKcal(i), 0)} ккал</span>
+        <span class="src">показать ▾</span>
+      </button>
+    </div>
+  {/if}
   {#each d.items as it, i}
+    {#if it.status !== 'ok' || showOk}
     <div class="ai-msg">
       <div class="ai-msg-avatar"><TraceFace size={24} /></div>
       <div class="dish-item" class:ok={it.status === 'ok'}>
@@ -49,14 +61,14 @@
           <span class="src">{it.source}</span>
         </div>
         <div class="row sub">
-          {#if d.saved}{it.grams} г{:else}
+          {#if d.saved || fixed}{it.grams} г{:else}
             <input type="number" min="0" inputmode="decimal" value={it.grams} on:input={e => { it.grams = Number(e.target.value) || 0; touch(); }}> г
           {/if}
           · {itemKcal(it)} ккал
           {#if t.share !== 1}<span class="share">→ съедено ≈ {Math.round(it.grams * t.share)} г</span>{/if}
           <span class="per">({it.kcal} / {it.protein} / {it.fat} / {it.carbs} на 100 г)</span>
         </div>
-        {#if !d.saved}
+        {#if !d.saved && !fixed}
           <div class="row btns">
             {#if it.status === 'ok'}<span class="done">✓ добавлено</span>
             {:else}<button class="btn btn-primary btn-sm" on:click={() => accept(i)}>✓ Добавить</button>{/if}
@@ -72,7 +84,11 @@
         {/if}
       </div>
     </div>
+    {/if}
   {/each}
+  {#if ok.length && showOk}
+    <div class="row btns"><button class="btn btn-secondary btn-sm" on:click={() => (showOk = false)}>свернуть ▴</button></div>
+  {/if}
 
   <div class="ai-msg">
     <div class="ai-msg-avatar"><TraceFace size={24} /></div>
@@ -123,6 +139,7 @@
   .dish-item { background: var(--surface-2); color: var(--text-1); border-radius: 14px; padding: 10px 12px;
     width: 100%; font-size: 14px; border: 1px solid transparent; }
   .dish-item.ok { border-color: var(--primary, #4caf50); }
+  .summary { display: flex; justify-content: space-between; align-items: center; text-align: left; cursor: pointer; font: inherit; }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: space-between; }
   .sub { justify-content: flex-start; color: var(--text-2); font-size: 13px; margin-top: 4px; }
   .btns { justify-content: flex-end; margin-top: 8px; }

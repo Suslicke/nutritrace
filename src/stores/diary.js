@@ -5,6 +5,7 @@ import { localDateStr, DB } from '../lib/db.js';
 import { resolveAssetUrl, isNative } from '../lib/platform.js';
 import { itemSourceRef } from '../lib/item-source.js';
 import { markCatalogItemUsed, countsUseHere } from '../lib/catalog-kind.js';
+import { drinkMl } from '../lib/fork-drinks.js'; // fork: drinks count toward water
 
 function todayStr() {
   return localDateStr();
@@ -319,9 +320,14 @@ export async function addDiaryItem(foodItem, meal, date, { kind = null, shared =
   // Issue #81: refetch from server before write so the append doesn't
   // wipe body_stats / water / notes that another device pushed in the
   // window since this client's cache was loaded.
+  // fork: a drink also counts toward the water goal (lib/fork-drinks.js)
+  const drink = drinkMl(item);
+  const drinkLog = drink ? { uuid: _newUuid(), amount: drink, from: item.uuid, name: item.name,
+    time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: DB.getSetting('timeFormat', '12h') !== '24h' }) } : null;
   await _refetchAndSave(targetDate, (entry) => ({
     ...entry,
     items: [...(entry.items || []), item],
+    ...(drinkLog ? { water: [...(entry.water || []), drinkLog] } : {}),
   }));
 
   // Bump usage_count + last_used_at on the correct source table so foods,
@@ -459,12 +465,15 @@ export async function removeDiaryItem(index) {
   if (!entry) return;
   const removed = entry.items?.[index];
   const prior = entry._pendingDeletions || { items: [], water: [] };
+  // fork: the water a drink added goes with it
+  const gone = removed?.uuid ? (entry.water || []).filter(w => w.from === removed.uuid) : [];
   const updated = {
     ...entry,
     items: entry.items.filter((_, i) => i !== index),
+    ...(gone.length ? { water: entry.water.filter(w => !gone.includes(w)) } : {}),
     _pendingDeletions: {
       items: removed?.uuid ? [...(prior.items || []), removed.uuid] : (prior.items || []),
-      water: prior.water || [],
+      water: [...(prior.water || []), ...gone.map(w => w.uuid)],
     },
   };
   currentEntry.set(await _save(updated));

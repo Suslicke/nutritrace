@@ -40,6 +40,6 @@ jobs:
         uses: actions/setup-node@v4
         with: { node-version: 22 }
       - if: steps.rebase.outputs.moved
-        run: node --test scripts/trace-extra.test.js scripts/codex-cli.test.js scripts/webpush.test.js
+        run: node --test scripts/trace-extra.test.js scripts/codex-cli.test.js scripts/webpush.test.js scripts/fork-evening.test.js
       - if: steps.rebase.outputs.moved
         run: git push --force-with-lease origin suslicke

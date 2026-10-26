@@ -13,6 +13,7 @@ import db from '../db.js';
 import { linkBase } from './public-url.js';
 import { logger } from '../logger.js';
 import { isBackupDue } from './backup-schedule.js';
+import { eveningSummary } from './fork-evening.js'; // fork: evening summary push
 
 function _getUserSetting(userId, key) {
   const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
@@ -581,6 +582,7 @@ async function _tick() {
     for (const userId of userIds) {
       try {
         await _pushReminders(userId);
+        await eveningSummary(userId, _getUserLocalTime(userId), _localMinutes(_getUserLocalTime(userId))); // fork
         await _weeklySummary(userId);
         await _syncWellness(userId);
         _checkFastingSchedule(userId);

@@ -63,3 +63,26 @@ test('eating part of a dish scales every product by the same share', async () =>
   assert.deepEqual(dishTotals(items, 250), { whole: 500, share: 0.5, kcal: 225, protein: 13, fat: 7, carbs: 22 });
   assert.equal(dishTotals(items).kcal, 450);
 });
+
+test('a saved recipe or meal becomes a fixed dish card', async () => {
+  const { recipeDraft, dishTotals, mealSlot } = await import('../src/lib/trace-extra.js');
+  const r = recipeDraft({ id: 3, name: 'Суп', is_recipe: 1, portion: 500, items: [
+    { id: 7, name: 'Картофель', portion: 200, quantity: 1, nutrition: { calories: 154, proteins: 4 } },
+    { id: 8, name: 'Сыр', portion: 150, quantity: 2, nutrition: { calories: 450, proteins: 30 } }] });
+  assert.equal(r.meal_id, 3); assert.equal(r.kind, 'recipe'); assert.equal(r.eaten, 500);
+  assert.deepEqual(r.items.map(i => [i.grams, i.kcal, i.protein, i.status]), [[200, 77, 2, 'ok'], [300, 300, 20, 'ok']]);
+  assert.equal(dishTotals(r.items, 250).kcal, Math.round((154 + 900) / 2));
+  assert.equal(recipeDraft({ id: 1, is_recipe: 0, items: [{ portion: 100, quantity: 3, nutrition: {} }] }).eaten, 300);
+  assert.deepEqual([7, 12, 18, 22].map(mealSlot), [0, 1, 2, 3]);
+});
+
+test('drinks count toward water, food does not', async () => {
+  const { drinkMl } = await import('../src/lib/fork-drinks.js');
+  assert.equal(drinkMl({ name: 'Молоко 6,5%', portion: 150, unit: 'ml', quantity: 1 }), 150);
+  assert.equal(drinkMl({ name: 'Чёрный чай с 1 ч. л. сахара', portion: 254, unit: 'g' }), 254);
+  assert.equal(drinkMl({ name: 'Вода', portion: 0.5, unit: 'l', quantity: 2 }), 1000);
+  assert.equal(drinkMl({ name: 'Кофейный торт', portion: 120, unit: 'g' }), 0);
+  assert.equal(drinkMl({ name: 'Сырный суп', portion: 500, unit: 'g' }), 0);
+  assert.equal(drinkMl({ name: 'Масло', portion: 15, unit: 'ml' }), 0);
+  assert.equal(drinkMl({ type: 'quick_calories', name: 'кофе', portion: 300, unit: 'ml' }), 0);
+});
