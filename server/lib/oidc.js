@@ -36,15 +36,37 @@ const _discoveryCache = new Map();   // providerId → { issuer, expiresAt }
 
 // ── Provider row helpers ──────────────────────────────────────────────────
 
+// Fork policy: single sign-on is on only while the environment defines the
+// provider (OIDC_ISSUER + OIDC_CLIENT_ID + OIDC_CLIENT_SECRET, see
+// oidc-env.js). A row an earlier start seeded, or one added in Settings, is
+// never offered or accepted on its own. Filled at boot by seedOidcFromEnv().
+const _envProviderIds = new Set();
+
+export function setEnvProviderIds(ids) {
+  _envProviderIds.clear();
+  for (const id of ids) _envProviderIds.add(Number(id));
+}
+
+export function isEnvProvider(id) {
+  return _envProviderIds.has(Number(id));
+}
+
 export function listProviders({ activeOnly = true } = {}) {
   const sql = activeOnly
     ? `SELECT * FROM oidc_providers WHERE is_active = 1 ORDER BY id`
     : `SELECT * FROM oidc_providers ORDER BY id`;
-  return db.prepare(sql).all();
+  const rows = db.prepare(sql).all();
+  return activeOnly ? rows.filter(p => isEnvProvider(p.id)) : rows;
 }
 
 export function getProvider(id) {
   return db.prepare(`SELECT * FROM oidc_providers WHERE id = ?`).get(Number(id));
+}
+
+/** A provider sign-in may use: active and defined by the environment. */
+export function getUsableProvider(id) {
+  const p = getProvider(id);
+  return p && p.is_active && isEnvProvider(p.id) ? p : null;
 }
 
 /** Public-safe shape — strip secret + admin-claim fields. */
@@ -85,7 +107,7 @@ function _safeJsonArray(s) {
 export async function getClient(providerId) {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unknown OIDC provider ${providerId}`);
-  if (!provider.is_active) throw new Error(`OIDC provider ${providerId} is disabled`);
+  if (!provider.is_active || !isEnvProvider(provider.id)) throw new Error(`OIDC provider ${providerId} is disabled`);
 
   const cached = _discoveryCache.get(provider.id);
   let issuer;
@@ -203,91 +225,34 @@ export function generateAuthChecks() {
 // ── User resolution + admin mapping ───────────────────────────────────────
 
 /**
- * Map OIDC claims to a NutriTrace user. Implements the resolved
- * email-collision policy: link to an existing account by email only when
- * the IdP says email_verified === true and auto-link is on; a matching email
- * that can't be linked is refused (never given a second account).
+ * Map OIDC claims to a NutriTrace user.
  *
- * Returns: { user, created, linked } — or throws with a user-facing message.
+ * Fork policy (Suslicke/nutritrace): a sign-in is bound ONLY by the IdP's
+ * `sub` on an existing link, which a signed-in user made from Profile →
+ * Linked Accounts. An unknown sub is refused: no account is created and an
+ * email (verified or not) never picks one, whatever the provider's
+ * auto_link_verified_email / auto_register_new_users switches say. Matching
+ * by email let anyone who could set that email at the IdP take the account.
+ *
+ * Returns: { user, created: false, linked: false } — or throws with a
+ * user-facing message.
  */
 export function resolveUser(provider, claims) {
   const sub = String(claims.sub || '');
   if (!sub) throw new Error('OIDC provider returned no `sub` claim');
 
-  // 1. Existing link?
   const existingLink = db.prepare(
     `SELECT u.* FROM user_oidc_links l JOIN users u ON u.id = l.user_id
       WHERE l.oidc_provider_id = ? AND l.oidc_sub = ?`
   ).get(provider.id, sub);
-  if (existingLink) {
-    db.prepare(
-      `UPDATE user_oidc_links SET last_login_at = datetime('now'), email_verified = ?
-        WHERE oidc_provider_id = ? AND oidc_sub = ?`
-    ).run(claims.email_verified ? 1 : 0, provider.id, sub);
-    return { user: existingLink, created: false, linked: false };
+  if (!existingLink) {
+    throw new Error(`No NutriTrace account is linked to this ${provider.display_name || 'OIDC'} identity. Sign in with your password once, then link it from Profile → Linked Accounts.`);
   }
-
-  const email = claims.email ? String(claims.email).trim().toLowerCase() : null;
-  const emailVerified = !!claims.email_verified;
-
-  // Split flags (rc.12+):
-  //   auto_link_verified_email — silently link verified-email match to existing
-  //     local user. Defaults ON (trust the IdP you configured).
-  //   auto_register_new_users — auto-create a NutriTrace account for first-time
-  //     OIDC users. Defaults OFF (admin must invite first).
-  const autoLink = provider.auto_link_verified_email != null
-    ? !!provider.auto_link_verified_email
-    : !!provider.auto_register;        // legacy fallback
-  const autoCreate = provider.auto_register_new_users != null
-    ? !!provider.auto_register_new_users
-    : !!provider.auto_register;        // legacy fallback
-
-  // 2. Verified-email auto-link to existing local user
-  if (email && emailVerified && autoLink) {
-    const localByEmail = db.prepare(`SELECT * FROM users WHERE email = ?`).get(email);
-    if (localByEmail) {
-      db.prepare(
-        `INSERT INTO user_oidc_links (user_id, oidc_provider_id, oidc_sub, email_verified, last_login_at)
-         VALUES (?, ?, ?, 1, datetime('now'))`
-      ).run(localByEmail.id, provider.id, sub);
-      return { user: localByEmail, created: false, linked: true };
-    }
-  }
-  // 2b. Email matches an existing account but we may not link it
-  // automatically (auto-link off, or the IdP didn't vouch for the email).
-  // Refuse and point at the manual link, instead of falling through to
-  // auto-register, which would create a second account with the same
-  // email and sign the person into that one instead of their own.
-  // Authentik >= 2025.10 sends email_verified=false by default, so this
-  // is the common case there.
-  if (email) {
-    const collision = db.prepare(`SELECT id FROM users WHERE email = ?`).get(email);
-    if (collision && (!autoLink || !emailVerified)) {
-      throw new Error(`Your ${provider.display_name || 'OIDC'} account matches an existing NutriTrace user. Sign in the usual way once, then link this provider from Profile → Linked Accounts. After that, SSO will sign you in directly.`);
-    }
-  }
-
-  // 3. Auto-create new user
-  if (autoCreate) {
-    const username = _deriveUsername(claims);
-    const emailVal = email || null;
-    const fullName = claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(' ') || null;
-
-    const result = db.prepare(
-      `INSERT INTO users (username, password_hash, full_name, role, email)
-       VALUES (?, NULL, ?, 'user', ?)`
-    ).run(username, fullName, emailVal);
-
-    const newUser = db.prepare(`SELECT * FROM users WHERE id = ?`).get(result.lastInsertRowid);
-    db.prepare(
-      `INSERT INTO user_oidc_links (user_id, oidc_provider_id, oidc_sub, email_verified, last_login_at)
-       VALUES (?, ?, ?, ?, datetime('now'))`
-    ).run(newUser.id, provider.id, sub, emailVerified ? 1 : 0);
-    return { user: newUser, created: true, linked: true };
-  }
-
-  // 4. Reject
-  throw new Error('No NutriTrace account is linked to this identity. Ask your admin to enable Auto-register new users on this provider, or have them invite you first.');
+  db.prepare(
+    `UPDATE user_oidc_links SET last_login_at = datetime('now'), email_verified = ?
+      WHERE oidc_provider_id = ? AND oidc_sub = ?`
+  ).run(claims.email_verified ? 1 : 0, provider.id, sub);
+  return { user: existingLink, created: false, linked: false };
 }
 
 /**
@@ -330,6 +295,14 @@ export function linkUser(userId, providerId, sub, emailVerified) {
     throw new Error('This provider identity is already linked to a different NutriTrace account.');
   }
   if (existing) return; // idempotent
+  // Never silently replace a binding: a user with a different identity of
+  // this provider already linked has to unlink it first.
+  const own = db.prepare(
+    `SELECT oidc_sub FROM user_oidc_links WHERE user_id = ? AND oidc_provider_id = ?`
+  ).get(userId, providerId);
+  if (own) {
+    throw new Error('Your account is already linked to a different identity of this provider. Unlink it first.');
+  }
   db.prepare(
     `INSERT INTO user_oidc_links (user_id, oidc_provider_id, oidc_sub, email_verified, last_login_at)
      VALUES (?, ?, ?, ?, datetime('now'))`

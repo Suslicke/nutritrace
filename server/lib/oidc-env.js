@@ -44,7 +44,7 @@
  *     control of the toggle.
  */
 import db from '../db.js';
-import { encryptClientSecret, setPasswordLoginEnabled } from './oidc.js';
+import { encryptClientSecret, setPasswordLoginEnabled, setEnvProviderIds } from './oidc.js';
 import { logger } from '../logger.js';
 
 // In-memory set of provider row IDs that were defined by env vars.
@@ -146,6 +146,7 @@ function _seedPasswordLoginFromEnv() {
 
 export function seedOidcFromEnv() {
   _envLockedIds.clear();
+  setEnvProviderIds([]);
   _seedPasswordLoginFromEnv();
 
   const prefixes = _findDefinedPrefixes();
@@ -195,6 +196,11 @@ export function seedOidcFromEnv() {
       logger.warn(`[oidc-env] ${prefix} missing ISSUER or CLIENT_ID — skipping`);
       continue;
     }
+    // Fork: confidential clients only; without a secret the provider is off.
+    if (!clientSecret) {
+      logger.warn(`[oidc-env] ${prefix} missing CLIENT_SECRET — skipping`);
+      continue;
+    }
 
     const encSecret = clientSecret ? encryptClientSecret(clientSecret) : null;
     const redirectJson = JSON.stringify(redirectUris);
@@ -227,6 +233,7 @@ export function seedOidcFromEnv() {
     count++;
   }
 
+  setEnvProviderIds(_envLockedIds);
   if (count) {
     logger.info(`[oidc-env] Loaded ${count} OIDC provider${count === 1 ? '' : 's'} from environment (IDs: ${getEnvLockedProviderIds().join(', ')})`);
   }
