@@ -447,3 +447,26 @@ This works for any environment variable the server reads directly, including `TO
 ## Backup & Restore
 
 Full backups (database + uploaded images) can be created and restored from Settings → Backup & Restore. Backups are ZIP files that include all user data and can be used to migrate between servers.
+
+## Fork (Suslicke/nutritrace): Pocket ID sign-in
+
+Single sign-on is on only while `OIDC_ISSUER`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`
+are all set (a provider row left in the database, or one added in Settings, is never offered
+on its own). For Pocket ID:
+
+```env
+OIDC_ISSUER=https://id.example.com
+OIDC_CLIENT_ID=<client id>
+OIDC_CLIENT_SECRET=<client secret>
+OIDC_DISPLAY_NAME=Pocket ID
+OIDC_REDIRECT_URIS=https://nutri.example.com/api/auth/oidc/callback
+```
+
+Register exactly that callback URL on the Pocket ID client (confidential, PKCE on).
+
+- A sign-in is bound only by the Pocket ID `sub` on a link. Link it from Profile → Linked
+  Accounts while signed in with your password; the same session must still be there when
+  Pocket ID sends you back. An unknown `sub` is refused: no account is created and an email
+  never picks one (`OIDC_AUTO_LINK` / `OIDC_AUTO_REGISTER` have no effect in this fork).
+- A linked identity is never moved to another user or replaced; unlink it first.
+- Password login, MCP and API tokens are unchanged.

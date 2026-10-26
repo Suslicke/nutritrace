@@ -2,8 +2,9 @@
  * OIDC fixes, verified end to end against a mock IdP before they went in;
  * these checks keep them from quietly coming undone.
  *
- *  - An email that matches an existing account but can't be linked (auto-link
- *    off, or email_verified not true) is refused, never given a second account.
+ *  - Fork (Suslicke/nutritrace): an email never picks or creates an account;
+ *    only a sub linked from a signed-in session signs in (see
+ *    pocket-id-login.test.js for the behaviour end to end).
  *  - The callback works with or without the provider ID, and at the old
  *    documented /api/oidc/callback address.
  *  - OIDC_ENABLE_EMAIL_PASSWORD_LOGIN applies even with no env-defined provider.
@@ -24,9 +25,11 @@ const index = read('server/index.js');
 const app = read('src/App.svelte');
 const handoff = read('src/lib/oidc-app-handoff.js');
 
-test('an unlinkable matching email is refused before auto-register', () => {
-  assert.match(lib, /if \(collision && \(!autoLink \|\| !emailVerified\)\) \{\s*throw new Error/);
-  assert.ok(lib.indexOf('collision && (!autoLink || !emailVerified)') < lib.indexOf('if (autoCreate)'));
+test('sign-in resolves a user by linked sub only: no email match, no auto-register', () => {
+  const fn = lib.slice(lib.indexOf('export function resolveUser'), lib.indexOf('export function applyAdminMapping'));
+  assert.doesNotMatch(fn, /FROM users WHERE email/);
+  assert.doesNotMatch(fn, /INSERT INTO users/);
+  assert.doesNotMatch(fn, /INSERT INTO user_oidc_links/);
 });
 
 test('callback works with or without the provider ID, and at the old address', () => {

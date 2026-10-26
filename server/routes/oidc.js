@@ -5,12 +5,13 @@
  * IdP redirect to /callback doesn't get blocked.
  */
 import { Router } from 'express';
+import crypto from 'crypto';
 import { wrap } from '../logger.js';
 import { logger } from '../logger.js';
 import { signToken, sessionMaxAge, requireAuth, userMgmtActive } from '../middleware/auth.js';
 import { claimAnonymousData } from '../lib/claim-anonymous-data.js';
 import {
-  listProviders, publicProvider, getProvider, getClient,
+  listProviders, publicProvider, getProvider, getUsableProvider, getClient,
   generateAuthChecks, persistState, consumeState,
   resolveUser, applyAdminMapping, linkUser, unlinkUser, listUserLinks,
   isPasswordLoginEnabled, isValidAppChallenge, persistHandoff, consumeHandoff,
@@ -27,6 +28,16 @@ const COOKIE_OPTS = {
   secure:   !_insecureCookies,
 };
 const LOGOUT_COOKIE = 'nt_oidc_logout';
+// Binds a sign-in's state to the browser that started it: a callback URL
+// (code + state) handed to another browser is refused there (login CSRF).
+const STATE_COOKIE = 'nt_oidc_state';
+const STATE_COOKIE_OPTS = { httpOnly: true, sameSite: 'lax', secure: !_insecureCookies, path: '/', maxAge: 10 * 60 * 1000 };
+
+function _sameString(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
 
 /** Choose a redirect URI for this provider that matches one of the configured ones. */
 function _resolveRedirectUri(provider, req) {
@@ -61,8 +72,14 @@ router.get('/providers', wrap((req, res) => {
  * Optional ?link=1 (only when authenticated) starts the link-via-Profile flow.
  */
 router.get('/login/:providerId', wrap(async (req, res) => {
-  const provider = getProvider(req.params.providerId);
-  if (!provider || !provider.is_active) return res.status(404).send('Provider not found');
+  const provider = getUsableProvider(req.params.providerId);
+  if (!provider) return res.status(404).send('Provider not found');
+
+  // Linking is only ever started from a signed-in session, by the app
+  // itself: never a sign-in in disguise, never from another site.
+  const wantsLink = req.query.link === '1';
+  if (wantsLink && !req.user) return res.status(401).send('Sign in first to link an identity provider');
+  if (wantsLink && req.headers['sec-fetch-site'] === 'cross-site') return res.status(403).send('Cross-site link request refused');
 
   const redirectUri = _resolveRedirectUri(provider, req);
   if (!redirectUri) return res.status(500).send('Provider has no redirect_uris configured');
@@ -75,7 +92,7 @@ router.get('/login/:providerId', wrap(async (req, res) => {
   }
 
   const checks = generateAuthChecks();
-  const linkMode = req.query.link === '1' && !!req.user;
+  const linkMode = wantsLink;
   const isMobile = req.query.mobile === '1';
   // Newer Android builds send app_challenge so the deep link at the end can
   // carry a single-use code instead of the session token (see /handoff).
@@ -92,6 +109,7 @@ router.get('/login/:providerId', wrap(async (req, res) => {
     linkUserId: linkMode ? req.user.id : null,
     appChallenge,
   });
+  res.cookie(STATE_COOKIE, checks.state, STATE_COOKIE_OPTS);
 
   const url = client.authorizationUrl({
     redirect_uri: redirectUri,
@@ -118,6 +136,9 @@ async function handleCallback(req, res) {
   const params = new URLSearchParams(req.url.split('?')[1] || '');
   const state = params.get('state');
   if (!state) return res.status(400).send('Missing state');
+  // The state must be the one this browser started with.
+  if (!_sameString(req.cookies?.[STATE_COOKIE], state)) return res.status(400).send('Invalid or expired state');
+  res.clearCookie(STATE_COOKIE, { path: '/' });
 
   const stored = consumeState(state);
   if (!stored) return res.status(400).send('Invalid or expired state');
@@ -125,7 +146,7 @@ async function handleCallback(req, res) {
   if (Number(stored.providerId) !== Number(providerId)) {
     return res.status(400).send('State / provider mismatch');
   }
-  const provider = getProvider(providerId);
+  const provider = getUsableProvider(providerId);
   if (!provider) return res.status(404).send('Provider not found');
 
   let tokenSet, claims;
@@ -159,6 +180,12 @@ async function handleCallback(req, res) {
   // Branch: link flow (existing user) vs login flow
   if (stored.linkUserId) {
     try {
+      // The user who started the link must still be the one signed in here;
+      // a session that ended or changed hands mid-flow links nothing.
+      if (!req.user || Number(req.user.id) !== Number(stored.linkUserId)) {
+        logger.warn(`[oidc] link refused: session at callback is not the user ${stored.linkUserId} who started it`);
+        throw new Error('Your session changed while linking. Sign in again and link from Profile → Linked Accounts.');
+      }
       linkUser(stored.linkUserId, provider.id, claims.sub, !!claims.email_verified);
     } catch (e) {
       const msg = encodeURIComponent(e?.message || 'link_failed');
