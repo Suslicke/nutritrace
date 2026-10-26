@@ -38,6 +38,7 @@
   import { mealIcon } from '../lib/mealIcon.js';
   import { focusDefaultField } from '../lib/default-field.js';
   import { pageScrollTop, restorePageScroll } from '../lib/scroll-anchor.js';
+  import FoodKindsHint from '../components/FoodKindsHint.svelte'; // fork: food / recipe / meal explained
 
   // Query string params
   function qs() {
@@ -2144,6 +2145,7 @@
     {/if}
 
     <div class="foods-main">
+      <FoodKindsHint tab={activeTab} /> <!-- fork -->
 
   <!-- Yesterday's meals (pick mode only) -->
   {#if pickMode && yesterdayMeals.length > 0 && !search && activeTab === 1}
