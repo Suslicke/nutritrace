@@ -86,3 +86,12 @@ test('drinks count toward water, food does not', async () => {
   assert.equal(drinkMl({ name: 'Масло', portion: 15, unit: 'ml' }), 0);
   assert.equal(drinkMl({ type: 'quick_calories', name: 'кофе', portion: 300, unit: 'ml' }), 0);
 });
+
+test('ask_choice shows 2–6 clean buttons', async () => {
+  const { traceChoices } = await import('../src/lib/trace-extra.js');
+  assert.ok((await runExtraTool('ask_choice', { options: ['Один'] })).error);
+  const r = await runExtraTool('ask_choice', { options: ['Сырный суп', 'Борщ\n ', 'x'.repeat(90), '4', '5', '6', '7'] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(traceChoices.get().map(o => o.length), [10, 4, 60, 1, 1, 1]);
+  assert.ok(EXTRA_TOOLS.some(t => t.name === 'offer_dish'));
+});

@@ -36,7 +36,7 @@
   import { acquireScreenWakeLock } from '../../lib/wake-lock.js';
   import { diaryRange, mealsPage } from '../../lib/trace-pages.js';
   import { coachingTools, coachingPrompt, runCoachingTool } from '../../lib/coach-trace.js';
-  import { EXTRA_TOOLS, runExtraTool, extraPrompt, dishDraft, takeRecipeLink } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
+  import { EXTRA_TOOLS, runExtraTool, extraPrompt, dishDraft, takeRecipeLink, traceChoices } from '../../lib/trace-extra.js'; // fork: Suslicke/nutritrace
   import TraceDock from './TraceDock.svelte'; // fork: day ring + quick dishes
   let _abort = null; // fork: the cancel button's AbortController
   import DishCard from './DishCard.svelte'; // fork: propose_dish cards
@@ -1852,6 +1852,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     input    = '';
     attachedImage = null;
     loading  = true;
+    traceChoices.set(null); // fork: an answer typed instead of tapped clears the buttons
     // #158: hold a screen wake lock while the request is in-flight so
     // the user doesn't have to keep tapping the screen when a slow
     // self-hosted model is thinking. Released in the finally block.
@@ -1981,7 +1982,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     messages = [];
     toolsNotice.reset();
     localStorage.removeItem('wl:aiChatHistory');
-    dishDraft.set(null); // fork
+    dishDraft.set(null); traceChoices.set(null); // fork
     NtApi.del('/api/ai/history').catch(() => {});
     // Clear ANY pending review card so a cleared chat doesn't strand a
     // proposal floating with no context above it. Covers both flows:
@@ -2385,6 +2386,11 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
           {/if}
 
           <DishCard ask={quickAsk} /> <!-- fork -->
+          {#if $traceChoices?.length && !loading} <!-- fork: ask_choice buttons -->
+            <div class="ai-quick-chips ai-choices">
+              {#each $traceChoices as c}<button class="ai-chip" on:click={() => { traceChoices.set(null); quickAsk(c); }}>{c}</button>{/each}
+            </div>
+          {/if}
 
           <!-- propose_food review card. Two commit paths (Save to
                Catalog vs Save & Log to Diary); meal picker is only
@@ -2859,6 +2865,7 @@ Diary logging streak: ${ctx.streakText || '(unknown)'}`
     justify-content: center; margin-top: 8px;
   }
   .ai-cancel { margin-top: 4px; padding: 4px 10px; border-radius: var(--radius-full); border: 1px solid var(--border-strong); background: none; color: var(--text-2); font-size: 12px; cursor: pointer; } /* fork */
+  .ai-choices { justify-content: flex-start; margin: 0 0 8px 32px; } /* fork */
   .ai-chip {
     padding: 7px 14px;
     border-radius: var(--radius-full);
