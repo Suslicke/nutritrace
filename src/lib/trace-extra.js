@@ -530,6 +530,21 @@ export async function quickDishes(n = 6) {
     .slice(0, n);
 }
 
+/** A diary recipe row's products scaled to the amount eaten (read only — the diary is not changed).
+ *  Same scale as stores/diary.js splitRecipeItem: eaten mass / the sum of the products' mass. */
+export function recipeParts(item) {
+  const parts = Array.isArray(item?.items) ? item.items : [];
+  const mass = parts.reduce((s, i) => s + (Number(i.portion) || 0) * (Number(i.quantity) || 1), 0);
+  const eaten = (Number(item?.portion) || 0) * (Number(item?.quantity) || 1);
+  const k = mass > 0 && eaten > 0 ? eaten / mass : 1;
+  return parts.map(i => {
+    const q = (Number(i.quantity) || 1) * k;
+    const n = (key) => Math.round((Number(i.nutrition?.[key]) || 0) * q * 10) / 10;
+    return { name: String(i.name || '?'), amount: Math.round((Number(i.portion) || 0) * q), unit: i.unit || 'g',
+      kcal: Math.round(n('calories')), protein: n('proteins'), fat: n('fat'), carbs: n('carbohydrates') };
+  });
+}
+
 /** Meal slot by the clock: breakfast, lunch, dinner, snacks. */
 export const mealSlot = (h = new Date().getHours()) => (h < 11 ? 0 : h < 16 ? 1 : h < 21 ? 2 : 3);
 

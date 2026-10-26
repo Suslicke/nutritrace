@@ -95,3 +95,12 @@ test('ask_choice shows 2–6 clean buttons', async () => {
   assert.deepEqual(traceChoices.get().map(o => o.length), [10, 4, 60, 1, 1, 1]);
   assert.ok(EXTRA_TOOLS.some(t => t.name === 'offer_dish'));
 });
+
+test('a recipe row shows its products scaled to the amount eaten', async () => {
+  const { recipeParts } = await import('../src/lib/trace-extra.js');
+  const row = { portion: 250, quantity: 1, items: [
+    { name: 'Картофель', portion: 300, unit: 'g', quantity: 1, nutrition: { calories: 231, proteins: 6 } },
+    { name: 'Сыр', portion: 100, unit: 'g', quantity: 2, nutrition: { calories: 300, proteins: 20 } }] };
+  assert.deepEqual(recipeParts(row).map(p => [p.name, p.amount, p.kcal, p.protein]), [['Картофель', 150, 116, 3], ['Сыр', 100, 300, 20]]);
+  assert.deepEqual(recipeParts({ name: 'x' }), []);
+});

@@ -73,6 +73,7 @@
   import { decimalInput, parseDecimal } from '../lib/decimal-input.js';
   import { pageScrollTop } from '../lib/scroll-anchor.js';
   import { focusDefaultField } from '../lib/default-field.js';
+  import RecipeParts from '../components/diary/RecipeParts.svelte'; // fork: recipe composition on tap
 
   let addMealIdx = 0;
   let showAddAction = false;
@@ -1497,6 +1498,11 @@
     _splitExpanded = _splitExpanded;
   }
   $: if ($currentDate) _splitExpanded = new Set();
+  // fork: a tap on a recipe row shows what it is made of (RecipeParts), read only
+  let _partsOpen = new Set();
+  const _hasParts = (item) => !!item?.is_recipe && item.type !== 'quick_calories' && !(item._splitItems?.length > 0);
+  function toggleParts(idx) { _partsOpen.has(idx) ? _partsOpen.delete(idx) : _partsOpen.add(idx); _partsOpen = _partsOpen; }
+  $: if ($currentDate) _partsOpen = new Set();
 
   // Tracks which summed Quick Calories rows are currently expanded, keyed
   // by the meal index (one summed row per meal). Lets users see + edit the
@@ -2212,7 +2218,7 @@
                     </span>
                   </button>
                 {/if}
-                <button class="diary-item-btn" on:click={() => selectMode ? toggleItemSelect(item) : openEditItem(item)}>
+                <button class="diary-item-btn" on:click={() => selectMode ? toggleItemSelect(item) : _hasParts(item) ? toggleParts(item._i) : openEditItem(item)}>
                   {#if $diaryShowThumbnails && item.imgUrl && !_brokenThumbs.has(item.imgUrl)}
                     <!-- A photo that can't be fetched (offline, or removed on the
                          server) falls back to the same placeholder an item with no
@@ -2233,6 +2239,7 @@
                       {#if $diaryShowTimestamps && item.addedAt}
                         · {formatTime(item.addedAt)}
                       {/if}
+                      {#if _hasParts(item)}<span class="parts-hint"> · состав {_partsOpen.has(item._i) ? '▴' : '▾'}</span>{/if}
                     </span>
                   </div>
                 </button>
@@ -2244,6 +2251,7 @@
                   </button>
                 {/if}
               </div>
+              {#if _partsOpen.has(item._i) && _hasParts(item)}<RecipeParts {item} onEdit={() => openEditItem(item)} />{/if} <!-- fork -->
               {#if Array.isArray(item._splitItems) && item._splitItems.length > 0 && _splitExpanded.has(item._i)}
                 <div class="split-children">
                   {#each item._splitItems as child, ci (child.addedAt + '-' + ci + '-' + (child.name || ''))}
@@ -4412,6 +4420,7 @@
     transition: transform 180ms ease;
   }
   .split-chevron-open { transform: rotate(180deg); }
+  .parts-hint { color: var(--accent); } /* fork */
   .split-children {
     display: flex;
     flex-direction: column;
