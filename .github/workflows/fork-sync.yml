@@ -1,6 +1,8 @@
-# Fork (Suslicke/nutritrace): daily, put the `suslicke` branch back on top of upstream `dev`.
-# A conflict fails this run (GitHub emails it); resolve locally:
-#   git fetch upstream && git rebase upstream/dev && git push --force-with-lease origin suslicke
+# Fork (Suslicke/nutritrace): daily, move the `suslicke` branch onto the newest STABLE upstream
+# release (tag vX.Y.Z, no -devNN). Upstream dev is ignored: it breaks too often.
+# Releases are squashed onto upstream main, so the fork commits are replayed with --onto from
+# whichever upstream commit they sit on now (a dev commit or the previous release).
+# A conflict fails this run (GitHub emails it); resolve locally with the same rebase --onto.
 # SYNC_TOKEN: fine-grained PAT for this repo only, Contents + Workflows read/write (GITHUB_TOKEN may
 # not push changed workflow files, and its pushes would not start the image build).
 name: fork sync
@@ -17,14 +19,27 @@ jobs:
           ref: suslicke
           fetch-depth: 0
           token: ${{ secrets.SYNC_TOKEN }}
-      - run: |
+      - id: rebase
+        run: |
           git config user.name "fork-sync"
           git config user.email "fork-sync@users.noreply.github.com"
           git remote add upstream https://github.com/TraceApps/nutritrace.git
-          git fetch upstream dev
-          if git merge-base --is-ancestor upstream/dev HEAD; then echo "up to date"; exit 0; fi
-          git rebase upstream/dev
-      - uses: actions/setup-node@v4
+          git fetch upstream main dev --tags
+          # the upstream commit the fork sits on: the newer of its merge-bases with main and dev
+          base=$(git merge-base HEAD upstream/main); dev=$(git merge-base HEAD upstream/dev)
+          git merge-base --is-ancestor "$base" "$dev" && base=$dev
+          cur=$(git describe --tags --abbrev=0 "$base")
+          # -devNN sorts before its release, so a stable tag wins only when it is really newer
+          newest=$(git -c versionsort.suffix=-dev tag -l 'v*' --sort=v:refname \
+            | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+\$|^$cur\$" | tail -1)
+          if [ "$newest" = "$cur" ]; then echo "on $cur, no newer stable release"; exit 0; fi
+          echo "rebasing from $cur onto $newest"
+          git rebase --onto "$newest" "$base"
+          echo "moved=1" >> "$GITHUB_OUTPUT"
+      - if: steps.rebase.outputs.moved
+        uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node --test scripts/trace-extra.test.js scripts/codex-cli.test.js scripts/webpush.test.js
-      - run: git push --force-with-lease origin suslicke
+      - if: steps.rebase.outputs.moved
+        run: node --test scripts/trace-extra.test.js scripts/codex-cli.test.js scripts/webpush.test.js
+      - if: steps.rebase.outputs.moved
+        run: git push --force-with-lease origin suslicke
