@@ -25,7 +25,9 @@ jobs:
           git config user.name "fork-sync"
           git config user.email "fork-sync@users.noreply.github.com"
           git remote add upstream https://github.com/TraceApps/nutritrace.git
-          git fetch upstream main dev --tags
+          # only release tags: upstream moves its floating tags (dev-latest), and --tags then fails
+          # with "would clobber existing tag"
+          git fetch --no-tags upstream main dev 'refs/tags/v*:refs/tags/v*'
           # the upstream commit the fork sits on: the newer of its merge-bases with main and dev
           base=$(git merge-base HEAD upstream/main); dev=$(git merge-base HEAD upstream/dev)
           git merge-base --is-ancestor "$base" "$dev" && base=$dev
