@@ -3,8 +3,9 @@
 # Releases are squashed onto upstream main, so the fork commits are replayed with --onto from
 # whichever upstream commit they sit on now (a dev commit or the previous release).
 # A conflict fails this run (GitHub emails it); resolve locally with the same rebase --onto.
-# SYNC_TOKEN: fine-grained PAT for this repo only, Contents + Workflows read/write (GITHUB_TOKEN may
-# not push changed workflow files, and its pushes would not start the image build).
+# SYNC_SSH_KEY: private half of this repo's write deploy key "fork-sync" (GITHUB_TOKEN may not push
+# changed workflow files, and its pushes would not start the image build; a deploy key does both
+# and, unlike a fine-grained PAT, does not expire).
 name: fork sync
 on:
   schedule:
@@ -18,7 +19,7 @@ jobs:
         with:
           ref: suslicke
           fetch-depth: 0
-          token: ${{ secrets.SYNC_TOKEN }}
+          ssh-key: ${{ secrets.SYNC_SSH_KEY }}
       - id: rebase
         run: |
           git config user.name "fork-sync"
